@@ -193,9 +193,13 @@ func (d *Devices) save() error {
 	return os.Rename(tmp.Name(), d.path)
 }
 
-// Setup codes: single use, valid for CodeTTL, held in memory only (a restart voids them).
+// Setup codes: single use, valid for CodeTTL (or what `pair -valid` asks, up to MaxCodeTTL),
+// held in memory only (a restart voids them).
 
-const CodeTTL = 15 * time.Minute
+const (
+	CodeTTL    = 15 * time.Minute
+	MaxCodeTTL = 24 * time.Hour
+)
 
 type setupCode struct {
 	expires time.Time
@@ -216,7 +220,11 @@ func NewCodes() *Codes { return &Codes{now: time.Now, m: map[string]*setupCode{}
 var codeEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
 // Mint returns a new code (120 random bits, 24 characters of A-Z2-7).
-func (c *Codes) Mint() (string, time.Time) {
+func (c *Codes) Mint() (string, time.Time) { return c.MintFor(CodeTTL) }
+
+// MintFor returns a code valid for ttl, clamped to 1 minute..MaxCodeTTL.
+func (c *Codes) MintFor(ttl time.Duration) (string, time.Time) {
+	ttl = min(max(ttl, time.Minute), MaxCodeTTL)
 	b := make([]byte, 15)
 	if _, err := rand.Read(b); err != nil {
 		panic(err)
@@ -236,7 +244,7 @@ func (c *Codes) Mint() (string, time.Time) {
 		}
 		delete(c.m, oldest)
 	}
-	exp := now.Add(CodeTTL)
+	exp := now.Add(ttl)
 	c.m[hashToken(code)] = &setupCode{expires: exp, minted: now}
 	return code, exp
 }
@@ -437,8 +445,10 @@ type CodeResponse struct {
 	Addresses []Address `json:"addresses,omitempty"`
 }
 
-func (s *Server) mintCode(publicURL string) CodeResponse {
-	code, exp := s.Codes.Mint()
+func (s *Server) mintCode(publicURL string) CodeResponse { return s.mintCodeFor(publicURL, CodeTTL) }
+
+func (s *Server) mintCodeFor(publicURL string, ttl time.Duration) CodeResponse {
+	code, exp := s.Codes.MintFor(ttl)
 	c := CodeResponse{Code: code, ExpiresAt: exp.UTC().Truncate(time.Second)}
 	if publicURL != "" {
 		c.Link, c.SetupURL = PairLink(publicURL, code), publicURL+"/setup?code="+code
@@ -453,6 +463,8 @@ func (s *Server) pairingCodes(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		PublicURL string `json:"public_url"`
+		// How long the code works, in seconds (default 15 minutes, at most a day).
+		ValidSeconds int `json:"valid_seconds"`
 	}
 	json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req) // the body is optional
 	var found []Address
@@ -465,7 +477,11 @@ func (s *Server) pairingCodes(w http.ResponseWriter, r *http.Request) {
 			public = found[0].URL
 		}
 	}
-	c := s.mintCode(public)
+	ttl := CodeTTL
+	if req.ValidSeconds > 0 {
+		ttl = time.Duration(req.ValidSeconds) * time.Second
+	}
+	c := s.mintCodeFor(public, ttl)
 	c.Addresses = found
 	writeJSON(w, http.StatusOK, c)
 }

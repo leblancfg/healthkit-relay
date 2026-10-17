@@ -22,6 +22,7 @@ func runCommand(name string, args []string, out io.Writer) error {
 	var cfg config
 	cfg.register(fs)
 	server := fs.String("server", "", "URL of the running server (default: http://<-listen>)")
+	valid := fs.Duration("valid", CodeTTL, "pair: how long the code works, at most 24h (e.g. 2h to send the link to a phone)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -72,7 +73,8 @@ func runCommand(name string, args []string, out io.Writer) error {
 	switch name {
 	case "pair":
 		var c CodeResponse
-		if err := call(http.MethodPost, "/v1/pairing-codes", map[string]string{"public_url": cfg.publicURL}, &c); err != nil {
+		body := map[string]any{"public_url": cfg.publicURL, "valid_seconds": int(valid.Seconds())}
+		if err := call(http.MethodPost, "/v1/pairing-codes", body, &c); err != nil {
 			return err
 		}
 		if c.Link == "" {
@@ -83,8 +85,11 @@ func runCommand(name string, args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "Scan with the iPhone's Camera to set up Health Relay (works once, until %s):\n\n",
-			c.ExpiresAt.Local().Format("15:04"))
+		until := c.ExpiresAt.Local().Format("15:04")
+		if time.Until(c.ExpiresAt) > 20*time.Hour {
+			until = c.ExpiresAt.Local().Format("Jan 2 15:04")
+		}
+		fmt.Fprintf(out, "Scan with the iPhone's Camera to set up Health Relay (works once, until %s):\n\n", until)
 		fmt.Fprint(out, q.Terminal())
 		fmt.Fprintf(out, "\nOr open this page on the iPhone or a computer:\n  %s\n", c.SetupURL)
 		if len(c.Addresses) > 0 {

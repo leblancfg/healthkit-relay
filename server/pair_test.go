@@ -154,6 +154,13 @@ func TestCodesExpire(t *testing.T) {
 	if state, _, _ := c.State(code); state != "invalid" {
 		t.Fatalf("expired code: %s", state)
 	}
+	// Longer codes for links sent to a phone, at most a day.
+	if _, exp := c.MintFor(2 * time.Hour); exp.Sub(now) != 2*time.Hour {
+		t.Errorf("2 h code expires %v", exp.Sub(now))
+	}
+	if _, exp := c.MintFor(30 * 24 * time.Hour); exp.Sub(now) != MaxCodeTTL {
+		t.Errorf("month-long code expires %v", exp.Sub(now))
+	}
 	if _, err := c.Redeem(code, func() (Device, error) { return Device{}, nil }); err != errBadCode {
 		t.Fatalf("redeem expired: %v", err)
 	}
@@ -397,8 +404,13 @@ func TestPairCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "https://health.example.com/setup?code=") || !strings.Contains(out.String(), "█") ||
+		!strings.Contains(out.String(), "until") ||
 		strings.Contains(out.String(), "Others") {
 		t.Fatalf("pair output:\n%s", out.String())
+	}
+	out.Reset()
+	if err := runCommand("pair", []string{"-server", ts.URL, "-token-file", tok, "-public-url", "https://h.example", "-valid", "3h"}, &out); err != nil {
+		t.Fatal(err)
 	}
 	out.Reset()
 	// The test server listens on loopback only: no address to offer, so no code.

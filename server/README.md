@@ -48,6 +48,7 @@ its own by scanning a one-time setup code.
 
   ```sh
   healthkit-relay pair -token-file ./token -public-url https://health.example.com
+  healthkit-relay pair -token-file ./token -valid 2h      # a link to send to your phone
   healthkit-relay devices -token-file ./token
   healthkit-relay revoke -token-file ./token 3f9a1c2e
   ```

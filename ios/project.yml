@@ -14,14 +14,26 @@ configFiles:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "2"
 targets:
   HealthKitRelay:
     type: application
     platform: iOS
     sources:
       - path: HealthKitRelay
+    # The list of HealthKit types is generated from the SDK of the Xcode doing the build, so a
+    # newer Xcode syncs the types it adds with no code change. The generated file is committed,
+    # so a machine without python3 still builds (with that file's types).
+    preBuildScripts:
+      - name: Generate HealthKit types from the SDK
+        basedOnDependencyAnalysis: false
+        script: |
+          if /usr/bin/xcrun --find python3 >/dev/null 2>&1; then
+            /usr/bin/xcrun python3 -I "$SRCROOT/Scripts/gen-health-types" "$SRCROOT/HealthKitRelay/Generated/SDKHealthTypes.swift"
+          else
+            echo "warning: python3 not found; using the committed Generated/SDKHealthTypes.swift"
+          fi
     info:
       path: HealthKitRelay/Info.plist
       properties:
@@ -33,11 +45,12 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSHealthShareUsageDescription: Health Relay reads your health data to copy it to your own server.
         NSHealthUpdateUsageDescription: Health Relay never writes health data.
+        NSHealthClinicalHealthRecordsShareUsageDescription: Health Relay reads your health records to copy them to your own server.
     entitlements:
       path: HealthKitRelay/HealthKitRelay.entitlements
       properties:
         com.apple.developer.healthkit: true
-        com.apple.developer.healthkit.access: []
+        com.apple.developer.healthkit.access: [health-records]
         com.apple.developer.healthkit.background-delivery: true
     settings:
       base:
@@ -47,6 +60,8 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: false
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_OBJC_BRIDGING_HEADER: HealthKitRelay/Support/HealthKitRelay-Bridging-Header.h
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
   HealthKitRelayTests:
     type: bundle.unit-test
     platform: iOS

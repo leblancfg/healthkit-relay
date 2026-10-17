@@ -17,10 +17,4 @@ final class SettingsTests: XCTestCase {
         let date = Date(timeIntervalSince1970: 1_767_323_045.5)
         XCTAssertEqual(WireEncoder.timestamp(date), "2026-01-02T03:04:05.500Z")
     }
-
-    func testEveryTypeHasAUnitOrIsNotAQuantity() {
-        for synced in HealthTypes.all where synced.type is HKQuantityType {
-            XCTAssertNotNil(synced.unit, synced.key)
-        }
-    }
 }

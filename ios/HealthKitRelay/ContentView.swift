@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var needsAuthorization = true
     @State private var message: String?
     @State private var confirmReset = false
+    @State private var coverage: Coverage?
 
     var body: some View {
         NavigationStack {
@@ -28,22 +29,38 @@ struct ContentView: View {
                     Text("Stored in the Keychain on this phone only.")
                 }
 
-                Section("Health data") {
+                Section {
                     if !SyncEngine.isAvailable {
                         Text("Health data is not available on this device.")
                     } else if needsAuthorization {
                         Button("Grant access") { authorize() }
                     } else {
                         Label("Access requested", systemImage: "checkmark.circle")
-                        Text("Change which data is shared in Settings › Health › Data Access & Devices.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                    }
+                    if let coverage {
+                        LabeledContent("Types", value: "\(coverage.requested) of \(coverage.available)")
+                        if coverage.notYetRequested > 0 {
+                            Text("\(coverage.notYetRequested) new types: tap Grant access to include them.")
+                                .font(.footnote)
+                        }
+                    }
+                } header: {
+                    Text("Health data")
+                } footer: {
+                    if let coverage {
+                        Text(coverageFooter(coverage))
                     }
                 }
 
                 Section("Sync") {
                     Button {
-                        Task { await SyncEngine.shared.syncAll() }
+                        Task {
+                            // A first sync can take long: keep the phone from locking (and
+                            // HealthKit from becoming unreadable) while it runs.
+                            UIApplication.shared.isIdleTimerDisabled = true
+                            await SyncEngine.shared.syncAll()
+                            UIApplication.shared.isIdleTimerDisabled = false
+                        }
                     } label: {
                         HStack {
                             Text("Sync now")
@@ -80,7 +97,7 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("Health Relay")
-            .task { needsAuthorization = await SyncEngine.shared.needsAuthorization() }
+            .task { await refresh() }
             .confirmationDialog("Re-send all history?", isPresented: $confirmReset) {
                 Button("Re-send", role: .destructive) {
                     Task { await SyncEngine.shared.resetAnchors() }
@@ -106,7 +123,20 @@ struct ContentView: View {
             } catch {
                 message = error.localizedDescription
             }
-            needsAuthorization = await SyncEngine.shared.needsAuthorization()
+            await refresh()
         }
+    }
+
+    private func refresh() async {
+        needsAuthorization = await SyncEngine.shared.needsAuthorization()
+        coverage = await SyncEngine.shared.coverage()
+    }
+
+    private func coverageFooter(_ c: Coverage) -> String {
+        var parts = ["Every type in the \(c.sdk) this app was built with."]
+        if !c.unavailable.isEmpty { parts.append("\(c.unavailable.count) need a newer iOS.") }
+        if !c.excluded.isEmpty { parts.append("\(c.excluded.count) not readable by apps: \(c.excluded.keys.sorted().map(SyncEngine.shortName).joined(separator: ", ")).") }
+        parts.append("Change what is shared in Settings › Health › Data Access & Devices.")
+        return parts.joined(separator: " ")
     }
 }

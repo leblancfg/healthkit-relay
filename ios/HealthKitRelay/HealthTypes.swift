@@ -1,67 +1,110 @@
+import Foundation
 import HealthKit
 
-/// One HealthKit data type to sync.
-struct SyncedType: Sendable {
-    let type: HKSampleType
-    /// Unit values are converted to before upload (quantity types only). Fixed per type, so
-    /// the server sees the same unit whatever the phone's region settings.
-    let unit: HKUnit?
+// The types to sync are not listed by hand: Scripts/gen-health-types writes every type the SDK
+// declares into Generated/SDKHealthTypes.swift at build time, and this file resolves them on
+// the running iOS. A type the running iOS does not know is skipped, never a crash.
 
-    static func quantity(_ id: HKQuantityTypeIdentifier, _ unit: HKUnit) -> SyncedType {
-        SyncedType(type: HKQuantityType(id), unit: unit)
-    }
-
-    static func category(_ id: HKCategoryTypeIdentifier) -> SyncedType {
-        SyncedType(type: HKCategoryType(id), unit: nil)
-    }
-
-    static let workouts = SyncedType(type: HKWorkoutType.workoutType(), unit: nil)
-
-    /// Stable key for persisted state (anchors).
-    var key: String { type.identifier }
+struct SDKFamily: Sendable {
+    let className: String
+    let selector: String
 }
 
-private let bpm = HKUnit.count().unitDivided(by: .minute())
+struct SDKIdentifiedType: Sendable {
+    let family: String
+    let identifier: String
+    let ios: String
+    /// Apple's documented canonical unit (quantity types), e.g. "count/s".
+    let unit: String?
+    let aggregation: String?
+    /// The NS_ENUM naming this category type's values, e.g. "HKCategoryValueSleepAnalysis".
+    let valueEnum: String?
+}
 
-/// Everything the app reads and uploads. Adding a HealthKit type is one line here.
+struct SDKFactoryType: Sendable {
+    let className: String
+    let selector: String
+    let ios: String
+}
+
+/// One HealthKit type, resolved on this iOS.
+struct SyncedType: @unchecked Sendable {
+    let type: HKObjectType
+    let canonicalUnit: String?
+    let valueEnum: String?
+
+    /// Stable key for persisted state (anchors, units).
+    var key: String { type.identifier }
+    var sampleType: HKSampleType? { type as? HKSampleType }
+}
+
 enum HealthTypes {
-    static let all: [SyncedType] = [
-        // Heart and lungs
-        .quantity(.heartRate, bpm),
-        .quantity(.restingHeartRate, bpm),
-        .quantity(.walkingHeartRateAverage, bpm),
-        .quantity(.heartRateVariabilitySDNN, .secondUnit(with: .milli)),
-        .quantity(.heartRateRecoveryOneMinute, bpm),
-        .quantity(.respiratoryRate, bpm),
-        .quantity(.oxygenSaturation, .percent()),
-        .quantity(.vo2Max, HKUnit.literUnit(with: .milli).unitDivided(by: HKUnit.gramUnit(with: .kilo).unitMultiplied(by: .minute()))),
-        .quantity(.appleSleepingWristTemperature, .degreeCelsius()),
-        // Activity
-        .quantity(.stepCount, .count()),
-        .quantity(.distanceWalkingRunning, .meter()),
-        .quantity(.distanceCycling, .meter()),
-        .quantity(.flightsClimbed, .count()),
-        .quantity(.activeEnergyBurned, .kilocalorie()),
-        .quantity(.basalEnergyBurned, .kilocalorie()),
-        .quantity(.appleExerciseTime, .minute()),
-        .quantity(.appleStandTime, .minute()),
-        .quantity(.walkingSpeed, HKUnit.meter().unitDivided(by: .second())),
-        // Body
-        .quantity(.bodyMass, .gramUnit(with: .kilo)),
-        .quantity(.bodyFatPercentage, .percent()),
-        // Environment
-        .quantity(.environmentalAudioExposure, .decibelAWeightedSoundPressureLevel()),
-        .quantity(.headphoneAudioExposure, .decibelAWeightedSoundPressureLevel()),
-        // Categories
-        .category(.sleepAnalysis),
-        .category(.mindfulSession),
-        .category(.appleStandHour),
-        .category(.highHeartRateEvent),
-        .category(.lowHeartRateEvent),
-        .category(.irregularHeartRhythmEvent),
-        // Workouts
-        .workouts,
-    ]
+    struct Catalog: @unchecked Sendable {
+        /// Every type available on this iOS, in SDK order.
+        let types: [SyncedType]
+        /// Identifiers the SDK declares that this iOS does not provide.
+        let unavailable: [String]
+        let byKey: [String: SyncedType]
+    }
 
-    static var readTypes: Set<HKObjectType> { Set(all.map(\.type)) }
+    static let catalog = resolve()
+    static var all: [SyncedType] { catalog.types }
+
+    static func named(_ identifier: String) -> SyncedType? { catalog.byKey[identifier] }
+
+    /// Readable name of an enum raw value, from the SDK headers: ("HKWorkoutActivityType", 37) -> "running".
+    static func enumName(_ enumName: String?, _ value: Int) -> String? {
+        guard let enumName else { return nil }
+        return SDKHealthTypes.enums[enumName]?[value]
+    }
+
+    static func resolve() -> Catalog {
+        var types: [SyncedType] = []
+        var unavailable: [String] = []
+        var seen = Set<String>()
+
+        func add(_ object: Any?, unit: String? = nil, valueEnum: String? = nil, fallbackName: String) {
+            guard let type = object as? HKObjectType else {
+                unavailable.append(fallbackName)
+                return
+            }
+            guard seen.insert(type.identifier).inserted else { return }
+            types.append(SyncedType(type: type, canonicalUnit: unit, valueEnum: valueEnum))
+        }
+
+        for t in SDKHealthTypes.identified {
+            guard isAvailable(t.ios), let family = SDKHealthTypes.families[t.family] else {
+                unavailable.append(t.identifier)
+                continue
+            }
+            add(HKRCallClassMethod(family.className, family.selector, t.identifier as NSString),
+                unit: t.unit, valueEnum: t.valueEnum, fallbackName: t.identifier)
+        }
+        for f in SDKHealthTypes.factories {
+            guard isAvailable(f.ios) else {
+                unavailable.append("\(f.className).\(f.selector)")
+                continue
+            }
+            add(HKRCallClassMethod(f.className, f.selector, nil), fallbackName: "\(f.className).\(f.selector)")
+        }
+        let byKey = Dictionary(types.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
+        return Catalog(types: types, unavailable: unavailable, byKey: byKey)
+    }
+
+    /// Plain identifier constants with no matching type: an SDK addition the factories missed.
+    /// Constant names and values can differ by "Identifier" (HKDataTypeIdentifierStateOfMind is
+    /// "HKDataTypeStateOfMind"), so both are compared without it.
+    static var uncoveredIdentifiers: [String] {
+        let have = Set(catalog.types.map { $0.key.replacingOccurrences(of: "Identifier", with: "") })
+        return SDKHealthTypes.namedIdentifiers.filter { !have.contains($0.replacingOccurrences(of: "Identifier", with: "")) }
+    }
+
+    static func isAvailable(_ ios: String) -> Bool {
+        let parts = ios.split(separator: ".").compactMap { Int($0) }
+        let version = OperatingSystemVersion(
+            majorVersion: parts.first ?? 0,
+            minorVersion: parts.count > 1 ? parts[1] : 0,
+            patchVersion: parts.count > 2 ? parts[2] : 0)
+        return ProcessInfo.processInfo.isOperatingSystemAtLeast(version)
+    }
 }

@@ -31,6 +31,11 @@ type Response struct {
 	Stored     int `json:"stored"`
 	Duplicates int `json:"duplicates"`
 	Deletions  int `json:"deletions"`
+	// Records received (v2). Always present, so a client can tell a v2 server, which stores
+	// records, from a v1 server, which would drop them.
+	Records int `json:"records"`
+	// Version is the newest wire format the server understands.
+	Version int `json:"version"`
 }
 
 func (s *Server) Handler() http.Handler {
@@ -74,7 +79,8 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 
 	// Validate everything first: a batch is stored whole or not at all, so the client can
 	// advance its HealthKit anchor only on success.
-	recs := make([]Record, 0, len(b.Samples)+len(b.Deletions))
+	v := b.version()
+	recs := make([]Record, 0, len(b.Samples)+len(b.Records)+len(b.Deletions))
 	samples := make([]*Sample, 0, len(b.Samples))
 	for i, raw := range b.Samples {
 		smp, err := parseSample(raw)
@@ -84,7 +90,22 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		samples = append(samples, smp)
-		recs = append(recs, Record{Op: "sample", UUID: smp.UUID, Type: smp.Type, Data: raw})
+		rec := Record{Op: "sample", UUID: smp.UUID, Type: smp.Type, Data: raw}
+		if v >= 2 {
+			rec.V = v
+		}
+		recs = append(recs, rec)
+	}
+	records := make([]*RecordIn, 0, len(b.Records))
+	for i, raw := range b.Records {
+		r, err := parseRecord(raw)
+		if err != nil {
+			s.count("bad_request")
+			httpError(w, http.StatusBadRequest, fmt.Sprintf("records[%d]: %v", i, err))
+			return
+		}
+		records = append(records, r)
+		recs = append(recs, Record{Op: "record", Type: r.Kind, Key: r.Key, Digest: r.digest, Data: raw})
 	}
 	for i, raw := range b.Deletions {
 		d, err := parseDeletion(raw)
@@ -94,6 +115,16 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		recs = append(recs, Record{Op: "delete", UUID: d.UUID, Type: d.Type, Data: raw})
+	}
+
+	// A v2 copy of a sample app 0.1 already sent is archived, but its value was forwarded then.
+	forwardedBefore := make(map[string]bool)
+	if v >= 2 && s.Forwarder != nil {
+		for _, smp := range samples {
+			if s.Archive.Has("sample:" + smp.UUID) {
+				forwardedBefore[smp.UUID] = true
+			}
+		}
 	}
 
 	stored, err := s.Archive.Append(recs)
@@ -109,8 +140,11 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 	if s.Forwarder != nil && added > 0 {
 		isNew := make(map[string]bool, added)
 		for _, rec := range stored {
-			if rec.Op == "sample" {
-				isNew[rec.UUID] = true
+			switch rec.Op {
+			case "sample":
+				isNew[rec.UUID] = !forwardedBefore[rec.UUID]
+			case "record":
+				isNew[rec.id()] = true
 			}
 		}
 		var fresh []*Sample
@@ -120,7 +154,16 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 				delete(isNew, smp.UUID) // a UUID repeated within the batch is sent once
 			}
 		}
-		if err := s.Forwarder.Send(r.Context(), s.Forwarder.Lines(fresh)); err != nil {
+		var freshRecords []*RecordIn
+		for _, rec := range records {
+			id := (&Record{Op: "record", Type: rec.Kind, Key: rec.Key, Digest: rec.digest}).id()
+			if isNew[id] {
+				freshRecords = append(freshRecords, rec)
+				delete(isNew, id)
+			}
+		}
+		lines := append(s.Forwarder.Lines(fresh), s.Forwarder.RecordLines(freshRecords)...)
+		if err := s.Forwarder.Send(r.Context(), lines); err != nil {
 			log.Printf("forward: %v", err)
 			s.mu.Lock()
 			s.forwardErrors++
@@ -128,14 +171,16 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp := Response{Received: len(recs), Stored: added, Duplicates: len(recs) - added, Deletions: len(b.Deletions)}
+	resp := Response{Received: len(recs), Stored: added, Duplicates: len(recs) - added, Deletions: len(b.Deletions),
+		Records: len(b.Records), Version: WireVersion}
 	s.mu.Lock()
 	s.lastUpload = time.Now()
 	s.mu.Unlock()
 	s.count("ok")
 	s.add("stored", int64(added))
 	s.add("duplicates", int64(resp.Duplicates))
-	log.Printf("batch: %d samples, %d deletions, %d stored, %d duplicates", len(b.Samples), len(b.Deletions), added, resp.Duplicates)
+	log.Printf("batch v%d: %d samples, %d records, %d deletions, %d stored, %d duplicates",
+		v, len(b.Samples), len(b.Records), len(b.Deletions), added, resp.Duplicates)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }

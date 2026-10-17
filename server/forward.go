@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,7 +26,8 @@ type Forwarder struct {
 	Client      *http.Client
 }
 
-// Lines renders the samples that carry a number. Samples without one are skipped.
+// Lines renders the samples that carry a number: quantities (value), categories (duration)
+// and workouts (summary). Other kinds (ECGs, routes, correlations...) live in the archive only.
 func (f *Forwarder) Lines(samples []*Sample) []byte {
 	var b bytes.Buffer
 	for _, s := range samples {
@@ -55,9 +57,34 @@ func (f *Forwarder) Lines(samples []*Sample) []byte {
 			}
 			tags["value"] = v
 			f.line(&b, tags, metricName(s.Type)+"_seconds", s.end.Sub(s.start).Seconds(), ts)
-		case s.Value != nil:
+		case s.Kind == "quantity" && s.Value != nil:
 			tags["unit"] = s.Unit
 			f.line(&b, tags, metricName(s.Type), *s.Value, ts)
+		}
+	}
+	return b.Bytes()
+}
+
+// RecordLines renders daily activity summaries (rings and goals), one line per value:
+//
+//	healthkit,unit=kcal activity_summary_active_energy_burned=512 <day start ns>
+func (f *Forwarder) RecordLines(recs []*RecordIn) []byte {
+	var b bytes.Buffer
+	for _, r := range recs {
+		if r.Kind != "activity_summary" || r.start.IsZero() {
+			continue
+		}
+		names := make([]string, 0, len(r.Values))
+		for name := range r.Values {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			v := r.Values[name]
+			if v.Value == nil {
+				continue
+			}
+			f.line(&b, map[string]string{"unit": v.Unit}, "activity_summary_"+name, *v.Value, r.start.UnixNano())
 		}
 	}
 	return b.Bytes()

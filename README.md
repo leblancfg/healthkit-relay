@@ -29,18 +29,43 @@ small pieces:
    background delivery, so iOS wakes it when new data lands.
 2. For each type an `HKAnchoredObjectQuery` returns what changed since the last persisted
    anchor: new samples and deleted ones. The first run uploads all history.
-3. Batches of up to 2000 records are posted with retries and exponential backoff. The
-   anchor advances only after the server confirms the batch is stored, so failures lose
-   nothing; the server ignores records it already has, so retries duplicate nothing.
+3. Batches (up to 4 MB) are posted with retries and exponential backoff; long series such
+   as routes and ECG voltages are split into chunks. The anchor advances only after the
+   server confirms the whole page is stored, so failures lose nothing and an interrupted
+   first upload resumes where it stopped; the server ignores records it already has, so
+   retries duplicate nothing.
 4. While the phone is locked HealthKit data is encrypted; the app defers and syncs after
    the next unlock.
 5. The server validates a batch as a whole, appends new records (one JSON line each, with
    the sample exactly as sent) to a per-day file, fsyncs, and only then answers 200.
    Deletions are recorded as tombstones; nothing is ever rewritten.
 
-Data types are listed in one place, [`ios/HealthKitRelay/HealthTypes.swift`](ios/HealthKitRelay/HealthTypes.swift):
-heart rate, HRV, resting heart rate, respiratory rate, SpO₂, VO₂ max, steps, energy,
-exercise minutes, sleep stages, workouts and more. Adding a type is one line.
+### What it syncs: everything
+
+There is no hand-written list of data types. At build time,
+[`ios/Scripts/gen-health-types`](ios/Scripts/gen-health-types) reads the HealthKit headers of
+the SDK the app is compiled with and generates every type identifier HealthKit declares, with
+Apple's documented unit for each quantity and the names of every enum value
+([`Generated/SDKHealthTypes.swift`](ios/HealthKitRelay/Generated/SDKHealthTypes.swift)). Build
+with a newer Xcode and the types Apple added are synced, with no code change; types the
+phone's iOS does not have yet are skipped. With the iOS 27 SDK that is 222 types:
+
+- all 121 quantity types (heart rate, HRV, steps, energy, nutrition, mobility, audio
+  exposure...) and 71 category types (sleep stages, symptoms, cycle tracking, events...), with
+  full metadata, source, device and the individual values of series samples;
+- workouts with their activities, events, per-type statistics and routes (every GPS point);
+- heartbeat series (beat-to-beat timing), ECGs (every voltage sample, classification,
+  symptoms), audiograms, blood pressure and food correlations with their members, state of
+  mind, GAD-7 and PHQ-9 assessments, medications and dose events, vision prescriptions (with
+  attached scans), health records (FHIR) and CDA documents;
+- daily activity summaries (rings and goals) and characteristics (date of birth, biological
+  sex, blood type, skin type, wheelchair use, move mode).
+
+Nothing is dropped for want of a unit: each quantity type gets one unit for its whole history
+(the one the Health app shows, else Apple's canonical one), and every value is sent with its
+unit string. Each object is also uploaded with its complete `NSKeyedArchiver` archive (except
+the bulk quantity and category samples), so even properties this app has no field for yet are
+kept.
 
 ## Privacy
 
@@ -76,7 +101,8 @@ make ios-build    # or: make ios-project, then open ios/HealthKitRelay.xcodeproj
 ```
 
 Then open **Health Relay** on the phone, enter the server URL and token, tap **Grant
-access** and **Sync now**. See [ios/README.md](ios/README.md).
+access** (one sheet for everything, plus one per type HealthKit grants object by object, such
+as vision prescriptions and medications) and **Sync now**. See [ios/README.md](ios/README.md).
 
 ## Layout
 

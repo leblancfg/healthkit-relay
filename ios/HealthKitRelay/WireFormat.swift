@@ -1,68 +1,58 @@
 import Foundation
 import HealthKit
 
-/// JSON body of POST /v1/samples. See server/README.md for the schema.
-struct WireBatch: Encodable {
-    var device: WireDevice
-    var samples: [WireSample]
-    var deletions: [WireDeletion]
+// Wire format v2: POST /v1/samples with
+//   {"version": 2, "device": {...}, "samples": [...], "records": [...], "deletions": [...]}
+// samples:   every HealthKit sample, any kind, keyed by its UUID (see SampleEncoder).
+// records:   everything without a sample UUID, keyed by (kind, key): series points and file
+//            chunks of large samples, daily activity summaries, characteristics, medications.
+// deletions: tombstones for samples HealthKit reports deleted.
+// server/README.md documents every field. Version 1 (app 0.1) had no "version" and no "records".
+
+enum Wire {
+    static let version = 2
 }
 
-struct WireDevice: Encodable {
-    var model: String
-    var systemVersion: String
-    var appVersion: String
+/// The part of a batch an item belongs to.
+enum WireSection: Sendable {
+    case sample, record, deletion
+}
 
-    enum CodingKeys: String, CodingKey {
-        case model, systemVersion = "system_version", appVersion = "app_version"
+/// One encoded item, kept as bytes so batches can be cut to a size limit.
+struct WireItem: Sendable {
+    let section: WireSection
+    let data: Data
+
+    init(_ section: WireSection, _ json: JSON) throws {
+        self.section = section
+        data = try json.data()
     }
 }
 
-struct WireSource: Encodable {
-    var name: String
-    var bundleID: String
-    var version: String?
-    var device: String?
+struct WireBatch {
+    var device: JSON
+    var items: [WireItem]
 
-    enum CodingKeys: String, CodingKey {
-        case name, bundleID = "bundle_id", version, device
+    var count: Int { items.count }
+    var recordCount: Int { items.filter { $0.section == .record }.count }
+
+    /// Assembles the body from pre-encoded items: no second encoding pass.
+    func body() throws -> Data {
+        var out = Data("{\"version\":\(Wire.version),\"device\":".utf8)
+        out.append(try device.data())
+        for (name, section) in [("samples", WireSection.sample), ("records", .record), ("deletions", .deletion)] {
+            out.append(Data(",\"\(name)\":[".utf8))
+            var first = true
+            for item in items where item.section == section {
+                if !first { out.append(UInt8(ascii: ",")) }
+                out.append(item.data)
+                first = false
+            }
+            out.append(UInt8(ascii: "]"))
+        }
+        out.append(UInt8(ascii: "}"))
+        return out
     }
-}
-
-struct WireWorkout: Encodable {
-    var activityType: UInt
-    var activityName: String?
-    var durationSeconds: Double
-    var energyKcal: Double?
-    var distanceMeters: Double?
-
-    enum CodingKeys: String, CodingKey {
-        case activityType = "activity_type", activityName = "activity_name"
-        case durationSeconds = "duration_s", energyKcal = "energy_kcal", distanceMeters = "distance_m"
-    }
-}
-
-struct WireSample: Encodable {
-    var uuid: String
-    var type: String
-    var kind: String
-    var start: String
-    var end: String
-    var value: Double?
-    var unit: String?
-    var valueLabel: String?
-    var source: WireSource
-    var metadata: [String: String]?
-    var workout: WireWorkout?
-
-    enum CodingKeys: String, CodingKey {
-        case uuid, type, kind, start, end, value, unit, valueLabel = "value_label", source, metadata, workout
-    }
-}
-
-struct WireDeletion: Encodable {
-    var uuid: String
-    var type: String
 }
 
 enum WireEncoder {
@@ -71,93 +61,47 @@ enum WireEncoder {
         date.formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
     }
 
-    static func sample(_ s: HKSample, as synced: SyncedType) -> WireSample {
-        let src = s.sourceRevision
-        var out = WireSample(
-            uuid: s.uuid.uuidString,
-            type: s.sampleType.identifier,
-            kind: "sample",
-            start: timestamp(s.startDate),
-            end: timestamp(s.endDate),
-            source: WireSource(
-                name: src.source.name,
-                bundleID: src.source.bundleIdentifier,
-                version: src.version,
-                device: s.device?.model),
-            metadata: metadata(s.metadata))
-
-        switch s {
-        case let q as HKQuantitySample:
-            out.kind = "quantity"
-            if let unit = synced.unit, q.quantity.is(compatibleWith: unit) {
-                out.value = q.quantity.doubleValue(for: unit)
-                out.unit = unit.unitString
-            }
-        case let c as HKCategorySample:
-            out.kind = "category"
-            out.value = Double(c.value)
-            out.valueLabel = categoryLabel(c)
-        case let w as HKWorkout:
-            out.kind = "workout"
-            out.workout = WireWorkout(
-                activityType: w.workoutActivityType.rawValue,
-                activityName: w.workoutActivityType.name,
-                durationSeconds: w.duration,
-                energyKcal: w.statistics(for: HKQuantityType(.activeEnergyBurned))?
-                    .sumQuantity()?.doubleValue(for: .kilocalorie()),
-                distanceMeters: distance(w))
-        default:
-            break
-        }
-        return out
+    static func deletion(_ d: HKDeletedObject, type: HKSampleType) -> JSON {
+        var o: [String: JSON] = ["uuid": .string(d.uuid.uuidString), "type": .string(type.identifier)]
+        o.put("metadata", JSON.metadata(d.metadata))
+        return .object(o)
     }
 
-    static func deletion(_ d: HKDeletedObject, type: HKSampleType) -> WireDeletion {
-        WireDeletion(uuid: d.uuid.uuidString, type: type.identifier)
+    static func source(_ s: HKSample) -> JSON {
+        let rev = s.sourceRevision
+        var o: [String: JSON] = [
+            "name": .string(rev.source.name),
+            "bundle_id": .string(rev.source.bundleIdentifier),
+        ]
+        o.put("version", JSON(rev.version))
+        o.put("product_type", JSON(rev.productType))
+        let os = rev.operatingSystemVersion
+        if os.majorVersion > 0 {
+            o["os_version"] = .string("\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)")
+        }
+        o.put("device", JSON(s.device?.model))  // v1 field
+        return .object(o)
     }
 
-    private static func distance(_ w: HKWorkout) -> Double? {
-        let types: [HKQuantityTypeIdentifier] = [.distanceWalkingRunning, .distanceCycling, .distanceSwimming,
-                                                 .distanceDownhillSnowSports, .distanceWheelchair]
-        for id in types {
-            if let q = w.statistics(for: HKQuantityType(id))?.sumQuantity() {
-                return q.doubleValue(for: .meter())
-            }
-        }
-        return nil
-    }
-
-    private static func categoryLabel(_ c: HKCategorySample) -> String? {
-        guard c.categoryType.identifier == HKCategoryTypeIdentifier.sleepAnalysis.rawValue,
-              let v = HKCategoryValueSleepAnalysis(rawValue: c.value) else { return nil }
-        switch v {
-        case .inBed: return "inBed"
-        case .asleepUnspecified: return "asleepUnspecified"
-        case .awake: return "awake"
-        case .asleepCore: return "asleepCore"
-        case .asleepDeep: return "asleepDeep"
-        case .asleepREM: return "asleepREM"
-        @unknown default: return nil
-        }
-    }
-
-    private static func metadata(_ m: [String: Any]?) -> [String: String]? {
-        guard let m, !m.isEmpty else { return nil }
-        var out: [String: String] = [:]
-        for (k, v) in m {
-            switch v {
-            case let d as Date: out[k] = timestamp(d)
-            case let q as HKQuantity: out[k] = "\(q)"
-            default: out[k] = "\(v)"
-            }
-        }
-        return out
+    static func device(_ d: HKDevice?) -> JSON? {
+        guard let d else { return nil }
+        var o: [String: JSON] = [:]
+        o.put("name", JSON(d.name))
+        o.put("manufacturer", JSON(d.manufacturer))
+        o.put("model", JSON(d.model))
+        o.put("hardware_version", JSON(d.hardwareVersion))
+        o.put("firmware_version", JSON(d.firmwareVersion))
+        o.put("software_version", JSON(d.softwareVersion))
+        o.put("local_identifier", JSON(d.localIdentifier))
+        o.put("udi_device_identifier", JSON(d.udiDeviceIdentifier))
+        return o.isEmpty ? nil : .object(o)
     }
 }
 
 extension HKWorkoutActivityType {
-    /// Readable names for common activities; the raw value is always sent too.
-    var name: String? {
+    /// v1 names for common activities, kept so metric series do not change name. The SDK
+    /// name of every activity is sent as `activity_type_name`.
+    var v1Name: String? {
         switch self {
         case .running: "running"
         case .walking: "walking"
@@ -175,7 +119,6 @@ extension HKWorkoutActivityType {
         case .coreTraining: "core_training"
         case .crossTraining: "cross_training"
         case .mixedCardio: "mixed_cardio"
-        case .dance: "dance"
         case .soccer: "soccer"
         case .tennis: "tennis"
         case .downhillSkiing: "downhill_skiing"

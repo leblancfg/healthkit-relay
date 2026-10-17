@@ -17,12 +17,32 @@ import (
 
 // Record is one line of the archive.
 type Record struct {
-	// Op is "sample" for a received sample and "delete" for a tombstone.
-	Op         string          `json:"op"`
-	UUID       string          `json:"uuid"`
-	Type       string          `json:"type,omitempty"`
+	// Op is "sample" for a received sample, "delete" for a tombstone and "record" for a
+	// record without UUID (wire format v2).
+	Op   string `json:"op"`
+	UUID string `json:"uuid,omitempty"`
+	// V is the wire format of a sample, if not 1. Samples are unique per (V, UUID): the
+	// fuller v2 copy of a sample app 0.1 already sent is stored too.
+	V int `json:"v,omitempty"`
+	// Type is the HealthKit type of samples and tombstones, and the kind of records.
+	Type string `json:"type,omitempty"`
+	// Key and Digest identify a record: unique per (Type, Key, Digest).
+	Key        string          `json:"key,omitempty"`
+	Digest     string          `json:"digest,omitempty"`
 	ReceivedAt time.Time       `json:"received_at"`
 	Data       json.RawMessage `json:"data"`
+}
+
+// id is the de-duplication key of a record.
+func (r *Record) id() string {
+	switch {
+	case r.Op == "record":
+		return "record:" + r.Type + ":" + r.Key + ":" + r.Digest
+	case r.Op == "sample" && r.V >= 2:
+		return fmt.Sprintf("sample@%d:%s", r.V, r.UUID)
+	default:
+		return r.Op + ":" + r.UUID
+	}
 }
 
 // Archive is an append-only store of records: one JSON Lines file per UTC day of receipt,
@@ -33,7 +53,7 @@ type Archive struct {
 	now func() time.Time
 
 	mu   sync.Mutex
-	seen map[string]struct{} // op + ":" + uuid
+	seen map[string]struct{} // Record.id()
 }
 
 // OpenArchive creates dir if needed and indexes the records already in it.
@@ -64,12 +84,16 @@ func (a *Archive) index(path string) error {
 	for n := 1; ; n++ {
 		line, err := r.ReadBytes('\n')
 		if len(bytes.TrimSpace(line)) > 0 {
-			var rec struct{ Op, UUID string }
-			if jerr := json.Unmarshal(line, &rec); jerr != nil || rec.UUID == "" {
+			var rec struct {
+				Op, UUID, Type, Key, Digest string
+				V                           int
+			}
+			if jerr := json.Unmarshal(line, &rec); jerr != nil || (rec.UUID == "" && rec.Key == "") {
 				// A crash mid-write can leave a partial last line: skip it, the client re-sends.
 				log.Printf("archive: %s:%d: skipping unreadable line", path, n)
 			} else {
-				a.seen[rec.Op+":"+rec.UUID] = struct{}{}
+				r := Record{Op: rec.Op, UUID: rec.UUID, V: rec.V, Type: rec.Type, Key: rec.Key, Digest: rec.Digest}
+				a.seen[r.id()] = struct{}{}
 			}
 		}
 		if err == io.EOF {
@@ -78,6 +102,14 @@ func (a *Archive) index(path string) error {
 			return err
 		}
 	}
+}
+
+// Has reports whether a record with this id is archived.
+func (a *Archive) Has(id string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	_, ok := a.seen[id]
+	return ok
 }
 
 // Len is the number of distinct records in the archive.
@@ -97,7 +129,7 @@ func (a *Archive) Append(recs []Record) (added []Record, err error) {
 	batch := make(map[string]struct{})
 	now := a.now().UTC()
 	for _, r := range recs {
-		key := r.Op + ":" + r.UUID
+		key := r.id()
 		if _, dup := a.seen[key]; dup {
 			continue
 		}

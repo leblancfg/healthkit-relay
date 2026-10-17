@@ -234,3 +234,97 @@ func TestEnvConfig(t *testing.T) {
 		t.Fatalf("want short-token error, got %v", err)
 	}
 }
+
+const ecgV2 = `{"uuid":"5b4e28ba-2fa1-11d2-883f-0016d3cca427","type":"HKDataTypeIdentifierElectrocardiogram","kind":"electrocardiogram",
+ "start":"2026-01-02T09:00:00Z","end":"2026-01-02T09:00:30Z","source":{"name":"Watch"},"classification":{"raw":1,"name":"sinusRhythm"}}`
+
+const ecgChunk = `{"kind":"series","key":"5B4E28BA-2FA1-11D2-883F-0016D3CCA427/electrocardiogram/0","series":"electrocardiogram",
+ "sample_uuid":"5B4E28BA-2FA1-11D2-883F-0016D3CCA427","index":0,"final":true,"unit":"mcV","points":[{"t":0,"v":12.5}]}`
+
+const summary = `{"kind":"activity_summary","key":"2026-01-02","date":"2026-01-02","start":"2026-01-02T05:00:00Z",
+ "values":{"active_energy_burned":{"value":512,"unit":"kcal"},"apple_stand_hours":{"value":10,"unit":"count"}}}`
+
+func TestV2RecordsStoredByContent(t *testing.T) {
+	dir := t.TempDir()
+	ts, fm := newTestServer(t, dir)
+	body := `{"version":2,"device":{"model":"iPhone"},"samples":[` + ecgV2 + `],"records":[` + ecgChunk + `,` + summary + `],"deletions":[]}`
+	resp, r := post(t, ts.URL, testToken, body)
+	if resp.StatusCode != 200 || r.Stored != 3 || r.Records != 2 || r.Version != 2 {
+		t.Fatalf("first post: %d %+v", resp.StatusCode, r)
+	}
+	// Same content: duplicates. A changed summary for the same day: a new record.
+	if _, r = post(t, ts.URL, testToken, body); r.Stored != 0 || r.Duplicates != 3 {
+		t.Fatalf("retry: %+v", r)
+	}
+	changed := strings.Replace(summary, `"value":512`, `"value":600`, 1)
+	if _, r = post(t, ts.URL, testToken, `{"version":2,"samples":[],"records":[`+changed+`]}`); r.Stored != 1 {
+		t.Fatalf("changed summary: %+v", r)
+	}
+
+	recs := archiveLines(t, dir)
+	if len(recs) != 4 {
+		t.Fatalf("archive has %d records, want 4", len(recs))
+	}
+	if recs[0].Op != "sample" || recs[0].V != 2 || recs[1].Op != "record" || recs[1].Type != "series" || recs[1].Digest == "" {
+		t.Errorf("records: %+v / %+v", recs[0], recs[1])
+	}
+
+	// ECGs and series are not metrics; the summary is, both times it changed.
+	want := []string{
+		"healthkit,unit=kcal activity_summary_active_energy_burned=512 1767330000000000000",
+		"healthkit,unit=count activity_summary_apple_stand_hours=10 1767330000000000000",
+		"healthkit,unit=kcal activity_summary_active_energy_burned=600 1767330000000000000",
+		"healthkit,unit=count activity_summary_apple_stand_hours=10 1767330000000000000",
+	}
+	if strings.Join(fm.lines, "\n") != strings.Join(want, "\n") {
+		t.Errorf("forwarded:\n%s\nwant:\n%s", strings.Join(fm.lines, "\n"), strings.Join(want, "\n"))
+	}
+
+	// The index is rebuilt from the archive, records included.
+	ts.Close()
+	ts2, _ := newTestServer(t, dir)
+	if _, r = post(t, ts2.URL, testToken, body); r.Stored != 0 {
+		t.Fatalf("after restart: %+v", r)
+	}
+}
+
+func TestV2CopyOfV1Sample(t *testing.T) {
+	dir := t.TempDir()
+	ts, fm := newTestServer(t, dir)
+	post(t, ts.URL, testToken, `{"samples":[`+hrSample+`]}`)
+	// The app re-sends history in v2: the fuller copy is archived once, but not forwarded
+	// again (its number is already in the metrics database).
+	v2 := strings.Replace(hrSample, `"future_field"`, `"device":{"model":"Watch7,1"},"future_field"`, 1)
+	for i := 0; i < 2; i++ {
+		if _, r := post(t, ts.URL, testToken, `{"version":2,"samples":[`+v2+`],"records":[]}`); r.Stored != 1-i {
+			t.Fatalf("v2 post %d: %+v", i, r)
+		}
+	}
+	if recs := archiveLines(t, dir); len(recs) != 2 || recs[1].V != 2 {
+		t.Fatalf("archive: %+v", recs)
+	}
+	if len(fm.lines) != 1 {
+		t.Errorf("forwarded %d lines, want 1: %v", len(fm.lines), fm.lines)
+	}
+}
+
+func TestV2RejectsBadRecord(t *testing.T) {
+	dir := t.TempDir()
+	ts, _ := newTestServer(t, dir)
+	for _, rec := range []string{`{"kind":"Bad Kind","key":"x"}`, `{"kind":"series","key":""}`, `{"kind":"activity_summary","key":"d","start":"yesterday"}`} {
+		if resp, _ := post(t, ts.URL, testToken, `{"version":2,"samples":[`+hrSample+`],"records":[`+rec+`]}`); resp.StatusCode != 400 {
+			t.Errorf("%s: status %d, want 400", rec, resp.StatusCode)
+		}
+	}
+	if recs := archiveLines(t, dir); len(recs) != 0 {
+		t.Fatalf("partial batch stored: %d records", len(recs))
+	}
+}
+
+func TestV1ResponseStillCompatible(t *testing.T) {
+	ts, _ := newTestServer(t, t.TempDir())
+	resp, r := post(t, ts.URL, testToken, `{"samples":[`+hrSample+`],"deletions":[`+deletion+`]}`)
+	if resp.StatusCode != 200 || r.Stored != 2 || r.Deletions != 1 || r.Records != 0 {
+		t.Fatalf("v1 post: %d %+v", resp.StatusCode, r)
+	}
+}

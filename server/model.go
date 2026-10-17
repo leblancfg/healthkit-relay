@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -8,14 +10,30 @@ import (
 	"time"
 )
 
+// WireVersion is the newest wire format this server understands. Version 1 (no "version"
+// field, no "records") is what app 0.1 sends; it is accepted unchanged.
+const WireVersion = 2
+
 // Batch is the request body of POST /v1/samples.
 type Batch struct {
+	// Version of the wire format; 0 means 1.
+	Version int `json:"version,omitempty"`
 	// Device describes the uploading phone. Free-form, archived as sent.
 	Device json.RawMessage `json:"device,omitempty"`
-	// Samples are new or updated HealthKit samples.
+	// Samples are new or updated HealthKit samples, keyed by UUID.
 	Samples []json.RawMessage `json:"samples"`
+	// Records (v2) are things without a sample UUID, keyed by (kind, key): series chunks,
+	// file chunks, daily activity summaries, characteristics, medications...
+	Records []json.RawMessage `json:"records,omitempty"`
 	// Deletions are samples HealthKit reported as deleted.
 	Deletions []json.RawMessage `json:"deletions"`
+}
+
+func (b *Batch) version() int {
+	if b.Version < 1 {
+		return 1
+	}
+	return b.Version
 }
 
 // Sample holds the fields the server reads from a sample. The full JSON object is archived
@@ -42,6 +60,48 @@ type Sample struct {
 	} `json:"workout,omitempty"`
 
 	start, end time.Time
+}
+
+// RecordIn holds the fields the server reads from a record; it is archived verbatim.
+type RecordIn struct {
+	Kind string `json:"kind"`
+	Key  string `json:"key"`
+	// Activity summaries: the day's start and its values, forwarded as metrics.
+	Start  string `json:"start,omitempty"`
+	Values map[string]struct {
+		Value *float64 `json:"value"`
+		Unit  string   `json:"unit"`
+	} `json:"values,omitempty"`
+
+	digest string
+	start  time.Time
+}
+
+var kindRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+
+func parseRecord(raw json.RawMessage) (*RecordIn, error) {
+	var r RecordIn
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return nil, err
+	}
+	if !kindRE.MatchString(r.Kind) {
+		return nil, fmt.Errorf("invalid kind %q", r.Kind)
+	}
+	if r.Key == "" || len(r.Key) > 512 {
+		return nil, fmt.Errorf("record %s: key must be 1 to 512 bytes", r.Kind)
+	}
+	if r.Start != "" {
+		t, err := time.Parse(time.RFC3339Nano, r.Start)
+		if err != nil {
+			return nil, fmt.Errorf("record %s/%s: bad start: %v", r.Kind, r.Key, err)
+		}
+		r.start = t
+	}
+	// Records are de-duplicated by content: a changed summary is a new record, an unchanged
+	// one is a duplicate. Clients encode deterministically (sorted keys).
+	sum := sha256.Sum256(raw)
+	r.digest = hex.EncodeToString(sum[:16])
+	return &r, nil
 }
 
 // Deletion is a HealthKit deleted-object notice.

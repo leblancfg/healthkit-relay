@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""Generate HealthKitRelay/Generated/SDKHealthTypes.swift from the HealthKit headers of an SDK.
+
+Every Xcode build runs this (see project.yml), so a newer Xcode brings its new HealthKit
+types into the app with no source change. The generated file is committed too, so the
+project also builds without the script.
+
+What it reads from the headers:
+  - every `HK_EXTERN <Family>TypeIdentifier const <Identifier> API_AVAILABLE(ios(x))`, with the
+    unit and aggregation style (quantity types) or value enum (category types) that Apple
+    documents in the trailing comment;
+  - the `+[HKObjectType <family>TypeForIdentifier:]` constructor of each identifier family;
+  - every argument-less class method returning a type (`+[HKObjectType workoutType]`,
+    `+[HKSeriesType workoutRouteType]`, ...): types without an identifier constant;
+  - every NS_ENUM, so raw values (sleep stages, workout activities, ...) get readable names.
+
+Usage: gen-health-types [--headers DIR] [--sdk-name NAME] OUTPUT.swift
+DIR defaults to $SDKROOT/System/Library/Frameworks/HealthKit.framework/Headers.
+Standard library only; Python 3.8+.
+"""
+import argparse
+import os
+import re
+import sys
+
+MACRO = re.compile(r"\b[A-Z][A-Z0-9_]*\s*\((?:[^()]|\([^()]*\))*\)")
+IOS = re.compile(r"\bios\((\d+(?:\.\d+)*)\)")
+
+
+def strip_comments(text):
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
+    return re.sub(r"//[^\n]*", "", text)
+
+
+def available(attrs):
+    """iOS version a declaration appeared in; None if deprecated, unavailable or not on iOS."""
+    if "API_DEPRECATED" in attrs or "API_UNAVAILABLE(ios" in attrs or "NS_UNAVAILABLE" in attrs:
+        return None
+    if "API_UNAVAILABLE" in attrs and re.search(r"API_UNAVAILABLE\([^)]*\bios\b", attrs):
+        return None
+    m = IOS.search(attrs)
+    return m.group(1) if m else "8.0"
+
+
+def parse_identifiers(headers):
+    """HK_EXTERN <Typedef> const <Name> ...; // comment"""
+    out = []
+    decl = re.compile(r"^\s*HK_EXTERN\s+(HK\w+TypeIdentifier|NSString\s*\*)\s+const\s+(HK\w+)\s*(.*?);\s*(?://(.*))?$")
+    for path, text in headers:
+        for line in text.splitlines():
+            m = decl.match(line)
+            if not m:
+                continue
+            typedef, name, attrs, comment = m.group(1), m.group(2), m.group(3), (m.group(4) or "").strip()
+            if typedef.startswith("NSString"):
+                # Only type identifiers (HKWorkoutTypeIdentifier, HKDataTypeIdentifierHeartbeatSeries,
+                # ...), not metadata keys or predicate key paths.
+                if not re.search(r"TypeIdentifier", name):
+                    continue
+                typedef = None
+            ios = available(attrs)
+            if ios is None:
+                continue
+            out.append({"typedef": typedef, "name": name, "ios": ios, "comment": comment})
+    return out
+
+
+def parse_constructors(headers):
+    """Class methods: family constructors (one identifier argument) and factories (no argument)."""
+    families, factories = {}, []
+    iface = re.compile(r"^@interface\s+(\w+)")
+    with_id = re.compile(r"^\+\s*\((?:nullable\s+)?(HK\w+)\s*\*\)\s*(\w+ForIdentifier):\((HK\w+TypeIdentifier)\)\w+\s*(.*);")
+    no_arg = re.compile(r"^\+\s*\((?:nullable\s+)?(?:(HK\w+Type)\s*\*|instancetype)\)\s*(\w+)\s*(.*);")
+    for path, text in headers:
+        current, current_ios, pending_ios = None, "8.0", "8.0"
+        for line in strip_comments(text).splitlines():
+            line = line.strip()
+            m = iface.match(line)
+            if m:
+                # Methods without their own availability have the class's (declared just before).
+                current, current_ios = m.group(1), pending_ios
+                continue
+            if line.startswith("API_AVAILABLE"):
+                pending_ios = available(line) or "8.0"
+                continue
+            if line.startswith("@end"):
+                current = None
+                continue
+            if current is None or not line.startswith("+"):
+                continue
+            m = with_id.match(line)
+            if m:
+                ios = available(m.group(4))
+                typedef = m.group(3)
+                if ios is not None or typedef not in families:
+                    families[typedef] = {"cls": current, "sel": m.group(2) + ":"}
+                continue
+            m = no_arg.match(line)
+            if m and not m.group(3).startswith(":"):
+                returns, sel, attrs = m.group(1) or current, m.group(2), m.group(3)
+                if not returns.endswith("Type") or sel in ("new", "alloc", "defaultSource", "localDevice"):
+                    continue
+                ios = available(attrs) if IOS.search(attrs) or "API_" in attrs else current_ios
+                if ios is not None:
+                    factories.append({"cls": current, "sel": sel, "ios": ios})
+    return families, factories
+
+
+def lower_first(s):
+    if s.isupper() or (len(s) > 1 and s[1].isupper()):
+        return s  # acronyms and numerals: APositive, REM, IV
+    return s[:1].lower() + s[1:]
+
+
+def parse_enums(headers):
+    enums = {}
+    block = re.compile(r"typedef\s+NS_(?:CLOSED_)?ENUM\s*\(\s*\w+\s*,\s*(\w+)\s*\)\s*\{(.*?)\}", re.S)
+    for path, text in headers:
+        for m in block.finditer(strip_comments(text)):
+            name, body = m.group(1), m.group(2)
+            # Attribute macros contain commas: replace them first, remembering deprecations.
+            body = MACRO.sub(lambda a: " @DEPRECATED " if a.group(0).startswith("API_DEPRECATED") else " ", body)
+            values, cases, prev = {}, [], -1
+            for raw in body.split(","):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                cm = re.match(r"(\w+)(.*)$", raw, re.S)
+                if not cm:
+                    continue
+                case, rest = cm.group(1), cm.group(2)
+                deprecated = "@DEPRECATED" in rest
+                rest = rest.replace("@DEPRECATED", " ")
+                value = None
+                if "=" in rest:
+                    expr = rest.split("=", 1)[1].strip()
+                    if re.fullmatch(r"-?\d+", expr):
+                        value = int(expr)
+                    elif re.fullmatch(r"0x[0-9a-fA-F]+", expr):
+                        value = int(expr, 16)
+                    elif re.fullmatch(r"\d+\s*<<\s*\d+", expr):
+                        a, b = expr.split("<<")
+                        value = int(a) << int(b)
+                    elif expr in values:
+                        value = values[expr]
+                    else:
+                        continue
+                else:
+                    value = prev + 1
+                values[case] = value
+                prev = value
+                label = case[len(name):] if case.startswith(name) and len(case) > len(name) else case
+                cases.append((value, lower_first(label), deprecated))
+            # One name per value: the first current case, else the first deprecated one.
+            names = {}
+            for value, label, deprecated in sorted(cases, key=lambda c: c[2]):
+                names.setdefault(value, label)
+            if names:
+                enums[name] = names
+    return enums
+
+
+def swift_str(s):
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--headers", help="HealthKit.framework/Headers directory")
+    ap.add_argument("--sdk-name", help="SDK name recorded in the output (default: from the path)")
+    ap.add_argument("output")
+    args = ap.parse_args()
+
+    hdir = args.headers
+    if not hdir:
+        sdk = os.environ.get("SDKROOT")
+        if not sdk:
+            sys.exit("gen-health-types: pass --headers or set SDKROOT")
+        hdir = os.path.join(sdk, "System/Library/Frameworks/HealthKit.framework/Headers")
+    if not os.path.isdir(hdir):
+        sys.exit("gen-health-types: no HealthKit headers in " + hdir)
+    # Same name for device and simulator builds, so the committed file does not churn.
+    sdk_name = args.sdk_name
+    if not sdk_name and os.environ.get("SDK_VERSION"):
+        sdk_name = "iOS %s SDK" % os.environ["SDK_VERSION"]
+    if not sdk_name:
+        m = re.search(r"/[A-Za-z]+?(\d+(?:\.\d+)*)\.sdk/", hdir + "/")
+        sdk_name = "iOS %s SDK" % m.group(1) if m else "unknown SDK"
+
+    headers = []
+    for fn in sorted(os.listdir(hdir)):
+        if fn.endswith(".h"):
+            with open(os.path.join(hdir, fn), encoding="utf-8", errors="replace") as f:
+                headers.append((fn, f.read()))
+
+    idents = parse_identifiers(headers)
+    families, factories = parse_constructors(headers)
+    enums = parse_enums(headers)
+
+    typed = [i for i in idents if i["typedef"]]
+    missing = sorted({i["typedef"] for i in typed} - set(families))
+    if missing:
+        sys.exit("gen-health-types: no constructor found for " + ", ".join(missing))
+    if not typed or not factories:
+        sys.exit("gen-health-types: found no types; header format changed?")
+
+    L = []
+    w = L.append
+    w("// Generated by ios/Scripts/gen-health-types from the HealthKit headers of the %s." % sdk_name)
+    w("// Do not edit: every build regenerates it from the active SDK (project.yml).")
+    w("")
+    w("enum SDKHealthTypes {")
+    w("    static let sdk = %s" % swift_str(sdk_name))
+    w("")
+    w("    /// Constructor of each identifier family: +[class selector:identifier].")
+    w("    static let families: [String: SDKFamily] = [")
+    for t in sorted(families):
+        w("        %s: SDKFamily(className: %s, selector: %s)," % (swift_str(t), swift_str(families[t]["cls"]), swift_str(families[t]["sel"])))
+    w("    ]")
+    w("")
+    w("    /// Every type identifier constant, with Apple's documented unit (quantities) or value")
+    w("    /// enum (categories).")
+    w("    static let identified: [SDKIdentifiedType] = [")
+    for i in typed:
+        unit = agg = value_enum = None
+        c = i["comment"]
+        if i["typedef"] == "HKQuantityTypeIdentifier" and c:
+            unit, _, agg = (p.strip() for p in c.partition(","))
+        elif i["typedef"] == "HKCategoryTypeIdentifier" and c.startswith("HK"):
+            value_enum = c.split()[0]
+        w("        SDKIdentifiedType(family: %s, identifier: %s, ios: %s, unit: %s, aggregation: %s, valueEnum: %s)," % (
+            swift_str(i["typedef"]), swift_str(i["name"]), swift_str(i["ios"]),
+            swift_str(unit) if unit is not None else "nil",
+            swift_str(agg) if agg else "nil",
+            swift_str(value_enum) if value_enum else "nil"))
+    w("    ]")
+    w("")
+    w("    /// Types without an identifier family, built by an argument-less class method.")
+    w("    static let factories: [SDKFactoryType] = [")
+    for f in factories:
+        w("        SDKFactoryType(className: %s, selector: %s, ios: %s)," % (swift_str(f["cls"]), swift_str(f["sel"]), swift_str(f["ios"])))
+    w("    ]")
+    w("")
+    w("    /// Plain string type identifiers (HKWorkoutTypeIdentifier, ...), to check that every one")
+    w("    /// is covered by a factory.")
+    w("    static let namedIdentifiers: [String] = [")
+    for i in idents:
+        if not i["typedef"]:
+            w("        %s," % swift_str(i["name"]))
+    w("    ]")
+    w("")
+    w("    /// Case names of every HealthKit NS_ENUM, by raw value.")
+    w("    static let enums: [String: [Int: String]] = [")
+    for name in sorted(enums):
+        cases = ", ".join("%d: %s" % (v, swift_str(n)) for v, n in sorted(enums[name].items()))
+        w("        %s: [%s]," % (swift_str(name), cases))
+    w("    ]")
+    w("}")
+    content = "\n".join(L) + "\n"
+
+    try:
+        with open(args.output, encoding="utf-8") as f:
+            if f.read() == content:
+                return
+    except FileNotFoundError:
+        pass
+    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+    with open(args.output + ".tmp", "w", encoding="utf-8") as f:
+        f.write(content)
+    os.replace(args.output + ".tmp", args.output)
+    print("gen-health-types: %d identified types, %d factory types, %d enums from %s" % (
+        len(typed), len(factories), len(enums), sdk_name))
+
+
+if __name__ == "__main__":
+    main()

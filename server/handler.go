@@ -19,8 +19,11 @@ type Server struct {
 	MaxBodyBytes int64
 	Devices      *Devices
 	Codes        *Codes
-	PublicURL    string // how phones reach the server, for setup links; "" derives it from requests
+	PublicURL    string // how phones reach the server, for setup links; "" offers what it finds (address.go)
 	SetupFrom    string // who may use /setup and pairing: "private" (default), "any", "off"
+	Listen       string // the listen address, to tell which local addresses reach the server
+
+	netInfo *netInfo // nil: the real interfaces and tailscale CLI
 
 	sessions sessions
 

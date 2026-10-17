@@ -105,41 +105,24 @@ func fromLocalProxy(r *http.Request) bool {
 	return err == nil && a.Unmap().IsLoopback()
 }
 
-// publicURL is how phones reach this server: -public-url, else what the request says
-// (scheme and host, from a local proxy's X-Forwarded-* headers if any).
-func (s *Server) publicURL(r *http.Request) string {
-	if s.PublicURL != "" {
-		return strings.TrimRight(s.PublicURL, "/")
-	}
-	scheme, host := "http", r.Host
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if fromLocalProxy(r) {
-		if p := r.Header.Get("X-Forwarded-Proto"); p == "https" || p == "http" {
-			scheme = p
-		}
-		if h := r.Header.Get("X-Forwarded-Host"); h != "" {
-			host = h
-		}
-	}
-	return scheme + "://" + host
-}
-
 type setupView struct {
-	Version  string
-	Nonce    string
-	Mode     string // "login", "pair", "used"
-	Message  string
-	Admin    bool
-	Code     string
-	Link     template.URL // a custom scheme, which html/template would otherwise blank
-	QR       template.HTML
-	Expires  string
-	Server   string
-	Paired   *Device
-	Devices  []Device
-	LoginErr bool
+	Version string
+	Nonce   string
+	Mode    string // "login", "pair", "used"
+	Message string
+	Admin   bool
+	Code    string
+	Link    template.URL // a custom scheme, which html/template would otherwise blank
+	QR      template.HTML
+	Expires string
+	Server  string
+	Paired  *Device
+	// Addresses to choose from when -public-url is not set; Chosen is the one in the code.
+	Addresses  []Address
+	Chosen     string
+	Configured bool // -public-url is set
+	Devices    []Device
+	LoginErr   bool
 }
 
 func (s *Server) render(w http.ResponseWriter, code int, v setupView) {
@@ -174,8 +157,7 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 		s.setupForbidden(w)
 		return
 	}
-	public := s.publicURL(r)
-	v := setupView{Server: strings.TrimPrefix(strings.TrimPrefix(public, "https://"), "http://"), Admin: s.admin(r)}
+	v := setupView{Admin: s.admin(r), Configured: s.PublicURL != ""}
 	code := r.URL.Query().Get("code")
 	if code == "" && !v.Admin {
 		v.Mode = "login"
@@ -202,9 +184,28 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 			exp = e
 		}
 	}
+	// The address in the link: -public-url, or the one picked from what was found.
+	found := s.addresses(r)
+	if len(found) == 0 {
+		v.Mode = "noaddress"
+		v.Server = requestURL(r)
+		s.render(w, http.StatusOK, v)
+		return
+	}
+	public := found[0].URL
+	for _, a := range found {
+		if a.URL == r.URL.Query().Get("server") {
+			public = a.URL
+		}
+	}
 	if code == "" {
 		c := s.mintCode(public)
 		code, exp = c.Code, c.ExpiresAt
+	}
+	v.Server = strings.TrimPrefix(strings.TrimPrefix(public, "https://"), "http://")
+	v.Chosen = public
+	if !v.Configured && len(found) > 1 {
+		v.Addresses = found
 	}
 	q, err := EncodeQR([]byte(PairLink(public, code)))
 	if err != nil {
@@ -233,7 +234,7 @@ func (s *Server) setupLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: s.sessions.add(), Path: "/setup", MaxAge: 3600,
-		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: strings.HasPrefix(s.publicURL(r), "https://"),
+		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: strings.HasPrefix(requestURL(r), "https://"),
 	})
 	http.Redirect(w, r, "/setup", http.StatusSeeOther)
 }
@@ -333,7 +334,7 @@ input[type=password] { width: 100%; font: inherit; padding: 13px 14px; border-ra
   background: var(--bg); color: var(--text); margin-bottom: 14px; }
 input[type=password]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .error { color: var(--accent); font-size: 15px; margin: 0 0 14px; }
-code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); padding: 2px 6px; border-radius: 6px; }
+code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); padding: 2px 6px; border-radius: 6px; white-space: nowrap; }
 .list { text-align: left; padding: 22px 0 8px; }
 .list h3 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 0 24px 8px; }
 .row { display: flex; align-items: center; gap: 12px; padding: 12px 24px; border-top: 1px solid var(--line); }
@@ -343,6 +344,13 @@ code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
 .row .meta { color: var(--muted); font-size: 13px; }
 .link { background: none; border: 0; padding: 6px 0; font: inherit; font-size: 15px; color: var(--accent); cursor: pointer; }
 .empty { color: var(--muted); font-size: 15px; padding: 4px 24px 14px; margin: 0; }
+.addresses { margin: 20px -8px 0; text-align: left; }
+.addresses h3 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 0 8px 8px; }
+.chip { display: flex; justify-content: space-between; gap: 10px; padding: 10px 12px; margin: 0 0 6px; border-radius: 12px;
+  border: 1px solid var(--line); color: var(--text); text-decoration: none; font-size: 15px; word-break: break-all; }
+.chip span { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.chip.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.addresses .hint { margin: 8px 8px 0; }
 footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
 [hidden] { display: none !important; }
 </style>
@@ -366,6 +374,12 @@ footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8
   </form>
   <p class="hint">Or run <code>healthkit-relay pair</code> on the server: it shows a code to scan right in the terminal.</p>
 </section>
+{{else if eq .Mode "noaddress"}}
+<section class="card">
+  <h2>No address for your iPhone</h2>
+  <p class="sub">This page was opened at {{.Server}}, which an iPhone cannot reach, and the server found no other address it answers on.</p>
+  <p class="hint">Start the server with <code>-public-url</code> set to the address your iPhone uses (for example <code>https://health.example.com</code> behind a reverse proxy), or with <code>-listen 0.0.0.0:8080</code> so this page can offer the machine's network addresses.</p>
+</section>
 {{else if eq .Mode "used"}}
 <section class="card">
   <svg class="check" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30" fill="#34c759"/><path d="M19 33l9 9 17-19" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -383,6 +397,13 @@ footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8
     <p class="sub">Connects Health Relay on this iPhone to {{.Server}}.</p>
     <a class="button" href="{{.Link}}">Open in Health Relay</a>
   </div>
+  {{if .Addresses}}
+  <div class="addresses">
+    <h3>Address in the code</h3>
+    {{range .Addresses}}<a class="chip{{if eq .URL $.Chosen}} on{{end}}" href="/setup?code={{$.Code}}&amp;server={{.URL}}">{{.URL}}<span>{{.Source}}</span></a>{{end}}
+    <p class="hint">Found on this server; pick the one your iPhone reaches. To fix it for good, start the server with <code>-public-url</code>.</p>
+  </div>
+  {{end}}
   <p class="status" id="status"><span class="dot"></span><span id="status-text"><span class="desktop">Waiting for your iPhone · </span>Works once, until {{.Expires}}</span></p>
 </section>
 <section class="card" id="done" hidden>

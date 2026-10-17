@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -248,7 +249,7 @@ func TestSetupOnlyOnPrivateNetworks(t *testing.T) {
 		{"[fd7a:115c:a1e0::1]:1", "", true},
 		{"203.0.113.9:1", "", false},
 		{"127.0.0.1:1", "100.88.12.34", true}, // Tailscale serve
-		{"127.0.0.1:1", "203.0.113.9", false},  // a public reverse proxy (or Funnel)
+		{"127.0.0.1:1", "203.0.113.9", false}, // a public reverse proxy (or Funnel)
 		{"127.0.0.1:1", "100.64.0.1, 203.0.113.9", false},
 		{"203.0.113.9:1", "10.0.0.1", false}, // forwarded headers only count from loopback
 	} {
@@ -275,22 +276,115 @@ func TestSetupOnlyOnPrivateNetworks(t *testing.T) {
 	}
 }
 
-func TestPublicURL(t *testing.T) {
+// The real shape of `tailscale serve status --json` (names changed).
+const serveStatus = `{"TCP":{"8180":{"HTTPS":true},"9428":{"TCPForward":"127.0.0.1:9428"}},
+ "Web":{"box.tailnet.ts.net:8180":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8180"}}},
+        "box.tailnet.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3000"}}},
+        "box.tailnet.ts.net:8443":{"Handlers":{"/":{"Proxy":"127.0.0.1:8180"}}},
+        "box.tailnet.ts.net:9000":{"Handlers":{"/":{"Proxy":"http://10.0.0.9:8180"}}}}}`
+
+func fakeNet(s *Server, listen string, addrs []string, serve string) {
+	var ips []netip.Addr
+	for _, a := range addrs {
+		ips = append(ips, netip.MustParseAddr(a))
+	}
+	s.Listen = listen
+	s.netInfo = &netInfo{
+		interfaces: func() []netip.Addr { return ips },
+		tailscale:  func() tailscaleInfo { return tailscaleInfo{Serve: parseServeStatus([]byte(serve))} },
+	}
+}
+
+func urls(as []Address) string {
+	var out []string
+	for _, a := range as {
+		out = append(out, a.URL)
+	}
+	return strings.Join(out, " ")
+}
+
+func TestAddressesNeverLoopback(t *testing.T) {
 	s := testServer(t)
-	r := httptest.NewRequest("GET", "http://relay.local:8180/setup", nil)
-	r.RemoteAddr = "127.0.0.1:5"
+	machine := []string{"127.0.0.1", "::1", "169.254.10.1", "fe80::1", "203.0.113.7", "192.168.1.20", "100.88.12.34", "fd7a:115c:a1e0::1"}
+	req := func(host, remote string) *http.Request {
+		r := httptest.NewRequest("GET", "http://"+host+"/setup", nil)
+		r.RemoteAddr = remote
+		return r
+	}
+
+	// Listening everywhere, page opened on localhost: the LAN addresses (private first),
+	// then Tailscale; never loopback, link-local or IPv6.
+	fakeNet(s, "0.0.0.0:8080", machine, "")
+	if got := urls(s.addresses(req("127.0.0.1:8080", "127.0.0.1:5"))); got != "http://192.168.1.20:8080 http://203.0.113.7:8080 http://100.88.12.34:8080" {
+		t.Errorf("listening everywhere, opened on localhost: %s", got)
+	}
+	// Opened by name from the LAN: that name first.
+	if got := urls(s.addresses(req("relay.local:8080", "192.168.1.30:5"))); !strings.HasPrefix(got, "http://relay.local:8080 http://192.168.1.20:8080") {
+		t.Errorf("opened by name: %s", got)
+	}
+	// Loopback only: what a local proxy says, and Tailscale serve names proxying to the port.
+	fakeNet(s, "127.0.0.1:8180", machine, serveStatus)
+	r := req("127.0.0.1:8180", "127.0.0.1:5")
+	if got := urls(s.addresses(r)); got != "https://box.tailnet.ts.net:8180 https://box.tailnet.ts.net:8443" {
+		t.Errorf("loopback with Tailscale serve: %s", got)
+	}
 	r.Header.Set("X-Forwarded-Proto", "https")
 	r.Header.Set("X-Forwarded-Host", "health.example.com")
-	if got := s.publicURL(r); got != "https://health.example.com" {
-		t.Errorf("behind a local proxy: %s", got)
+	if got := s.addresses(r); len(got) == 0 || got[0].URL != "https://health.example.com" || got[0].Source != "this page's address" {
+		t.Errorf("behind a local proxy: %+v", got)
 	}
-	r.RemoteAddr = "192.168.1.2:5"
-	if got := s.publicURL(r); got != "http://relay.local:8180" {
-		t.Errorf("direct: %s", got)
+	// Loopback only, nothing else: no address at all.
+	fakeNet(s, "127.0.0.1:8080", machine, "")
+	for _, host := range []string{"127.0.0.1:8080", "localhost:8080", "[::1]:8080", "169.254.1.1:8080"} {
+		if got := s.addresses(req(host, "127.0.0.1:5")); len(got) != 0 {
+			t.Errorf("opened at %s: %+v", host, got)
+		}
 	}
+	// A specific listen address: only that one.
+	fakeNet(s, "192.168.1.20:8080", machine, "")
+	if got := urls(s.addresses(req("192.168.1.20:8080", "192.168.1.30:5"))); got != "http://192.168.1.20:8080" {
+		t.Errorf("listening on one address: %s", got)
+	}
+	// -public-url wins, alone.
 	s.PublicURL = "https://set.example.com/"
-	if got := s.publicURL(r); got != "https://set.example.com" {
-		t.Errorf("configured: %s", got)
+	if got := s.addresses(r); len(got) != 1 || got[0].URL != "https://set.example.com" {
+		t.Errorf("configured: %+v", got)
+	}
+}
+
+func TestSetupPageAddressChoice(t *testing.T) {
+	s := testServer(t)
+	fakeNet(s, "0.0.0.0:8080", []string{"192.168.1.20", "100.88.12.34"}, "")
+	c := s.mintCode("")
+	if c.Link != "" || c.SetupURL != "" {
+		t.Fatalf("no address, yet a link: %+v", c)
+	}
+	page := func(query string) string {
+		return setupRequest(t, s, "GET", "http://127.0.0.1:8080/setup?code="+c.Code+query, "127.0.0.1:5", nil, nil).Body.String()
+	}
+	body := page("")
+	if !strings.Contains(body, "server=http%3a%2f%2f192.168.1.20%3a8080") || !strings.Contains(body, "Address in the code") ||
+		strings.Contains(body, "127.0.0.1") {
+		t.Fatalf("default choice:\n%s", body)
+	}
+	if body := page("&server=http://100.88.12.34:8080"); !strings.Contains(strings.ToLower(body),
+		strings.ToLower(`href="healthrelay://pair?code=`+c.Code+`&amp;server=http%3a%2f%2f100.88.12.34%3a8080"`)) {
+		t.Errorf("picked address not in the link:\n%s", body)
+	}
+	// Only found addresses can be put in a link.
+	if body := page("&server=https://evil.example.com"); strings.Contains(body, "evil") {
+		t.Errorf("arbitrary server accepted")
+	}
+	// Nothing reachable: no code at all, and what to do.
+	fakeNet(s, "127.0.0.1:8080", []string{"192.168.1.20"}, "")
+	body = page("")
+	if strings.Contains(body, "healthrelay://") || !strings.Contains(body, "No address for your iPhone") {
+		t.Errorf("loopback only:\n%s", body)
+	}
+	// With -public-url, no choice is offered.
+	s.PublicURL = "https://health.example.com"
+	if body := page(""); strings.Contains(body, "Address in the code") || !strings.Contains(body, "health.example.com") {
+		t.Errorf("configured:\n%s", body)
 	}
 }
 
@@ -303,12 +397,14 @@ func TestPairCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "https://health.example.com/setup?code=") || !strings.Contains(out.String(), "█") ||
-		strings.Contains(out.String(), "Warning") {
+		strings.Contains(out.String(), "Others") {
 		t.Fatalf("pair output:\n%s", out.String())
 	}
 	out.Reset()
-	if err := runCommand("pair", []string{"-server", ts.URL, "-token-file", tok}, &out); err != nil || !strings.Contains(out.String(), "Warning") {
-		t.Fatalf("pair without -public-url should warn: %v\n%s", err, out.String())
+	// The test server listens on loopback only: no address to offer, so no code.
+	if err := runCommand("pair", []string{"-server", ts.URL, "-token-file", tok}, &out); err == nil || !strings.Contains(err.Error(), "-public-url") ||
+		strings.Contains(out.String(), "127.0.0.1") {
+		t.Fatalf("pair without any reachable address: %v\n%s", err, out.String())
 	}
 	out.Reset()
 	if err := runCommand("devices", []string{"-server", ts.URL, "-token-file", tok}, &out); err != nil || !strings.Contains(out.String(), "No paired devices") {
@@ -329,7 +425,8 @@ func TestSetupSessionCookieWorksThroughBrowser(t *testing.T) {
 	}
 	b, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != 200 || !strings.Contains(string(b), "healthrelay://pair") {
+	// Signed in: the page for the admin (here without a link: the test server is on loopback).
+	if resp.StatusCode != 200 || strings.Contains(string(b), `name="token"`) || !strings.Contains(string(b), "No address for your iPhone") {
 		t.Fatalf("after sign-in redirect: %d", resp.StatusCode)
 	}
 }

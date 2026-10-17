@@ -430,14 +430,20 @@ type CodeResponse struct {
 	Code      string    `json:"code"`
 	ExpiresAt time.Time `json:"expires_at"`
 	// Link sets up the app in one tap (or as a QR code); SetupURL is the page showing both.
-	Link     string `json:"link"`
-	SetupURL string `json:"setup_url"`
+	// Both are empty when no address a phone could reach is known (see address.go).
+	Link     string `json:"link,omitempty"`
+	SetupURL string `json:"setup_url,omitempty"`
+	// Addresses found when -public-url is not set; Link uses the first.
+	Addresses []Address `json:"addresses,omitempty"`
 }
 
 func (s *Server) mintCode(publicURL string) CodeResponse {
 	code, exp := s.Codes.Mint()
-	return CodeResponse{Code: code, ExpiresAt: exp.UTC().Truncate(time.Second), Link: PairLink(publicURL, code),
-		SetupURL: publicURL + "/setup?code=" + code}
+	c := CodeResponse{Code: code, ExpiresAt: exp.UTC().Truncate(time.Second)}
+	if publicURL != "" {
+		c.Link, c.SetupURL = PairLink(publicURL, code), publicURL+"/setup?code="+code
+	}
+	return c
 }
 
 func (s *Server) pairingCodes(w http.ResponseWriter, r *http.Request) {
@@ -449,11 +455,19 @@ func (s *Server) pairingCodes(w http.ResponseWriter, r *http.Request) {
 		PublicURL string `json:"public_url"`
 	}
 	json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req) // the body is optional
-	public := s.publicURL(r)
-	if s.PublicURL == "" && req.PublicURL != "" {
+	var found []Address
+	public := strings.TrimRight(s.PublicURL, "/")
+	if public == "" && req.PublicURL != "" {
 		public = strings.TrimRight(req.PublicURL, "/")
 	}
-	writeJSON(w, http.StatusOK, s.mintCode(public))
+	if public == "" {
+		if found = s.addresses(r); len(found) > 0 {
+			public = found[0].URL
+		}
+	}
+	c := s.mintCode(public)
+	c.Addresses = found
+	writeJSON(w, http.StatusOK, c)
 }
 
 func (s *Server) devicesList(w http.ResponseWriter, r *http.Request) {

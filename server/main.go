@@ -42,7 +42,7 @@ func (c *config) register(fs *flag.FlagSet) {
 	fs.StringVar(&c.listen, "listen", "127.0.0.1:8080", "address to listen on")
 	fs.StringVar(&c.archiveDir, "archive-dir", "", "directory of the append-only archive, and of devices.json (required)")
 	fs.StringVar(&c.tokenFile, "token-file", "", "file holding the server token: admin credential, also accepted for uploads (required)")
-	fs.StringVar(&c.publicURL, "public-url", "", "URL phones use to reach this server, put in setup links, e.g. https://health.example.com (default: taken from the request)")
+	fs.StringVar(&c.publicURL, "public-url", "", "URL phones use to reach this server, put in setup links, e.g. https://health.example.com (default: the setup page offers the addresses it finds)")
 	fs.StringVar(&c.setupFrom, "setup-from", "private", "who may open /setup and pair: private (loopback, LAN, Tailscale), any, or off")
 }
 
@@ -99,7 +99,7 @@ func run(args []string) error {
 		return fmt.Errorf("open devices: %w", err)
 	}
 	srv := &Server{Archive: archive, Token: token, MaxBodyBytes: *maxBody, Devices: devices, Codes: NewCodes(),
-		PublicURL: strings.TrimRight(cfg.publicURL, "/"), SetupFrom: cfg.setupFrom}
+		PublicURL: strings.TrimRight(cfg.publicURL, "/"), SetupFrom: cfg.setupFrom, Listen: *listen}
 	if *forwardURL != "" {
 		f := &Forwarder{URL: *forwardURL, Measurement: *measurement, Client: &http.Client{}}
 		if *forwardTokenFile != "" {

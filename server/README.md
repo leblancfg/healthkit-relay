@@ -20,7 +20,7 @@ with dashes as underscores (`-archive-dir` is `HKR_ARCHIVE_DIR`). Flags win.
 | `-listen` | `127.0.0.1:8080` | address to listen on |
 | `-archive-dir` | (required) | archive directory, created if missing; also holds `devices.json` |
 | `-token-file` | (required) | file holding the server token (at least 16 characters; surrounding whitespace ignored) |
-| `-public-url` | (from the request) | the URL phones use to reach the server, put in setup links, e.g. `https://health.example.com` |
+| `-public-url` | (offered, see below) | the URL phones use to reach the server, put in setup links, e.g. `https://health.example.com` |
 | `-setup-from` | `private` | who may open `/setup` and pair: `private` (loopback, LAN, Tailscale), `any`, or `off` |
 | `-forward-url` | | line-protocol write URL, e.g. `http://127.0.0.1:8428/influx/write` (VictoriaMetrics) or `http://influx:8086/api/v2/write?org=o&bucket=b&precision=ns` (InfluxDB 2) |
 | `-forward-token-file` | | bearer token for `-forward-url` |
@@ -51,6 +51,20 @@ its own by scanning a one-time setup code.
   healthkit-relay devices -token-file ./token
   healthkit-relay revoke -token-file ./token 3f9a1c2e
   ```
+
+Which address goes in the code: `-public-url` if set (do set it behind a reverse proxy).
+Otherwise the server lists the addresses it can find, best first, and the setup page lets
+you pick one (the terminal shows the others):
+
+1. the address the page was opened with, or a local proxy's `X-Forwarded-Host`;
+2. Tailscale serve names that proxy to this server (`https://<name>.ts.net:<port>`, read with
+   the `tailscale` command if installed);
+3. this machine's LAN IPv4 addresses, then its Tailscale IPv4 addresses, if the server
+   listens on them (`-listen 0.0.0.0:8080`).
+
+Loopback (`127.0.0.1`, `localhost`) and link-local addresses are never offered: a phone
+cannot reach them. When nothing else is found the page says so, with what to set, and shows
+no code.
 
 How it works:
 

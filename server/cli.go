@@ -75,6 +75,10 @@ func runCommand(name string, args []string, out io.Writer) error {
 		if err := call(http.MethodPost, "/v1/pairing-codes", map[string]string{"public_url": cfg.publicURL}, &c); err != nil {
 			return err
 		}
+		if c.Link == "" {
+			return errors.New("the server knows no address a phone could reach (it listens on loopback only and " +
+				"found no Tailscale serve name): set -public-url (HKR_PUBLIC_URL) to the address your iPhone uses")
+		}
 		q, err := EncodeQR([]byte(c.Link))
 		if err != nil {
 			return err
@@ -83,9 +87,15 @@ func runCommand(name string, args []string, out io.Writer) error {
 			c.ExpiresAt.Local().Format("15:04"))
 		fmt.Fprint(out, q.Terminal())
 		fmt.Fprintf(out, "\nOr open this page on the iPhone or a computer:\n  %s\n", c.SetupURL)
-		if u, err := url.Parse(c.SetupURL); err == nil && isLoopbackHost(u.Hostname()) {
-			fmt.Fprintf(out, "\nWarning: this points to %s, which a phone cannot reach. Set -public-url (HKR_PUBLIC_URL) "+
-				"to the address phones use, on the server or for this command.\n", u.Host)
+		if len(c.Addresses) > 0 {
+			fmt.Fprintf(out, "\nThe code points to %s (%s), the first address found. Others:\n", c.Addresses[0].URL, c.Addresses[0].Source)
+			for _, a := range c.Addresses[1:] {
+				fmt.Fprintf(out, "  %s (%s)\n", a.URL, a.Source)
+			}
+			if len(c.Addresses) == 1 {
+				fmt.Fprintln(out, "  none")
+			}
+			fmt.Fprintln(out, "Set -public-url (HKR_PUBLIC_URL) to choose.")
 		}
 	case "devices":
 		var list struct{ Devices []Device }
@@ -124,12 +134,4 @@ func loopback(listen string) string {
 		host = "127.0.0.1"
 	}
 	return net.JoinHostPort(host, port)
-}
-
-func isLoopbackHost(h string) bool {
-	if h == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(h)
-	return ip != nil && ip.IsLoopback()
 }

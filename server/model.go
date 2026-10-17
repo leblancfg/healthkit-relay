@@ -66,15 +66,36 @@ type Sample struct {
 type RecordIn struct {
 	Kind string `json:"kind"`
 	Key  string `json:"key"`
-	// Activity summaries: the day's start and its values, forwarded as metrics.
-	Start  string `json:"start,omitempty"`
-	Values map[string]struct {
-		Value *float64 `json:"value"`
-		Unit  string   `json:"unit"`
-	} `json:"values,omitempty"`
+	// Activity summaries: the day's start and its values, forwarded as metrics. Other kinds
+	// put anything under "values" (characteristics: a date string, enum objects), so values
+	// are read as {value, unit} only where they have that shape, never rejected; see quantities.
+	Start  string          `json:"start,omitempty"`
+	Values json.RawMessage `json:"values,omitempty"`
 
 	digest string
 	start  time.Time
+}
+
+// Quantity is a {"value": 512, "unit": "kcal"} record value.
+type Quantity struct {
+	Value *float64 `json:"value"`
+	Unit  string   `json:"unit"`
+}
+
+// quantities returns the values shaped like a Quantity with a number, by name.
+func (r *RecordIn) quantities() map[string]Quantity {
+	var values map[string]json.RawMessage
+	if json.Unmarshal(r.Values, &values) != nil {
+		return nil
+	}
+	out := make(map[string]Quantity, len(values))
+	for name, raw := range values {
+		var q Quantity
+		if json.Unmarshal(raw, &q) == nil && q.Value != nil {
+			out[name] = q
+		}
+	}
+	return out
 }
 
 var kindRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)

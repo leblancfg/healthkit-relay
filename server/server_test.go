@@ -328,3 +328,28 @@ func TestV1ResponseStillCompatible(t *testing.T) {
 		t.Fatalf("v1 post: %d %+v", resp.StatusCode, r)
 	}
 }
+
+// Characteristics carry a date string and enum objects under "values": a v2 app sends one
+// with every full sync, and rejecting it stopped medications and activity summaries too.
+const characteristics = `{"kind":"characteristics","key":"characteristics","values":{"date_of_birth":"1990-01-02",
+ "biological_sex":{"raw":2,"name":"male"},"blood_type":{"raw":0,"name":"notSet"}},"not_read":["HKCharacteristicTypeIdentifierX"]}`
+
+func TestV2RecordValuesOfAnyShape(t *testing.T) {
+	dir := t.TempDir()
+	ts, fm := newTestServer(t, dir)
+	odd := strings.Replace(summary, `"apple_stand_hours":{"value":10,"unit":"count"}`,
+		`"apple_stand_hours":{"value":10,"unit":"count"},"paused":true,"move_mode":{"raw":1,"name":"activeEnergy"},"goal":{"value":null,"unit":"min"},"note":"text"`, 1)
+	other := `{"kind":"future_kind","key":"k","values":[1,"two"]}`
+	resp, r := post(t, ts.URL, testToken, `{"version":2,"samples":[],"records":[`+characteristics+`,`+odd+`,`+other+`]}`)
+	if resp.StatusCode != 200 || r.Stored != 3 || r.Records != 3 {
+		t.Fatalf("post: %d %+v", resp.StatusCode, r)
+	}
+	// Only number-valued {value, unit} entries become metrics.
+	want := []string{
+		"healthkit,unit=kcal activity_summary_active_energy_burned=512 1767330000000000000",
+		"healthkit,unit=count activity_summary_apple_stand_hours=10 1767330000000000000",
+	}
+	if strings.Join(fm.lines, "\n") != strings.Join(want, "\n") {
+		t.Errorf("forwarded:\n%s\nwant:\n%s", strings.Join(fm.lines, "\n"), strings.Join(want, "\n"))
+	}
+}

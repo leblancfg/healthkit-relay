@@ -74,16 +74,14 @@ func (f *Forwarder) RecordLines(recs []*RecordIn) []byte {
 		if r.Kind != "activity_summary" || r.start.IsZero() {
 			continue
 		}
-		names := make([]string, 0, len(r.Values))
-		for name := range r.Values {
+		values := r.quantities()
+		names := make([]string, 0, len(values))
+		for name := range values {
 			names = append(names, name)
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			v := r.Values[name]
-			if v.Value == nil {
-				continue
-			}
+			v := values[name]
 			f.line(&b, map[string]string{"unit": v.Unit}, "activity_summary_"+name, *v.Value, r.start.UnixNano())
 		}
 	}

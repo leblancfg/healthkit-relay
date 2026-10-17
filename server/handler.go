@@ -72,8 +72,7 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 			httpError(w, http.StatusRequestEntityTooLarge, "body too large")
 			return
 		}
-		s.count("bad_request")
-		httpError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		s.badRequest(w, "invalid JSON: "+err.Error())
 		return
 	}
 
@@ -85,8 +84,7 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 	for i, raw := range b.Samples {
 		smp, err := parseSample(raw)
 		if err != nil {
-			s.count("bad_request")
-			httpError(w, http.StatusBadRequest, fmt.Sprintf("samples[%d]: %v", i, err))
+			s.badRequest(w, fmt.Sprintf("samples[%d]: %v", i, err))
 			return
 		}
 		samples = append(samples, smp)
@@ -100,8 +98,7 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 	for i, raw := range b.Records {
 		r, err := parseRecord(raw)
 		if err != nil {
-			s.count("bad_request")
-			httpError(w, http.StatusBadRequest, fmt.Sprintf("records[%d]: %v", i, err))
+			s.badRequest(w, fmt.Sprintf("records[%d]: %v", i, err))
 			return
 		}
 		records = append(records, r)
@@ -110,8 +107,7 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 	for i, raw := range b.Deletions {
 		d, err := parseDeletion(raw)
 		if err != nil {
-			s.count("bad_request")
-			httpError(w, http.StatusBadRequest, fmt.Sprintf("deletions[%d]: %v", i, err))
+			s.badRequest(w, fmt.Sprintf("deletions[%d]: %v", i, err))
 			return
 		}
 		recs = append(recs, Record{Op: "delete", UUID: d.UUID, Type: d.Type, Data: raw})
@@ -189,6 +185,14 @@ func httpError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// badRequest rejects the whole batch. The reason is logged too: the client may not show it,
+// and it names fields and keys, not health values.
+func (s *Server) badRequest(w http.ResponseWriter, msg string) {
+	s.count("bad_request")
+	log.Printf("rejected batch: %s", msg)
+	httpError(w, http.StatusBadRequest, msg)
 }
 
 func (s *Server) count(name string) { s.add("requests_"+name, 1) }

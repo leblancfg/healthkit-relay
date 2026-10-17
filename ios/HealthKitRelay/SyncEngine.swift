@@ -7,6 +7,7 @@ enum SyncError: LocalizedError {
     case disallowed(String)
     case notAuthorized
     case noAnchor
+    case noAccess
 
     var errorDescription: String? {
         switch self {
@@ -14,6 +15,7 @@ enum SyncError: LocalizedError {
         case let .disallowed(reason): "HealthKit refused the query: \(reason)"
         case .notAuthorized: "Not authorized"
         case .noAnchor: "HealthKit returned no anchor"
+        case .noAccess: "No Health data is readable yet: tap Grant access and allow the data types"
         }
     }
 }
@@ -182,6 +184,9 @@ actor SyncEngine {
 
     func requestAuthorization() async throws {
         let p = await authPlan()
+        Log.info("authorization: requesting \(p.read.count) types in one sheet, \(p.perObject.count) per-object, \(p.excluded.count) excluded")
+        let before = await requestStatus(p.read)
+        Log.info("authorization: request status before = \(String(describing: before?.rawValue))")
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             let once = ResumeOnceThrowing(cont)
             let raised = HKRTry {
@@ -191,6 +196,8 @@ actor SyncEngine {
             }
             if let raised { once.fail(SyncError.disallowed(raised)) }
         }
+        UserDefaults.standard.set(p.read.map(\.identifier), forKey: Self.askedReadKey)
+        Log.info("authorization: sheet done, status after = \(String(describing: await requestStatus(p.read)?.rawValue))")
         if #available(iOS 16.0, *) {
             var asked = Set(UserDefaults.standard.stringArray(forKey: "perObjectRequested") ?? [])
             for type in p.perObject where !asked.contains(type.identifier) {
@@ -237,12 +244,19 @@ actor SyncEngine {
 
     /// Whether the authorization sheet still needs to be shown: true after an update brings
     /// new types. HealthKit never reveals which read permissions were granted.
+    ///
+    /// Tracked by what this app already asked for, not by HealthKit's request status: some types
+    /// can report "should request" even right after the sheet was shown, which would leave the
+    /// app stuck asking forever.
     func needsAuthorization() async -> Bool {
         let p = await authPlan()
-        if await requestStatus(p.read) != .unnecessary { return true }
+        let askedRead = Set(UserDefaults.standard.stringArray(forKey: Self.askedReadKey) ?? [])
+        if !Set(p.read.map(\.identifier)).isSubset(of: askedRead) { return true }
         let asked = Set(UserDefaults.standard.stringArray(forKey: "perObjectRequested") ?? [])
         return p.perObject.contains { !asked.contains($0.identifier) }
     }
+
+    static let askedReadKey = "readRequested"
 
     /// Types the user has been asked about. Only those sync: an anchored query over a type
     /// never requested returns nothing, and its anchor must not advance past real history.
@@ -353,6 +367,10 @@ actor SyncEngine {
         }
         let req = await requestedTypes()
         let types = HealthTypes.all.filter { $0.sampleType != nil && req.contains($0.key) }
+        Log.info("sync: \(types.count) readable sample types")
+        if types.isEmpty && firstError == nil {
+            firstError = SyncError.noAccess
+        }
         for (i, synced) in types.enumerated() where !Self.isFatal(firstError) {
             await show("\(i + 1)/\(types.count) \(Self.shortName(synced.key))")
             do {
@@ -377,6 +395,7 @@ actor SyncEngine {
             status.running = false
             status.detail = ""
             if let failure {
+                Log.error("sync: \(failure)")
                 status.lastError = failure.localizedDescription
             } else {
                 status.lastSuccess = .now

@@ -8,6 +8,8 @@ struct ContentView: View {
     @State private var message: String?
     @State private var confirmReset = false
     @State private var coverage: Coverage?
+    @State private var authorizing = false
+    @State private var alert: String?
     @State private var healthRecordsAvailable = false
     @State private var healthRecordsOptedIn = false
 
@@ -35,7 +37,18 @@ struct ContentView: View {
                     if !SyncEngine.isAvailable {
                         Text("Health data is not available on this device.")
                     } else if needsAuthorization {
-                        Button("Grant access") { authorize() }
+                        Button {
+                            authorize()
+                        } label: {
+                            HStack {
+                                Text("Grant access")
+                                if authorizing {
+                                    Spacer()
+                                    ProgressView()
+                                }
+                            }
+                        }
+                        .disabled(authorizing)
                     } else {
                         Label("Access requested", systemImage: "checkmark.circle")
                     }
@@ -82,7 +95,7 @@ struct ContentView: View {
                             }
                         }
                     }
-                    .disabled(status.running || !saved.isComplete || needsAuthorization)
+                    .disabled(status.running || !saved.isComplete)
                     if !status.detail.isEmpty {
                         Text(status.detail).font(.footnote)
                     }
@@ -110,6 +123,9 @@ struct ContentView: View {
             }
             .navigationTitle("Health Relay")
             .task { await refresh() }
+            .alert(alert ?? "", isPresented: Binding(get: { alert != nil }, set: { if !$0 { alert = nil } })) {
+                Button("OK", role: .cancel) {}
+            }
             .confirmationDialog("Re-send all history?", isPresented: $confirmReset) {
                 Button("Re-send", role: .destructive) {
                     Task { await SyncEngine.shared.resetAnchors() }
@@ -129,13 +145,19 @@ struct ContentView: View {
     }
 
     private func authorize() {
+        guard !authorizing else { return }
+        authorizing = true
+        Log.info("ui: Grant access tapped")
         Task {
             do {
                 try await SyncEngine.shared.requestAuthorization()
+                Log.info("ui: authorization finished")
             } catch {
-                message = error.localizedDescription
+                Log.error("ui: authorization failed: \(error)")
+                alert = "Could not request access: \(error.localizedDescription)"
             }
             await refresh()
+            authorizing = false
         }
     }
 
@@ -144,7 +166,8 @@ struct ContentView: View {
             do {
                 try await SyncEngine.shared.requestHealthRecords()
             } catch {
-                message = error.localizedDescription
+                Log.error("ui: health records authorization failed: \(error)")
+                alert = "Could not request Health Records: \(error.localizedDescription)"
             }
             await refresh()
         }

@@ -130,15 +130,20 @@ struct SampleEncoder: Sendable {
 
     /// The individual values of a series sample (count > 1).
     private func quantitySeries(_ s: HKQuantitySample, unit: HKUnit?) async -> [JSON] {
-        let query = HKQuantitySeriesSampleQueryDescriptor(
-            predicate: .quantitySample(type: s.quantityType, predicate: HKQuery.predicateForObject(with: s.uuid)),
-            options: .orderByQuantitySampleStartDate)
+        let values: AsyncThrowingStream<(HKQuantity, DateInterval), Error> = store.safeStream { cont in
+            HKQuantitySeriesSampleQuery(quantityType: s.quantityType, predicate: HKQuery.predicateForObject(with: s.uuid)) {
+                _, quantity, interval, _, done, error in
+                if let error { cont.finish(throwing: error); return }
+                if let quantity, let interval { cont.yield((quantity, interval)) }
+                if done { cont.finish() }
+            }
+        }
         var points: [JSON] = []
         var chunks = Chunker(sample: s, series: "quantity", extra: unit.map { ["unit": .string($0.unitString)] } ?? [:])
         do {
-            for try await r in query.results(for: store) {
-                var p: [String: JSON] = ["start": JSON(r.dateInterval.start), "end": JSON(r.dateInterval.end)]
-                if let split = QuantityCodec.split(r.quantity, preferred: unit) {
+            for try await (quantity, interval) in values {
+                var p: [String: JSON] = ["start": JSON(interval.start), "end": JSON(interval.end)]
+                if let split = QuantityCodec.split(quantity, preferred: unit) {
                     p["value"] = .double(split.value)
                     if split.unit != unit?.unitString { p["unit"] = .string(split.unit) }
                 }
@@ -202,9 +207,7 @@ struct SampleEncoder: Sendable {
         }
         o["activities"] = .array(activities)
         // Routes are synced as their own samples; record which belong to this workout.
-        let routes = (try? await HKSampleQueryDescriptor(
-            predicates: [.workoutRoute(HKQuery.predicateForObjects(from: w))], sortDescriptors: []
-        ).result(for: store)) ?? []
+        let routes = (try? await store.safeSamples(HKSeriesType.workoutRoute()) { HKQuery.predicateForObjects(from: w) }) ?? []
         if !routes.isEmpty { o["route_uuids"] = .array(routes.map { .string($0.uuid.uuidString) }) }
     }
 
@@ -237,16 +240,19 @@ struct SampleEncoder: Sendable {
                 "start": JSON(s.startDate),
                 "end": JSON(s.endDate),
             ]
-            o.put("sum", s.sumQuantity().map { q($0, unit) })
-            o.put("average", s.averageQuantity().map { q($0, unit) })
-            o.put("minimum", s.minimumQuantity().map { q($0, unit) })
-            o.put("maximum", s.maximumQuantity().map { q($0, unit) })
-            o.put("most_recent", s.mostRecentQuantity().map { q($0, unit) })
-            if let i = s.mostRecentQuantityDateInterval() {
-                o["most_recent_start"] = JSON(i.start)
-                o["most_recent_end"] = JSON(i.end)
+            let raised = HKRTry {
+                o.put("sum", s.sumQuantity().map { q($0, unit) })
+                o.put("average", s.averageQuantity().map { q($0, unit) })
+                o.put("minimum", s.minimumQuantity().map { q($0, unit) })
+                o.put("maximum", s.maximumQuantity().map { q($0, unit) })
+                o.put("most_recent", s.mostRecentQuantity().map { q($0, unit) })
+                if let i = s.mostRecentQuantityDateInterval() {
+                    o["most_recent_start"] = JSON(i.start)
+                    o["most_recent_end"] = JSON(i.end)
+                }
+                o.put("duration", s.duration().map { q($0, .second()) })
             }
-            o.put("duration", s.duration().map { q($0, .second()) })
+            o.put("error", JSON(raised))
             out.append(.object(o))
         }
         return .array(out)
@@ -258,7 +264,14 @@ struct SampleEncoder: Sendable {
         var points: [JSON] = []
         var chunks = Chunker(sample: r, series: "workout_route")
         do {
-            for try await l in HKWorkoutRouteQueryDescriptor(r).results(for: store) {
+            let locations: AsyncThrowingStream<CLLocation, Error> = store.safeStream { cont in
+                HKWorkoutRouteQuery(route: r) { _, locations, done, error in
+                    if let error { cont.finish(throwing: error); return }
+                    for l in locations ?? [] { cont.yield(l) }
+                    if done { cont.finish() }
+                }
+            }
+            for try await l in locations {
                 var p: [String: JSON] = [
                     "t": JSON(l.timestamp),
                     "lat": .double(l.coordinate.latitude),
@@ -286,8 +299,18 @@ struct SampleEncoder: Sendable {
         var points: [JSON] = []
         var chunks = Chunker(sample: h, series: "heartbeat")
         do {
-            for try await b in HKHeartbeatSeriesQueryDescriptor(h).results(for: store) {
-                points.append(["t": .double(b.timeIntervalSinceStart), "gap": .bool(b.precededByGap)])
+            let beats: AsyncThrowingStream<(TimeInterval, Bool), Error> = store.safeStream { cont in
+                HKHeartbeatSeriesQuery(heartbeatSeries: h) { _, t, gap, done, error in
+                    if let error { cont.finish(throwing: error); return }
+                    cont.yield((t, gap))
+                    if done { cont.finish() }
+                }
+            }
+            var n = 0
+            // An empty series answers once, with done and no beat: never send more than count.
+            for try await (t, gap) in beats where n < h.count {
+                n += 1
+                points.append(["t": .double(t), "gap": .bool(gap)])
                 if points.count == Self.heartbeatsPerChunk { chunks.add(&points) }
             }
         } catch {
@@ -311,7 +334,17 @@ struct SampleEncoder: Sendable {
         var chunks = Chunker(sample: e, series: "electrocardiogram",
                              extra: ["unit": .string(microvolts.unitString), "lead": JSON.enumValue(1, "HKElectrocardiogramLead")])
         do {
-            for try await m in HKElectrocardiogramQueryDescriptor(e).results(for: store) {
+            let measurements: AsyncThrowingStream<HKElectrocardiogram.VoltageMeasurement, Error> = store.safeStream { cont in
+                HKElectrocardiogramQuery(e) { _, result in
+                    switch result {
+                    case let .measurement(m): cont.yield(m)
+                    case .done: cont.finish()
+                    case let .error(error): cont.finish(throwing: error)
+                    @unknown default: cont.finish()
+                    }
+                }
+            }
+            for try await m in measurements {
                 let v = m.quantity(for: .appleWatchSimilarToLeadI)?.doubleValue(for: microvolts)
                 points.append(["t": .double(m.timeSinceSampleStart), "v": JSON(v)])
                 if points.count == Self.voltagesPerChunk { chunks.add(&points) }
@@ -328,10 +361,8 @@ struct SampleEncoder: Sendable {
         let predicate = HKQuery.predicateForObjectsAssociated(electrocardiogram: e)
         for synced in HealthTypes.all where synced.valueEnum == "HKCategoryValueSeverity" || synced.valueEnum == "HKCategoryValuePresence" {
             guard let type = synced.type as? HKCategoryType else { continue }
-            let found = (try? await HKSampleQueryDescriptor(
-                predicates: [.categorySample(type: type, predicate: predicate)], sortDescriptors: []
-            ).result(for: store)) ?? []
-            for s in found {
+            let found = (try? await store.safeSamples(type) { predicate }) ?? []
+            for case let s as HKCategorySample in found {
                 out.append(["uuid": .string(s.uuid.uuidString), "type": .string(type.identifier), "value": JSON(s.value)])
             }
         }
@@ -385,15 +416,17 @@ struct SampleEncoder: Sendable {
         // Anchored queries return CDA samples without the document: fetch it.
         let doc: HKCDADocument? = await withCheckedContinuation { cont in
             let once = ResumeOnce(cont)
-            let query = HKDocumentQuery(
-                documentType: d.documentType, predicate: HKQuery.predicateForObject(with: d.uuid), limit: 1,
-                sortDescriptors: nil, includeDocumentData: true
-            ) { _, results, done, _ in
-                if done || results?.isEmpty == false {
-                    once.resume((results?.first as? HKCDADocumentSample)?.document)
+            let raised = store.safeExecute {
+                HKDocumentQuery(
+                    documentType: d.documentType, predicate: HKQuery.predicateForObject(with: d.uuid), limit: 1,
+                    sortDescriptors: nil, includeDocumentData: true
+                ) { _, results, done, _ in
+                    if done || results?.isEmpty == false {
+                        once.resume((results?.first as? HKCDADocumentSample)?.document)
+                    }
                 }
             }
-            if HKRTry({ store.execute(query) }) != nil { once.resume(nil) }
+            if raised != nil { once.resume(nil) }
         }
         guard let doc else { return [] }
         o["title"] = .string(doc.title)
@@ -455,11 +488,18 @@ struct SampleEncoder: Sendable {
     private func attachments(for object: HKObject) async -> [JSON] {
         let attachStore = HKAttachmentStore(healthStore: store)
         let list: [HKAttachment] = await withCheckedContinuation { cont in
-            attachStore.getAttachments(for: object) { a, _ in cont.resume(returning: a ?? []) }
+            let once = ResumeOnce(cont)
+            let raised = HKRTry { attachStore.getAttachments(for: object) { a, _ in once.resume(a ?? []) } }
+            if raised != nil { once.resume([]) }
         }
         var out: [JSON] = []
         for a in list {
-            guard let data = try? await attachStore.dataReader(for: a).data else { continue }
+            let data: Data? = await withCheckedContinuation { cont in
+                let once = ResumeOnce(cont)
+                let raised = HKRTry { _ = attachStore.getData(for: a) { data, _ in once.resume(data) } }
+                if raised != nil { once.resume(nil) }
+            }
+            guard let data else { continue }
             out += Self.blobChunks(owner: object, blob: "attachment", id: a.identifier.uuidString,
                                    contentType: a.contentType.identifier, data: data,
                                    extra: [

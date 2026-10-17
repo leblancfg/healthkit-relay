@@ -68,7 +68,7 @@ actor UnitResolver {
             return unit
         }
         var chosen: HKUnit?
-        if let preferred = try? await store.preferredUnits(for: [type])[type], type.is(compatibleWith: preferred) {
+        if let preferred = await store.safePreferredUnit(type), type.is(compatibleWith: preferred) {
             chosen = preferred
         }
         if chosen == nil, let s = HealthTypes.named(id)?.canonicalUnit, let unit = HKRUnitFromString(s),

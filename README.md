@@ -101,8 +101,8 @@ make ios-build    # or: make ios-project, then open ios/HealthKitRelay.xcodeproj
 ```
 
 Then open **Health Relay** on the phone, enter the server URL and token, tap **Grant
-access** (one sheet for everything, plus one per type HealthKit grants object by object, such
-as vision prescriptions and medications) and **Sync now**. See [ios/README.md](ios/README.md).
+access** (one sheet for everything; vision prescriptions, medications and Health Records are
+optional rows of their own) and **Sync now**. See [ios/README.md](ios/README.md).
 
 ## Layout
 

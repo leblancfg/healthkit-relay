@@ -40,18 +40,25 @@ case names of every HealthKit enum. At run time each type is built from its iden
 string through the Objective-C runtime, so a type the running iOS lacks is skipped rather
 than crashing. To see what a new Xcode adds: build, then `git diff` the generated file.
 
-The app asks for everything in one sheet. HealthKit's own rules shape it: types needing a
-companion are requested together (routes with workouts, heartbeat series with HRV), types
-granted object by object (vision prescriptions, medications, CDA documents) get their own
-sheet, and correlations and medication dose events are read through their parts.
-Health records need the Clinical Health Records capability on your App ID (Automatic signing
-adds it).
+**Grant access** asks for everything in one sheet. HealthKit's own rules shape it: types
+needing a companion are requested together (routes with workouts, heartbeat series with HRV),
+and correlations and medication dose events are read through their parts. Types granted
+object by object (vision prescriptions, medications, CDA documents) and Health Records are
+not part of it: each has its own row under **Optional**, since their sheets can be slow,
+lead to Apple's provider setup, or never come when Health has nothing to list. Health
+records need the Clinical Health Records capability on your App ID (Automatic signing adds
+it).
+
+HealthKit raises Objective-C exceptions, not errors, for some types and queries (an observer
+query for vision prescriptions, for one). Every query is created and run inside an
+exception guard (`HealthKitSafe.swift`), so such a type is skipped and logged, never fatal.
 
 ## Use
 
 1. Enter the server URL (`https://…`; the app appends `/v1/samples`) and the token. Save.
 2. **Grant access** and allow the data types you want to share. After an update that brings
-   new types, the button comes back: tap it again to include them.
+   new types, the button comes back: tap it again to include them. Optionally, tap the rows
+   under **Optional** (vision prescriptions, medications...) to pick items to share.
 3. **Sync now**. The first sync uploads all history, which can take a while; keep the app
    open. After that iOS wakes the app in the background when new data arrives (about
    hourly, at the system's discretion; Low Power Mode and force-quitting the app pause it).
@@ -69,7 +76,8 @@ adds it).
 | `Units.swift` | one pinned unit per quantity type; quantities to `{value, unit}` |
 | `JSON.swift` | JSON values, typed metadata, NSKeyedArchiver archives |
 | `Support/HKRObjC.m` | catches the Objective-C exceptions HealthKit raises for disallowed types |
-| `SyncEngine.swift` | authorization plan, observer queries, background delivery, anchored queries, activity summaries, characteristics, medications, lock handling |
+| `HealthKitSafe.swift` | every query built and run inside that guard; streams, one-shot results, timeouts |
+| `SyncEngine.swift` | authorization plan, main and per-object requests, observer queries, background delivery, anchored queries, activity summaries, characteristics, medications, lock handling |
 | `Uploader.swift` | batched POST with retry and exponential backoff |
 | `WireFormat.swift` | batches (wire format v2), source and device fields |
 | `AnchorStore.swift` | persisted query anchors |

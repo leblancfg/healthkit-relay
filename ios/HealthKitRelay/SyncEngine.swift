@@ -66,10 +66,37 @@ struct Coverage: Sendable {
     var inSDK = 0
     var available = 0
     var requested = 0
-    var perObject = 0
     var excluded: [String: String] = [:]
     var unavailable: [String] = []
+    /// Types of the main request never asked (an update added them).
     var notYetRequested = 0
+}
+
+/// How a per-object request (one optional row each) ended.
+enum PerObjectOutcome: Codable, Equatable, Sendable {
+    /// The user went through Health's sheet; this many objects are readable now (nil: unknown).
+    case answered(Int?)
+    /// Health did not answer in time. A sheet still open can still answer later.
+    case noAnswer
+    case failed(String)
+
+    var text: String {
+        switch self {
+        case .answered(nil): "Done"
+        case .answered(0): "None shared"
+        case let .answered(n?): "\(n) shared"
+        case .noAnswer: "No answer from Health"
+        case let .failed(reason): "Failed: \(reason)"
+        }
+    }
+}
+
+/// One optional per-object row: vision prescriptions, medications, CDA documents.
+struct PerObjectRow: Identifiable, Sendable {
+    let identifier: String
+    let name: String
+    let outcome: PerObjectOutcome?
+    var id: String { identifier }
 }
 
 /// Incremental sync of everything in HealthKit.
@@ -94,9 +121,11 @@ actor SyncEngine {
     private var busy = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private var observed = Set<String>()
+    /// Types HealthKit refuses observer queries for.
+    private var unobservable = Set<String>()
     private var deliveryEnabled = Set<String>()
-    private var plan: AuthPlan?
-    private var requested: Set<String>?
+    private var planTask: Task<AuthPlan, Never>?
+    private var requestedTask: Task<Set<String>, Never>?
     private var lastAux: Date?
     /// A sync was skipped because the phone was locked: run it after the next unlock.
     private(set) var pendingAfterUnlock = false
@@ -105,6 +134,8 @@ actor SyncEngine {
 
     init() {
         units = UnitResolver(store: store)
+        // App 0.2.3 recorded per-object types as asked before asking (see perObjectKey).
+        UserDefaults.standard.removeObject(forKey: "perObjectRequested")
     }
 
     // MARK: Authorization
@@ -113,7 +144,15 @@ actor SyncEngine {
     /// exclusions. HealthKit raises an exception (not an error) for types an app may not
     /// request, so each type is probed on its own first, without showing anything.
     func authPlan() async -> AuthPlan {
-        if let plan { return plan }
+        // Shared by concurrent callers (launch observers, the UI), computed once per launch.
+        if let planTask { return await planTask.value }
+        let task = Task { await self.computePlan() }
+        planTask = task
+        return await task.value
+    }
+
+    private func computePlan() async -> AuthPlan {
+        let started = Date.now
         var p = AuthPlan()
         let healthRecords = store.supportsHealthRecords()
         for synced in HealthTypes.all {
@@ -149,8 +188,14 @@ actor SyncEngine {
                 p.excluded[type.identifier] = reason
             }
         }
-        plan = p
+        Log.info("authorization: plan in \(Self.elapsed(since: started)): \(p.read.count) in the main request, "
+            + "per-object \(p.perObject.map(\.identifier)), \(p.derived.count) derived, \(p.healthRecords.count) health records, "
+            + "\(p.excluded.count) excluded")
         return p
+    }
+
+    static func elapsed(since start: Date) -> String {
+        String(format: "%.1f s", Date.now.timeIntervalSince(start))
     }
 
     private static func identifiers(in text: String) -> [String] {
@@ -182,11 +227,18 @@ actor SyncEngine {
         }
     }
 
-    func requestAuthorization() async throws {
+    /// The one authorization sheet for every type that has no other flow. HealthKit shows it
+    /// only for types never answered, so with everything answered this returns at once.
+    /// Per-object types (vision prescriptions, medications...) are not part of it: their
+    /// sheets can take long or never come, so each is asked from its own row, see
+    /// requestPerObject.
+    /// Returns whether Health had anything to ask.
+    @discardableResult
+    func requestAuthorization() async throws -> Bool {
+        let started = Date.now
         let p = await authPlan()
-        Log.info("authorization: requesting \(p.read.count) types in one sheet, \(p.perObject.count) per-object, \(p.excluded.count) excluded")
         let before = await requestStatus(p.read)
-        Log.info("authorization: request status before = \(String(describing: before?.rawValue))")
+        Log.info("authorization: main request, \(p.read.count) types, status before: \(Self.statusName(before))")
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             let once = ResumeOnceThrowing(cont)
             let raised = HKRTry {
@@ -197,36 +249,131 @@ actor SyncEngine {
             if let raised { once.fail(SyncError.disallowed(raised)) }
         }
         UserDefaults.standard.set(p.read.map(\.identifier), forKey: Self.askedReadKey)
-        Log.info("authorization: sheet done, status after = \(String(describing: await requestStatus(p.read)?.rawValue))")
-        if #available(iOS 16.0, *) {
-            var asked = Set(UserDefaults.standard.stringArray(forKey: "perObjectRequested") ?? [])
-            for type in p.perObject where !asked.contains(type.identifier) {
-                // Recorded before asking: per-object requests can show nothing and never call
-                // back (no such objects in Health), which must not leave the app waiting on
-                // this type forever.
-                asked.insert(type.identifier)
-                UserDefaults.standard.set(Array(asked), forKey: "perObjectRequested")
-                Log.info("authorization: per-object request for \(type.identifier)")
-                await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                    let once = ResumeOnce(cont)
-                    let raised = HKRTry {
-                        self.store.requestPerObjectReadAuthorization(for: type, predicate: nil) { _, error in
-                            if let error { Log.info("authorization: \(type.identifier): \(error.localizedDescription)") }
-                            once.resume(())
-                        }
-                    }
-                    if raised != nil { once.resume(()) }
-                    // A sheet the user is looking at stays up; this only stops the wait.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
-                        if once.resume(()) {
-                            Log.info("authorization: \(type.identifier): no answer after 20 s, moving on")
-                        }
-                    }
-                }
+        Log.info("authorization: main request done in \(Self.elapsed(since: started)), status after: \(Self.statusName(await requestStatus(p.read)))")
+        accessChanged()
+        return before != .unnecessary
+    }
+
+    private static func statusName(_ status: HKAuthorizationRequestStatus?) -> String {
+        guard let status else { return "unknown (HealthKit refused)" }
+        return HealthTypes.enumName("HKAuthorizationRequestStatus", status.rawValue) ?? "\(status.rawValue)"
+    }
+
+    /// Readable types changed: recompute them, and register observers for new ones without
+    /// making the caller (a button) wait for that.
+    func accessChanged() {
+        requestedTask = nil
+        Task { await self.startObserving() }
+    }
+
+    // MARK: Per-object authorization
+
+    static let perObjectKey = "perObjectOutcomes"
+    /// Long enough for a sheet that is slow to come up; the request goes on after it, see
+    /// PerObjectOutcome.noAnswer.
+    static let perObjectTimeout: Double = 45
+    static let perObjectChanged = Notification.Name("HealthRelayPerObjectChanged")
+
+    private var perObjectOutcomes: [String: PerObjectOutcome] {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: Self.perObjectKey) else { return [:] }
+            return (try? JSONDecoder().decode([String: PerObjectOutcome].self, from: data)) ?? [:]
+        }
+        set {
+            UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: Self.perObjectKey)
+        }
+    }
+
+    /// The optional rows to show: per-object types this iPhone has, with the last outcome.
+    func perObjectRows() async -> [PerObjectRow] {
+        let outcomes = perObjectOutcomes
+        return await authPlan().perObject.map {
+            PerObjectRow(identifier: $0.identifier, name: Self.perObjectName($0.identifier), outcome: outcomes[$0.identifier])
+        }
+    }
+
+    static func perObjectName(_ identifier: String) -> String {
+        switch identifier {
+        case HKVisionPrescriptionTypeIdentifier: "Vision prescriptions"
+        case HKDocumentTypeIdentifier.CDA.rawValue: "Clinical documents (CDA)"
+        case "HKDataTypeIdentifierUserAnnotatedMedicationConcept": "Medications"
+        default: shortName(identifier)
+        }
+    }
+
+    /// Asks for one per-object type: Health shows a sheet listing its objects, the user picks
+    /// which to share. Returns within perObjectTimeout; a later answer is still recorded.
+    func requestPerObject(_ identifier: String) async -> PerObjectOutcome {
+        guard #available(iOS 16.0, *),
+              let type = await authPlan().perObject.first(where: { $0.identifier == identifier })
+        else { return .failed("not available on this iPhone") }
+        let started = Date.now
+        Log.info("authorization: per-object request for \(identifier)")
+        let store = store
+        let answer: String?? = await withTimeout(Self.perObjectTimeout, late: { error in
+            Log.info("authorization: \(identifier) answered late, after \(Self.elapsed(since: started))")
+            Task { await SyncEngine.shared.recordPerObject(identifier, type, error: error) }
+        }) { (done: @escaping @Sendable (String?) -> Void) in
+            let raised = HKRTry {
+                store.requestPerObjectReadAuthorization(for: type, predicate: nil) { _, error in done(error?.localizedDescription) }
+            }
+            if let raised { done(raised) }
+        }
+        guard let error = answer else {
+            Log.info("authorization: \(identifier): no answer after \(Self.elapsed(since: started))")
+            perObjectOutcomes[identifier] = .noAnswer
+            accessChanged()
+            return .noAnswer
+        }
+        Log.info("authorization: \(identifier) answered in \(Self.elapsed(since: started))\(error.map { ": \($0)" } ?? "")")
+        return await recordPerObject(identifier, type, error: error)
+    }
+
+    @discardableResult
+    private func recordPerObject(_ identifier: String, _ type: HKObjectType, error: String?) async -> PerObjectOutcome {
+        let outcome: PerObjectOutcome
+        if let error {
+            outcome = .failed(error)
+        } else {
+            let n = await sharedCount(type)
+            Log.info("authorization: \(identifier): \(n.map(String.init) ?? "unknown number of") objects readable")
+            outcome = .answered(n)
+        }
+        perObjectOutcomes[identifier] = outcome
+        accessChanged()
+        await MainActor.run { NotificationCenter.default.post(name: Self.perObjectChanged, object: nil) }
+        return outcome
+    }
+
+    /// How many objects of a per-object type the app can read now; nil if HealthKit does not
+    /// say within 10 s.
+    private func sharedCount(_ type: HKObjectType) async -> Int? {
+        let store = store
+        if let sampleType = type as? HKSampleType {
+            return await withTimeout(10) { (done: @escaping @Sendable (Int?) -> Void) in
+                Task { done((try? await store.safeSamples(sampleType))?.count) }
+            } ?? nil
+        }
+        if #available(iOS 26.0, *), type == HKObjectType.userAnnotatedMedicationType() {
+            return await withTimeout(10) { (done: @escaping @Sendable (Int?) -> Void) in
+                Task { done(try? await Self.medications(store).count) }
+            } ?? nil
+        }
+        return nil
+    }
+
+    @available(iOS 26.0, *)
+    static func medications(_ store: HKHealthStore) async throws -> [HKUserAnnotatedMedication] {
+        let stream: AsyncThrowingStream<HKUserAnnotatedMedication, Error> = store.safeStream { cont in
+            HKUserAnnotatedMedicationQuery(predicate: nil, limit: HKObjectQueryNoLimit) { _, medication, done, error in
+                if let error { cont.finish(throwing: error); return }
+                if let medication { cont.yield(medication) }
+                if done { cont.finish() }
             }
         }
-        requested = nil
-        await startObserving()
+        var out: [HKUserAnnotatedMedication] = []
+        for try await m in stream { out.append(m) }
+        return out
     }
 
     static let healthRecordsOptInKey = "healthRecordsOptIn"
@@ -248,8 +395,7 @@ actor SyncEngine {
             if let raised { once.fail(SyncError.disallowed(raised)) }
         }
         UserDefaults.standard.set(true, forKey: Self.healthRecordsOptInKey)
-        requested = nil
-        await startObserving()
+        accessChanged()
     }
 
     /// Whether Health Records can be offered on this device.
@@ -264,9 +410,7 @@ actor SyncEngine {
     func needsAuthorization() async -> Bool {
         let p = await authPlan()
         let askedRead = Set(UserDefaults.standard.stringArray(forKey: Self.askedReadKey) ?? [])
-        if !Set(p.read.map(\.identifier)).isSubset(of: askedRead) { return true }
-        let asked = Set(UserDefaults.standard.stringArray(forKey: "perObjectRequested") ?? [])
-        return p.perObject.contains { !asked.contains($0.identifier) }
+        return !Set(p.read.map(\.identifier)).isSubset(of: askedRead)
     }
 
     static let askedReadKey = "readRequested"
@@ -274,7 +418,13 @@ actor SyncEngine {
     /// Types the user has been asked about. Only those sync: an anchored query over a type
     /// never requested returns nothing, and its anchor must not advance past real history.
     private func requestedTypes() async -> Set<String> {
-        if let requested { return requested }
+        if let requestedTask { return await requestedTask.value }
+        let task = Task { await self.computeRequested() }
+        requestedTask = task
+        return await task.value
+    }
+
+    private func computeRequested() async -> Set<String> {
         let p = await authPlan()
         var out = Set<String>()
         for type in p.read {
@@ -283,8 +433,10 @@ actor SyncEngine {
                 out.insert(type.identifier)
             }
         }
-        let asked = Set(UserDefaults.standard.stringArray(forKey: "perObjectRequested") ?? [])
-        for type in p.perObject where asked.contains(type.identifier) { out.insert(type.identifier) }
+        // Asked from their row, whatever the outcome: reading a type nothing was shared of
+        // just returns nothing.
+        let asked = perObjectOutcomes
+        for type in p.perObject where asked[type.identifier] != nil { out.insert(type.identifier) }
         if healthRecordsOptedIn {
             for type in p.healthRecords where await requestStatus([type]) == .unnecessary {
                 out.insert(type.identifier)
@@ -293,7 +445,6 @@ actor SyncEngine {
         if !out.isEmpty {
             for type in p.derived { out.insert(type.identifier) }
         }
-        requested = out
         return out
     }
 
@@ -301,15 +452,14 @@ actor SyncEngine {
         let p = await authPlan()
         let req = await requestedTypes()
         let catalog = HealthTypes.catalog
+        let askedRead = Set(UserDefaults.standard.stringArray(forKey: Self.askedReadKey) ?? [])
         return Coverage(
             inSDK: SDKHealthTypes.identified.count + SDKHealthTypes.factories.count,
             available: catalog.types.count,
             requested: req.count,
-            perObject: p.perObject.count,
             excluded: p.excluded,
             unavailable: catalog.unavailable,
-            notYetRequested: max(0, p.read.count + p.perObject.count + p.derived.count
-                + (healthRecordsOptedIn ? p.healthRecords.count : 0) - req.count))
+            notYetRequested: p.read.filter { !askedRead.contains($0.identifier) }.count)
     }
 
     // MARK: Background delivery
@@ -322,17 +472,26 @@ actor SyncEngine {
         for synced in HealthTypes.all {
             guard let type = synced.sampleType, req.contains(synced.key) else { continue }
             let key = synced.key
-            if !observed.contains(key) {
-                let query = HKObserverQuery(sampleType: type, predicate: nil) { _, completion, error in
-                    let done = CompletionOnce(completion)
-                    guard error == nil else { done.call(); return }
-                    Task {
-                        let task = await BackgroundTask.begin("sync \(key)")
-                        await SyncEngine.shared.observerFired(key, done: done)
-                        await task.end()
+            if !observed.contains(key) && !unobservable.contains(key) {
+                // HealthKit raises for some types (vision prescriptions) already when the query
+                // is created: those sync with the others, just without waking the app.
+                let raised = store.safeExecute {
+                    HKObserverQuery(sampleType: type, predicate: nil) { _, completion, error in
+                        let done = CompletionOnce(completion)
+                        guard error == nil else { done.call(); return }
+                        Task {
+                            let task = await BackgroundTask.begin("sync \(key)")
+                            await SyncEngine.shared.observerFired(key, done: done)
+                            await task.end()
+                        }
                     }
                 }
-                if HKRTry({ self.store.execute(query) }) == nil { observed.insert(key) }
+                if let raised {
+                    Log.info("observe: \(Self.shortName(key)) cannot be observed, synced with the others: \(raised)")
+                    unobservable.insert(key)
+                } else {
+                    observed.insert(key)
+                }
             }
             if !deliveryEnabled.contains(key) {
                 let ok = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
@@ -345,6 +504,7 @@ actor SyncEngine {
                 if ok { deliveryEnabled.insert(key) }
             }
         }
+        Log.info("observe: \(observed.count) types observed, \(deliveryEnabled.count) with background delivery")
     }
 
     /// HealthKit stops waking an app that does not call the observer completion promptly, so it
@@ -557,19 +717,19 @@ actor SyncEngine {
         do {
             return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Page, Error>) in
                 let once = ResumeOnceThrowing(cont)
-                let query = HKAnchoredObjectQuery(type: type, predicate: nil, anchor: anchor, limit: limit) {
-                    _, samples, deleted, newAnchor, error in
-                    if let error {
-                        once.fail(error)
-                    } else if let newAnchor {
-                        once.succeed(Page(samples: samples ?? [], deleted: deleted ?? [], anchor: newAnchor))
-                    } else {
-                        once.fail(SyncError.noAnchor)
+                let raised = store.safeExecute {
+                    HKAnchoredObjectQuery(type: type, predicate: nil, anchor: anchor, limit: limit) {
+                        _, samples, deleted, newAnchor, error in
+                        if let error {
+                            once.fail(error)
+                        } else if let newAnchor {
+                            once.succeed(Page(samples: samples ?? [], deleted: deleted ?? [], anchor: newAnchor))
+                        } else {
+                            once.fail(SyncError.noAnchor)
+                        }
                     }
                 }
-                if let raised = HKRTry({ self.store.execute(query) }) {
-                    once.fail(SyncError.disallowed(raised))
-                }
+                if let raised { once.fail(SyncError.disallowed(raised)) }
             }
         } catch let error as HKError where error.code == .errorDatabaseInaccessible {
             pendingAfterUnlock = true
@@ -624,7 +784,13 @@ actor SyncEngine {
         var errors: [String: JSON] = [:]
         func read(_ id: HKCharacteristicTypeIdentifier, _ name: String, _ body: () throws -> JSON) {
             guard req.contains(id.rawValue) else { return }
-            do { values[name] = try body() } catch { errors[name] = .string(error.localizedDescription) }
+            var result: Result<JSON, Error>?
+            if let raised = HKRTry({ result = Result { try body() } }) { result = .failure(SyncError.disallowed(raised)) }
+            switch result {
+            case let .success(value)?: values[name] = value
+            case let .failure(error)?: errors[name] = .string(error.localizedDescription)
+            case nil: break
+            }
         }
         read(.dateOfBirth, "date_of_birth") {
             let c = try store.dateOfBirthComponents()
@@ -657,7 +823,7 @@ actor SyncEngine {
         guard #available(iOS 26.0, *) else { return 0 }
         let type = HKObjectType.userAnnotatedMedicationType()
         guard await requestedTypes().contains(type.identifier) else { return 0 }
-        let meds = (try? await HKUserAnnotatedMedicationQueryDescriptor().result(for: store)) ?? []
+        let meds = (try? await Self.medications(store)) ?? []
         var items: [WireItem] = []
         for m in meds {
             let c = m.medication
@@ -705,8 +871,11 @@ actor SyncEngine {
             var to = cal.dateComponents([.year, .month, .day, .era], from: end)
             from.calendar = cal
             to.calendar = cal
-            let predicate = HKQuery.predicate(forActivitySummariesBetweenStart: from, end: to)
-            let summaries = try await HKActivitySummaryQueryDescriptor(predicate: predicate).result(for: store)
+            let summaries: [HKActivitySummary] = try await store.safeResult { answer in
+                HKActivitySummaryQuery(predicate: HKQuery.predicate(forActivitySummariesBetweenStart: from, end: to)) { _, summaries, error in
+                    if let error { answer(.failure(error)) } else { answer(.success(summaries ?? [])) }
+                }
+            }
             let items = try summaries.map { try WireItem(.record, activitySummary($0, calendar: cal)) }
             try await upload(items, ctx)
             total += items.count
@@ -765,11 +934,13 @@ actor SyncEngine {
         let (relationships, anchor): ([HKWorkoutEffortRelationship], HKQueryAnchor?) = try await withCheckedThrowingContinuation { cont in
             let once = ResumeOnceThrowing(cont)
             let box = QueryBox()
-            let query = HKWorkoutEffortRelationshipQuery(predicate: nil, anchor: previous, options: .default) { q, rel, newAnchor, error in
-                box.stop(q, store: self.store)
-                if let error { once.fail(error) } else { once.succeed((rel ?? [], newAnchor)) }
+            let raised = store.safeExecute {
+                HKWorkoutEffortRelationshipQuery(predicate: nil, anchor: previous, options: .default) { q, rel, newAnchor, error in
+                    box.stop(q, store: self.store)
+                    if let error { once.fail(error) } else { once.succeed((rel ?? [], newAnchor)) }
+                }
             }
-            if let raised = HKRTry({ self.store.execute(query) }) { once.fail(SyncError.disallowed(raised)) }
+            if let raised { once.fail(SyncError.disallowed(raised)) }
         }
         let items = try relationships.map { r -> WireItem in
             var o: [String: JSON] = [

@@ -118,10 +118,9 @@ extension JSON {
     /// NSKeyedArchiver archive of a HealthKit object, base64: every property HealthKit stores,
     /// including ones this app does not know about yet. Decodable on any Apple platform.
     static func archive(_ object: NSObject & NSSecureCoding) -> JSON {
-        guard let data = try? NSKeyedArchiver.archivedData(withRootObject: object, requiringSecureCoding: true) else {
-            return .null
-        }
-        return .string(data.base64EncodedString())
+        var data: Data?
+        _ = HKRTry { data = try? NSKeyedArchiver.archivedData(withRootObject: object, requiringSecureCoding: true) }
+        return data.map { .string($0.base64EncodedString()) } ?? .null
     }
 }
 

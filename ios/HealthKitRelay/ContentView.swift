@@ -8,6 +8,8 @@ struct ContentView: View {
     @State private var message: String?
     @State private var confirmReset = false
     @State private var coverage: Coverage?
+    @State private var healthRecordsAvailable = false
+    @State private var healthRecordsOptedIn = false
 
     var body: some View {
         NavigationStack {
@@ -37,6 +39,13 @@ struct ContentView: View {
                     } else {
                         Label("Access requested", systemImage: "checkmark.circle")
                     }
+                    if healthRecordsAvailable {
+                        if healthRecordsOptedIn {
+                            Label("Health Records included", systemImage: "checkmark.circle")
+                        } else {
+                            Button("Include Health Records…") { authorizeHealthRecords() }
+                        }
+                    }
                     if let coverage {
                         LabeledContent("Types", value: "\(coverage.requested) of \(coverage.available)")
                         if coverage.notYetRequested > 0 {
@@ -48,7 +57,10 @@ struct ContentView: View {
                     Text("Health data")
                 } footer: {
                     if let coverage {
-                        Text(coverageFooter(coverage))
+                        Text(coverageFooter(coverage)
+                            + (healthRecordsAvailable && !healthRecordsOptedIn
+                               ? " Health Records (clinical data from your providers) are optional: they need a provider connected in the Health app first."
+                               : ""))
                     }
                 }
 
@@ -127,8 +139,21 @@ struct ContentView: View {
         }
     }
 
+    private func authorizeHealthRecords() {
+        Task {
+            do {
+                try await SyncEngine.shared.requestHealthRecords()
+            } catch {
+                message = error.localizedDescription
+            }
+            await refresh()
+        }
+    }
+
     private func refresh() async {
         needsAuthorization = await SyncEngine.shared.needsAuthorization()
+        healthRecordsAvailable = await SyncEngine.shared.healthRecordsAvailable()
+        healthRecordsOptedIn = await SyncEngine.shared.healthRecordsOptedIn
         coverage = await SyncEngine.shared.coverage()
     }
 

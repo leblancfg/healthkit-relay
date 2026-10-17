@@ -48,6 +48,10 @@ struct AuthPlan: @unchecked Sendable {
     /// Types an app may not request but can read once their parts are granted: correlations
     /// (their member quantities), medication dose events (the medications).
     var derived: [HKObjectType] = []
+    /// Health Records (clinical) types. Requested only when the user opts in: asking for them
+    /// opens Apple's provider-setup flow, which is a dead end without a connected provider, and
+    /// HealthKit cannot tell an app whether a provider is connected.
+    var healthRecords: Set<HKObjectType> = []
     /// Types HealthKit only accepts requested together with others: route -> workout.
     var companions: [String: [HKObjectType]] = [:]
     /// Identifier -> reason it cannot be requested (HealthKit forbids it, unsupported device...).
@@ -112,8 +116,12 @@ actor SyncEngine {
         let healthRecords = store.supportsHealthRecords()
         for synced in HealthTypes.all {
             let type = synced.type
-            if type is HKClinicalType && !healthRecords {
-                p.excluded[type.identifier] = "Health Records not supported on this device"
+            if type is HKClinicalType {
+                if healthRecords {
+                    p.healthRecords.insert(type)
+                } else {
+                    p.excluded[type.identifier] = "Health Records not supported on this device"
+                }
                 continue
             }
             if #available(iOS 16.0, *), type.requiresPerObjectAuthorization() {
@@ -201,6 +209,32 @@ actor SyncEngine {
         await startObserving()
     }
 
+    static let healthRecordsOptInKey = "healthRecordsOptIn"
+
+    /// Whether the user chose to include Health Records.
+    var healthRecordsOptedIn: Bool { UserDefaults.standard.bool(forKey: Self.healthRecordsOptInKey) }
+
+    /// Asks for Health Records access separately (opt-in, see `AuthPlan.healthRecords`).
+    func requestHealthRecords() async throws {
+        let p = await authPlan()
+        guard !p.healthRecords.isEmpty else { return }
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            let once = ResumeOnceThrowing(cont)
+            let raised = HKRTry {
+                self.store.requestAuthorization(toShare: [], read: p.healthRecords) { _, error in
+                    if let error { once.fail(error) } else { once.succeed(()) }
+                }
+            }
+            if let raised { once.fail(SyncError.disallowed(raised)) }
+        }
+        UserDefaults.standard.set(true, forKey: Self.healthRecordsOptInKey)
+        requested = nil
+        await startObserving()
+    }
+
+    /// Whether Health Records can be offered on this device.
+    func healthRecordsAvailable() async -> Bool { !(await authPlan()).healthRecords.isEmpty }
+
     /// Whether the authorization sheet still needs to be shown: true after an update brings
     /// new types. HealthKit never reveals which read permissions were granted.
     func needsAuthorization() async -> Bool {
@@ -224,6 +258,11 @@ actor SyncEngine {
         }
         let asked = Set(UserDefaults.standard.stringArray(forKey: "perObjectRequested") ?? [])
         for type in p.perObject where asked.contains(type.identifier) { out.insert(type.identifier) }
+        if healthRecordsOptedIn {
+            for type in p.healthRecords where await requestStatus([type]) == .unnecessary {
+                out.insert(type.identifier)
+            }
+        }
         if !out.isEmpty {
             for type in p.derived { out.insert(type.identifier) }
         }
@@ -242,7 +281,8 @@ actor SyncEngine {
             perObject: p.perObject.count,
             excluded: p.excluded,
             unavailable: catalog.unavailable,
-            notYetRequested: max(0, p.read.count + p.perObject.count + p.derived.count - req.count))
+            notYetRequested: max(0, p.read.count + p.perObject.count + p.derived.count
+                + (healthRecordsOptedIn ? p.healthRecords.count : 0) - req.count))
     }
 
     // MARK: Background delivery

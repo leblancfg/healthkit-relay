@@ -1,0 +1,9 @@
+// Build settings shared by all configurations. Placeholders only: put your own values in
+// Local.xcconfig (gitignored; start from Local.xcconfig.example).
+
+// Reverse-DNS bundle identifier; must be unique to your Apple Developer team.
+HKR_BUNDLE_ID = org.example.healthkitrelay
+// Ten-character Apple Developer Team ID. Empty: Xcode asks for a team.
+HKR_TEAM_ID =
+
+#include? "Local.xcconfig"

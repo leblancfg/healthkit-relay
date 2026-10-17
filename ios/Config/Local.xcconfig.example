@@ -1,0 +1,3 @@
+// Copy to Local.xcconfig (gitignored) and fill in.
+HKR_BUNDLE_ID = com.yourname.healthkitrelay
+HKR_TEAM_ID = ABCDE12345

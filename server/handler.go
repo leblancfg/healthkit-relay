@@ -1,13 +1,12 @@
 package main
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -16,8 +15,14 @@ import (
 type Server struct {
 	Archive      *Archive
 	Forwarder    *Forwarder // nil: no forwarding
-	Token        string
+	Token        string     // the server token: admin, and accepted for uploads
 	MaxBodyBytes int64
+	Devices      *Devices
+	Codes        *Codes
+	PublicURL    string // how phones reach the server, for setup links; "" derives it from requests
+	SetupFrom    string // who may use /setup and pairing: "private" (default), "any", "off"
+
+	sessions sessions
 
 	mu            sync.Mutex
 	stats         map[string]int64 // counter name -> value, see writeMetrics
@@ -43,6 +48,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("POST /v1/samples", s.samples)
+	mux.HandleFunc("GET /v1/status", s.statusHandler)
+	mux.HandleFunc("POST /v1/pair", s.pair)
+	mux.HandleFunc("POST /v1/pairing-codes", s.pairingCodes)
+	mux.HandleFunc("GET /v1/devices", s.devicesList)
+	mux.HandleFunc("DELETE /v1/devices/{id}", s.deviceRevoke)
+	mux.HandleFunc("GET /setup", s.setupPage)
+	mux.HandleFunc("POST /setup", s.setupLogin)
+	mux.HandleFunc("POST /setup/revoke", s.setupRevoke)
+	mux.HandleFunc("GET /setup/status", s.setupStatus)
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+	})
 	return mux
 }
 
@@ -51,16 +68,9 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "ok")
 }
 
-func (s *Server) authorized(r *http.Request) bool {
-	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	return ok && subtle.ConstantTimeCompare([]byte(got), []byte(s.Token)) == 1
-}
-
 func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
-	if !s.authorized(r) {
-		s.count("unauthorized")
-		w.Header().Set("WWW-Authenticate", "Bearer")
-		httpError(w, http.StatusUnauthorized, "unauthorized")
+	if _, ok := s.caller(r); !ok {
+		s.unauthorized(w)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, s.MaxBodyBytes)
@@ -70,6 +80,12 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
 			httpError(w, http.StatusRequestEntityTooLarge, "body too large")
+			return
+		}
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			// The app went away mid-upload (iOS suspended it): it sends the batch again.
+			s.count("incomplete")
+			httpError(w, http.StatusBadRequest, "incomplete body")
 			return
 		}
 		s.badRequest(w, "invalid JSON: "+err.Error())
@@ -211,9 +227,9 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	fmt.Fprintln(w, "# HELP healthkit_relay_requests_total POST /v1/samples requests by result.")
+	fmt.Fprintln(w, "# HELP healthkit_relay_requests_total Uploads (POST /v1/samples) and pairings by result.")
 	fmt.Fprintln(w, "# TYPE healthkit_relay_requests_total counter")
-	for _, res := range []string{"ok", "unauthorized", "bad_request", "archive_error"} {
+	for _, res := range []string{"ok", "unauthorized", "bad_request", "incomplete", "archive_error", "paired", "pair_rejected"} {
 		fmt.Fprintf(w, "healthkit_relay_requests_total{result=%q} %d\n", res, s.stats["requests_"+res])
 	}
 	fmt.Fprintln(w, "# HELP healthkit_relay_records_total Records received, by outcome.")
@@ -223,6 +239,9 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "# HELP healthkit_relay_archive_records Distinct records in the archive.")
 	fmt.Fprintln(w, "# TYPE healthkit_relay_archive_records gauge")
 	fmt.Fprintf(w, "healthkit_relay_archive_records %d\n", s.Archive.Len())
+	fmt.Fprintln(w, "# HELP healthkit_relay_devices Paired devices.")
+	fmt.Fprintln(w, "# TYPE healthkit_relay_devices gauge")
+	fmt.Fprintf(w, "healthkit_relay_devices %d\n", s.Devices.Len())
 	fmt.Fprintln(w, "# HELP healthkit_relay_forward_errors_total Failed metric forwards.")
 	fmt.Fprintln(w, "# TYPE healthkit_relay_forward_errors_total counter")
 	fmt.Fprintf(w, "healthkit_relay_forward_errors_total %d\n", s.forwardErrors)

@@ -18,8 +18,10 @@ with dashes as underscores (`-archive-dir` is `HKR_ARCHIVE_DIR`). Flags win.
 | Flag | Default | |
 |------|---------|-|
 | `-listen` | `127.0.0.1:8080` | address to listen on |
-| `-archive-dir` | (required) | archive directory, created if missing |
-| `-token-file` | (required) | file holding the bearer token (at least 16 characters; surrounding whitespace ignored) |
+| `-archive-dir` | (required) | archive directory, created if missing; also holds `devices.json` |
+| `-token-file` | (required) | file holding the server token (at least 16 characters; surrounding whitespace ignored) |
+| `-public-url` | (from the request) | the URL phones use to reach the server, put in setup links, e.g. `https://health.example.com` |
+| `-setup-from` | `private` | who may open `/setup` and pair: `private` (loopback, LAN, Tailscale), `any`, or `off` |
 | `-forward-url` | | line-protocol write URL, e.g. `http://127.0.0.1:8428/influx/write` (VictoriaMetrics) or `http://influx:8086/api/v2/write?org=o&bucket=b&precision=ns` (InfluxDB 2) |
 | `-forward-token-file` | | bearer token for `-forward-url` |
 | `-measurement` | `healthkit` | line-protocol measurement name |
@@ -28,6 +30,43 @@ with dashes as underscores (`-archive-dir` is `HKR_ARCHIVE_DIR`). Flags win.
 The token is read from a file, never from a flag value, so it stays out of process
 listings. With systemd, `LoadCredential=` and `-token-file ${CREDENTIALS_DIRECTORY}/token`
 work well.
+
+## Setting up the app
+
+The **server token** is the admin credential. The app does not need it: it gets a token of
+its own by scanning a one-time setup code.
+
+- **Setup page.** Open `https://<server>/setup` in a browser and enter the server token: the
+  page shows a QR code to scan with the iPhone's Camera (on the iPhone itself, an **Open in
+  Health Relay** button instead), turns into "iPhone connected" once the app has paired, and
+  lists paired iPhones with a **Revoke** button. The sign-in lasts an hour (an HttpOnly,
+  SameSite=Strict cookie).
+- **Terminal.** `healthkit-relay pair` prints the QR code in the terminal, and a link to the
+  setup page for that code alone (no token needed to open it; for instance to send to your
+  phone). It reads the same flags and `HKR_` variables as the server, and talks to the
+  running server on `-listen` (or `-server URL`) with the server token:
+
+  ```sh
+  healthkit-relay pair -token-file ./token -public-url https://health.example.com
+  healthkit-relay devices -token-file ./token
+  healthkit-relay revoke -token-file ./token 3f9a1c2e
+  ```
+
+How it works:
+
+- A setup code is 120 random bits, works once, and expires after 15 minutes; codes live in
+  memory only, so a restart voids them. The QR code holds
+  `healthrelay://pair?server=<public url>&code=<code>`, which the app registers.
+- The app sends the code to `POST /v1/pair` and gets a token of its own (256 random bits). The
+  server stores only its SHA-256, with the device's name and model, in
+  `<archive-dir>/devices.json` (mode 600). Revoking deletes the entry: the token stops
+  working at once. Pairing again from the same iPhone revokes its previous token.
+- `/setup` and `/v1/pair` answer only clients on private networks by default
+  (`-setup-from`); behind a reverse proxy on the same host, the address the proxy puts last in
+  `X-Forwarded-For` counts. Without the server token or a valid code, the page shows only its
+  sign-in form. Responses are not cached, send no referrer and cannot be framed.
+- The server token still authorizes uploads, so an app set up by hand keeps working (app
+  0.4 swaps it for a device token of its own on the first start).
 
 ## API
 
@@ -109,7 +148,30 @@ Responses:
   the batch is on disk. `records` tells a client the server stores records (a v1 server
   would silently drop them).
 - `400` invalid JSON or an invalid record. Nothing from the batch is stored.
-- `401` missing or wrong token. `413` body too large. `500` the archive could not be written.
+- `401` missing, wrong or revoked token. `413` body too large. `500` the archive could not be
+  written.
+
+The token is the server token or a device token from pairing.
+
+### `POST /v1/pair`
+
+No token; the setup code is the credential. Body `{"code": "…", "name": "iPhone", "model":
+"iPhone17,1", "replaces": "<previous device token, optional>"}`. `200`
+`{"token": "…", "device": {"id": "3f9a1c2e", "name": "iPhone", "model": "iPhone17,1",
+"created_at": "…"}, "server": {…status…}}`; `403` for an unknown, used or expired code, or a
+client outside `-setup-from`.
+
+### `GET /v1/status`
+
+Any valid token. `{"version": "…", "wire_version": 2, "records": 12571973, "device": {…}}`
+(`device` only for a device token). The app shows the record count and detects a revoked
+token here.
+
+### `POST /v1/pairing-codes`, `GET /v1/devices`, `DELETE /v1/devices/{id}`
+
+Server token only: mint a setup code (`{"code", "expires_at", "link", "setup_url"}`; the body
+may give `{"public_url": "…"}` when `-public-url` is not set), list paired devices, revoke
+one (`204`). The `pair`, `devices` and `revoke` commands use these.
 
 A batch is stored entirely or not at all, so a client can safely retry until it gets 200.
 
@@ -119,8 +181,10 @@ A batch is stored entirely or not at all, so a client can safely retry until it 
 
 ### `GET /metrics`
 
-Prometheus text format: `healthkit_relay_requests_total{result}`,
-`healthkit_relay_records_total{outcome}`, `healthkit_relay_archive_records`,
+Prometheus text format: `healthkit_relay_requests_total{result}` (`ok`, `unauthorized`,
+`bad_request`, `incomplete` for a body cut short by a client going away, `archive_error`,
+`paired`, `pair_rejected`), `healthkit_relay_records_total{outcome}`,
+`healthkit_relay_archive_records`, `healthkit_relay_devices`,
 `healthkit_relay_forward_errors_total`, `healthkit_relay_last_upload_timestamp_seconds`.
 No health data.
 

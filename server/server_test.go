@@ -49,7 +49,11 @@ func newTestServer(t *testing.T, dir string) (*httptest.Server, *fakeMetrics) {
 	fm := &fakeMetrics{}
 	metrics := httptest.NewServer(fm)
 	t.Cleanup(metrics.Close)
-	s := &Server{Archive: a, Token: testToken, MaxBodyBytes: 1 << 20,
+	devices, err := OpenDevices(filepath.Join(dir, "devices.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{Archive: a, Token: testToken, MaxBodyBytes: 1 << 20, Devices: devices, Codes: NewCodes(),
 		Forwarder: &Forwarder{URL: metrics.URL, Measurement: "healthkit", Client: metrics.Client()}}
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)

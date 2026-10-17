@@ -4,6 +4,10 @@
 //
 // Every flag can also be set with an environment variable: -archive-dir is HKR_ARCHIVE_DIR,
 // and so on (upper case, dashes as underscores, HKR_ prefix). Flags win over the environment.
+//
+// Subcommands talk to the running server with the same configuration: `pair` prints a
+// one-time setup code (QR code and link) for the app, `devices` lists paired devices and
+// `revoke <id>` removes one.
 package main
 
 import (
@@ -15,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -28,11 +33,30 @@ func main() {
 	}
 }
 
+// config holds the flags the server and its subcommands share.
+type config struct {
+	listen, archiveDir, tokenFile, publicURL, setupFrom string
+}
+
+func (c *config) register(fs *flag.FlagSet) {
+	fs.StringVar(&c.listen, "listen", "127.0.0.1:8080", "address to listen on")
+	fs.StringVar(&c.archiveDir, "archive-dir", "", "directory of the append-only archive, and of devices.json (required)")
+	fs.StringVar(&c.tokenFile, "token-file", "", "file holding the server token: admin credential, also accepted for uploads (required)")
+	fs.StringVar(&c.publicURL, "public-url", "", "URL phones use to reach this server, put in setup links, e.g. https://health.example.com (default: taken from the request)")
+	fs.StringVar(&c.setupFrom, "setup-from", "private", "who may open /setup and pair: private (loopback, LAN, Tailscale), any, or off")
+}
+
 func run(args []string) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "pair", "devices", "revoke":
+			return runCommand(args[0], args[1:], os.Stdout)
+		}
+	}
 	fs := flag.NewFlagSet("healthkit-relay", flag.ContinueOnError)
-	listen := fs.String("listen", "127.0.0.1:8080", "address to listen on")
-	archiveDir := fs.String("archive-dir", "", "directory of the append-only archive (required)")
-	tokenFile := fs.String("token-file", "", "file holding the bearer token clients must send (required)")
+	var cfg config
+	cfg.register(fs)
+	listen, archiveDir, tokenFile := &cfg.listen, &cfg.archiveDir, &cfg.tokenFile
 	forwardURL := fs.String("forward-url", "", "InfluxDB line-protocol write URL for numeric samples, e.g. http://127.0.0.1:8428/influx/write (optional)")
 	forwardTokenFile := fs.String("forward-token-file", "", "file holding a bearer token for -forward-url (optional)")
 	measurement := fs.String("measurement", "healthkit", "line-protocol measurement name; metrics are named <measurement>_<field>")
@@ -51,6 +75,11 @@ func run(args []string) error {
 	if *archiveDir == "" || *tokenFile == "" {
 		return errors.New("-archive-dir and -token-file are required")
 	}
+	switch cfg.setupFrom {
+	case "private", "any", "off":
+	default:
+		return fmt.Errorf("-setup-from must be private, any or off, not %q", cfg.setupFrom)
+	}
 
 	token, err := readSecret(*tokenFile)
 	if err != nil {
@@ -65,7 +94,12 @@ func run(args []string) error {
 	}
 	log.Printf("healthkit-relay %s: archive %s holds %d records", version, *archiveDir, archive.Len())
 
-	srv := &Server{Archive: archive, Token: token, MaxBodyBytes: *maxBody}
+	devices, err := OpenDevices(filepath.Join(*archiveDir, "devices.json"))
+	if err != nil {
+		return fmt.Errorf("open devices: %w", err)
+	}
+	srv := &Server{Archive: archive, Token: token, MaxBodyBytes: *maxBody, Devices: devices, Codes: NewCodes(),
+		PublicURL: strings.TrimRight(cfg.publicURL, "/"), SetupFrom: cfg.setupFrom}
 	if *forwardURL != "" {
 		f := &Forwarder{URL: *forwardURL, Measurement: *measurement, Client: &http.Client{}}
 		if *forwardTokenFile != "" {
@@ -89,7 +123,7 @@ func run(args []string) error {
 	defer stop()
 	errc := make(chan error, 1)
 	go func() { errc <- hs.ListenAndServe() }()
-	log.Printf("listening on %s", *listen)
+	log.Printf("listening on %s; %d paired devices; setup page /setup (%s)", *listen, devices.Len(), cfg.setupFrom)
 	select {
 	case err := <-errc:
 		return err

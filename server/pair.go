@@ -1,0 +1,482 @@
+package main
+
+import (
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base32"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"log"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Pairing. The server token is the admin credential: whoever holds it mints one-time setup
+// codes (`healthkit-relay pair`, or the setup page). The app exchanges a code for a token of
+// its own; the server keeps only its SHA-256, in <archive-dir>/devices.json, and can revoke
+// it. The server token still authorizes uploads, so apps set up by hand keep working.
+
+// Device is a paired app.
+type Device struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Model     string    `json:"model,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	LastSeen  time.Time `json:"last_seen_at,omitempty"`
+	TokenHash string    `json:"token_sha256,omitempty"`
+}
+
+// Devices is the list of paired apps, persisted as JSON.
+type Devices struct {
+	path string
+	now  func() time.Time
+
+	mu     sync.Mutex
+	list   []*Device
+	byHash map[string]*Device
+}
+
+// OpenDevices loads the device list at path; a missing file is an empty list.
+func OpenDevices(path string) (*Devices, error) {
+	d := &Devices{path: path, now: time.Now, byHash: map[string]*Device{}}
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return d, nil
+	} else if err != nil {
+		return nil, err
+	}
+	var file struct{ Devices []*Device }
+	if err := json.Unmarshal(b, &file); err != nil {
+		return nil, err
+	}
+	for _, dev := range file.Devices {
+		d.list = append(d.list, dev)
+		d.byHash[dev.TokenHash] = dev
+	}
+	return d, nil
+}
+
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+func randomString(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic(err) // crypto/rand does not fail on supported platforms
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// Add pairs a new device and returns its token, which is not stored.
+func (d *Devices) Add(name, model string) (string, Device, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	token := randomString(32)
+	dev := &Device{Name: name, Model: model, CreatedAt: d.now().UTC().Truncate(time.Second), TokenHash: hashToken(token)}
+	dev.LastSeen = dev.CreatedAt
+	for dev.ID == "" || d.find(dev.ID) >= 0 {
+		b := make([]byte, 4)
+		rand.Read(b)
+		dev.ID = hex.EncodeToString(b)
+	}
+	d.list = append(d.list, dev)
+	d.byHash[dev.TokenHash] = dev
+	if err := d.save(); err != nil {
+		d.list = d.list[:len(d.list)-1]
+		delete(d.byHash, dev.TokenHash)
+		return "", Device{}, err
+	}
+	return token, dev.public(), nil
+}
+
+func (d *Devices) find(id string) int {
+	for i, dev := range d.list {
+		if dev.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// Revoke removes a device; its token stops working at once.
+func (d *Devices) Revoke(id string) (bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	i := d.find(id)
+	if i < 0 {
+		return false, nil
+	}
+	dev := d.list[i]
+	d.list = append(d.list[:i:i], d.list[i+1:]...)
+	delete(d.byHash, dev.TokenHash)
+	return true, d.save()
+}
+
+// Lookup returns the device a token belongs to, and records that it was seen (to the
+// nearest ten minutes, to keep writes rare).
+func (d *Devices) Lookup(token string) (Device, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	dev, ok := d.byHash[hashToken(token)]
+	if !ok {
+		return Device{}, false
+	}
+	if now := d.now().UTC(); now.Sub(dev.LastSeen) > 10*time.Minute {
+		dev.LastSeen = now.Truncate(time.Second)
+		_ = d.save() // a lost last-seen time is not worth failing an upload for
+	}
+	return dev.public(), true
+}
+
+// List returns the devices, oldest first, without token hashes.
+func (d *Devices) List() []Device {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]Device, 0, len(d.list))
+	for _, dev := range d.list {
+		out = append(out, dev.public())
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out
+}
+
+func (d *Devices) Len() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.list)
+}
+
+func (dev *Device) public() Device {
+	c := *dev
+	c.TokenHash = ""
+	return c
+}
+
+func (d *Devices) save() error {
+	b, err := json.MarshalIndent(struct {
+		Devices []*Device `json:"devices"`
+	}{d.list}, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(d.path), ".devices-*.json")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(append(b, '\n')); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), d.path)
+}
+
+// Setup codes: single use, valid for CodeTTL, held in memory only (a restart voids them).
+
+const CodeTTL = 15 * time.Minute
+
+type setupCode struct {
+	expires time.Time
+	minted  time.Time
+	device  *Device // set once used
+}
+
+// Codes holds the setup codes not yet expired.
+type Codes struct {
+	now func() time.Time
+
+	mu sync.Mutex
+	m  map[string]*setupCode // by SHA-256 of the code
+}
+
+func NewCodes() *Codes { return &Codes{now: time.Now, m: map[string]*setupCode{}} }
+
+var codeEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
+
+// Mint returns a new code (120 random bits, 24 characters of A-Z2-7).
+func (c *Codes) Mint() (string, time.Time) {
+	b := make([]byte, 15)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	code := codeEncoding.EncodeToString(b)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now()
+	c.prune(now)
+	// Bound the number of live codes: a setup page left open and reloaded mints one each time.
+	for len(c.m) >= 50 {
+		var oldest string
+		for k, v := range c.m {
+			if oldest == "" || v.minted.Before(c.m[oldest].minted) {
+				oldest = k
+			}
+		}
+		delete(c.m, oldest)
+	}
+	exp := now.Add(CodeTTL)
+	c.m[hashToken(code)] = &setupCode{expires: exp, minted: now}
+	return code, exp
+}
+
+func (c *Codes) prune(now time.Time) {
+	for k, v := range c.m {
+		if now.After(v.expires) {
+			delete(c.m, k)
+		}
+	}
+}
+
+func normalizeCode(code string) string {
+	return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(code), "-", ""))
+}
+
+// Redeem marks a code used by the device pair() creates, if the code is valid; the code
+// stays known (as used) until it expires, for the setup page to show the result.
+func (c *Codes) Redeem(code string, pair func() (Device, error)) (Device, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now()
+	c.prune(now)
+	sc, ok := c.m[hashToken(normalizeCode(code))]
+	if !ok || sc.device != nil {
+		return Device{}, errBadCode
+	}
+	dev, err := pair()
+	if err != nil {
+		return Device{}, err
+	}
+	sc.device = &dev
+	return dev, nil
+}
+
+var errBadCode = errors.New("this setup code is not valid: it may have expired or been used already. Get a new one from the setup page")
+
+// State is "pending", "paired" (with the device) or "invalid".
+func (c *Codes) State(code string) (string, *Device, time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.prune(c.now())
+	sc, ok := c.m[hashToken(normalizeCode(code))]
+	switch {
+	case !ok:
+		return "invalid", nil, time.Time{}
+	case sc.device != nil:
+		d := *sc.device
+		return "paired", &d, sc.expires
+	default:
+		return "pending", nil, sc.expires
+	}
+}
+
+// AppScheme is the URL scheme the Health Relay app registers.
+const AppScheme = "healthrelay"
+
+// PairLink is the URL that sets up the app in one tap: healthrelay://pair?server=…&code=….
+func PairLink(server, code string) string {
+	v := url.Values{"server": {server}, "code": {code}}
+	return AppScheme + "://pair?" + v.Encode()
+}
+
+// Caller is who sent a request: the admin (server token) or a paired device.
+type Caller struct {
+	Admin  bool
+	Device *Device
+}
+
+func bearer(r *http.Request) string {
+	got, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return strings.TrimSpace(got)
+}
+
+func (s *Server) isAdminToken(token string) bool {
+	return token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.Token)) == 1
+}
+
+// caller authenticates a request; ok is false without a valid token.
+func (s *Server) caller(r *http.Request) (Caller, bool) {
+	token := bearer(r)
+	if token == "" {
+		return Caller{}, false
+	}
+	if s.isAdminToken(token) {
+		return Caller{Admin: true}, true
+	}
+	if s.Devices != nil {
+		if dev, ok := s.Devices.Lookup(token); ok {
+			return Caller{Device: &dev}, true
+		}
+	}
+	return Caller{}, false
+}
+
+func (s *Server) unauthorized(w http.ResponseWriter) {
+	s.count("unauthorized")
+	w.Header().Set("WWW-Authenticate", "Bearer")
+	httpError(w, http.StatusUnauthorized, "unauthorized")
+}
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(v)
+}
+
+// PairRequest is the body of POST /v1/pair.
+type PairRequest struct {
+	Code  string `json:"code"`
+	Name  string `json:"name"`
+	Model string `json:"model"`
+	// Replaces is the token the app used so far, if it was paired before: that device is
+	// revoked, so re-pairing leaves no stale entry.
+	Replaces string `json:"replaces,omitempty"`
+}
+
+// PairResponse answers POST /v1/pair.
+type PairResponse struct {
+	Token  string `json:"token"`
+	Device Device `json:"device"`
+	Server Status `json:"server"`
+}
+
+// Status answers GET /v1/status.
+type Status struct {
+	Version     string  `json:"version"`
+	WireVersion int     `json:"wire_version"`
+	Records     int     `json:"records"`
+	Device      *Device `json:"device,omitempty"`
+}
+
+func (s *Server) status(dev *Device) Status {
+	return Status{Version: version, WireVersion: WireVersion, Records: s.Archive.Len(), Device: dev}
+}
+
+func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
+	if !s.setupAllowed(r) {
+		httpError(w, http.StatusForbidden, "pairing is only open to private networks on this server")
+		return
+	}
+	var req PairRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = "iPhone"
+	}
+	if len(name) > 100 || len(req.Model) > 100 {
+		httpError(w, http.StatusBadRequest, "name or model too long")
+		return
+	}
+	var token string
+	dev, err := s.Codes.Redeem(req.Code, func() (Device, error) {
+		t, d, err := s.Devices.Add(name, strings.TrimSpace(req.Model))
+		token = t
+		return d, err
+	})
+	if errors.Is(err, errBadCode) {
+		s.count("pair_rejected")
+		httpError(w, http.StatusForbidden, err.Error())
+		return
+	} else if err != nil {
+		httpError(w, http.StatusInternalServerError, "could not save the device: "+err.Error())
+		return
+	}
+	if req.Replaces != "" && !s.isAdminToken(req.Replaces) {
+		if old, ok := s.Devices.Lookup(req.Replaces); ok {
+			s.Devices.Revoke(old.ID)
+		}
+	}
+	s.count("paired")
+	log.Printf("paired device %s (%s, %s)", dev.ID, dev.Name, dev.Model)
+	writeJSON(w, http.StatusOK, PairResponse{Token: token, Device: dev, Server: s.status(&dev)})
+}
+
+func (s *Server) statusHandler(w http.ResponseWriter, r *http.Request) {
+	c, ok := s.caller(r)
+	if !ok {
+		s.unauthorized(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.status(c.Device))
+}
+
+// CodeResponse answers POST /v1/pairing-codes.
+type CodeResponse struct {
+	Code      string    `json:"code"`
+	ExpiresAt time.Time `json:"expires_at"`
+	// Link sets up the app in one tap (or as a QR code); SetupURL is the page showing both.
+	Link     string `json:"link"`
+	SetupURL string `json:"setup_url"`
+}
+
+func (s *Server) mintCode(publicURL string) CodeResponse {
+	code, exp := s.Codes.Mint()
+	return CodeResponse{Code: code, ExpiresAt: exp.UTC().Truncate(time.Second), Link: PairLink(publicURL, code),
+		SetupURL: publicURL + "/setup?code=" + code}
+}
+
+func (s *Server) pairingCodes(w http.ResponseWriter, r *http.Request) {
+	if c, ok := s.caller(r); !ok || !c.Admin {
+		s.unauthorized(w)
+		return
+	}
+	var req struct {
+		PublicURL string `json:"public_url"`
+	}
+	json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req) // the body is optional
+	public := s.publicURL(r)
+	if s.PublicURL == "" && req.PublicURL != "" {
+		public = strings.TrimRight(req.PublicURL, "/")
+	}
+	writeJSON(w, http.StatusOK, s.mintCode(public))
+}
+
+func (s *Server) devicesList(w http.ResponseWriter, r *http.Request) {
+	if c, ok := s.caller(r); !ok || !c.Admin {
+		s.unauthorized(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string][]Device{"devices": s.Devices.List()})
+}
+
+func (s *Server) deviceRevoke(w http.ResponseWriter, r *http.Request) {
+	if c, ok := s.caller(r); !ok || !c.Admin {
+		s.unauthorized(w)
+		return
+	}
+	ok, err := s.Devices.Revoke(r.PathValue("id"))
+	switch {
+	case err != nil:
+		httpError(w, http.StatusInternalServerError, err.Error())
+	case !ok:
+		httpError(w, http.StatusNotFound, "no such device")
+	default:
+		log.Printf("revoked device %s", r.PathValue("id"))
+		w.WriteHeader(http.StatusNoContent)
+	}
+}

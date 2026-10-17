@@ -8,12 +8,15 @@ final class ResumeOnce<T>: @unchecked Sendable {
 
     init(_ continuation: CheckedContinuation<T, Never>) { self.continuation = continuation }
 
-    func resume(_ value: T) {
+    /// Returns whether this call was the one that resumed.
+    @discardableResult
+    func resume(_ value: T) -> Bool {
         lock.lock()
         let c = continuation
         continuation = nil
         lock.unlock()
         c?.resume(returning: value)
+        return c != nil
     }
 }
 

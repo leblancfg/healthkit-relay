@@ -201,16 +201,29 @@ actor SyncEngine {
         if #available(iOS 16.0, *) {
             var asked = Set(UserDefaults.standard.stringArray(forKey: "perObjectRequested") ?? [])
             for type in p.perObject where !asked.contains(type.identifier) {
+                // Recorded before asking: per-object requests can show nothing and never call
+                // back (no such objects in Health), which must not leave the app waiting on
+                // this type forever.
+                asked.insert(type.identifier)
+                UserDefaults.standard.set(Array(asked), forKey: "perObjectRequested")
+                Log.info("authorization: per-object request for \(type.identifier)")
                 await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                     let once = ResumeOnce(cont)
                     let raised = HKRTry {
-                        self.store.requestPerObjectReadAuthorization(for: type, predicate: nil) { _, _ in once.resume(()) }
+                        self.store.requestPerObjectReadAuthorization(for: type, predicate: nil) { _, error in
+                            if let error { Log.info("authorization: \(type.identifier): \(error.localizedDescription)") }
+                            once.resume(())
+                        }
                     }
                     if raised != nil { once.resume(()) }
+                    // A sheet the user is looking at stays up; this only stops the wait.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
+                        if once.resume(()) {
+                            Log.info("authorization: \(type.identifier): no answer after 20 s, moving on")
+                        }
+                    }
                 }
-                asked.insert(type.identifier)
             }
-            UserDefaults.standard.set(Array(asked), forKey: "perObjectRequested")
         }
         requested = nil
         await startObserving()

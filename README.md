@@ -72,10 +72,12 @@ kept.
 - Your data goes to your server and nowhere else: no analytics, no third-party SDKs, no
   vendor cloud. The app has no network destination other than the URL you enter.
 - The app asks for **read** access only and never writes to Health.
-- The server URL and token live in the iPhone Keychain (this device only), never in the
-  source or the app bundle.
-- The server needs a bearer token for uploads. Run it behind HTTPS (a reverse proxy, or a
-  private network such as a VPN or Tailscale); do not expose it publicly without TLS.
+- The server URL and the app's token live in the iPhone Keychain (this device only), never
+  in the source or the app bundle. Each iPhone gets a token of its own when it scans a setup
+  code; the server keeps only a hash of it and can revoke it.
+- The server needs a token for uploads. Run it behind HTTPS (a reverse proxy, or a private
+  network such as a VPN or Tailscale); do not expose it publicly without TLS. Setup and
+  pairing answer private networks only, by default.
 - `/healthz` and `/metrics` carry no health data (`/metrics` exposes request counts).
 - The archive is plain JSON Lines: readable with `jq`, easy to back up, easy to delete.
 
@@ -100,9 +102,13 @@ cp ios/Config/Local.xcconfig.example ios/Config/Local.xcconfig   # set your team
 make ios-build    # or: make ios-project, then open ios/HealthKitRelay.xcodeproj
 ```
 
-Then open **Health Relay** on the phone, enter the server URL and token, tap **Grant
-access** (one sheet for everything; vision prescriptions, medications and Health Records are
-optional rows of their own) and **Sync now**. See [ios/README.md](ios/README.md).
+Then set up the app in one tap: open `http://127.0.0.1:8080/setup` (or your server's
+address) in a browser, enter the token, and scan the code with the iPhone's Camera. Or, on
+the server, run `./bin/healthkit-relay pair -token-file ./token -public-url <address phones
+use>` and scan the code it prints. The app connects, asks for Health access once (select
+everything, then confirm) and starts syncing; there is nothing else to set. See
+[server/README.md](server/README.md#setting-up-the-app) for how pairing works, and
+[ios/README.md](ios/README.md).
 
 ## Layout
 

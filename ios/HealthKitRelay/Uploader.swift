@@ -5,6 +5,7 @@ enum UploadError: LocalizedError {
     case rejected(Int, String)   // the server refused the batch; retrying will not help
     case failed(String)          // network or server trouble; worth retrying later
     case serverTooOld
+    case unauthorized             // token revoked or replaced
 
     var errorDescription: String? {
         switch self {
@@ -12,6 +13,7 @@ enum UploadError: LocalizedError {
         case let .rejected(code, msg): "Server rejected the upload (\(code)): \(msg)"
         case let .failed(msg): "Upload failed: \(msg)"
         case .serverTooOld: "The server is too old for this app (needs wire format v2): update healthkit-relay"
+        case .unauthorized: "The server no longer accepts this iPhone. Scan a new setup code from its setup page."
         }
     }
 }
@@ -49,6 +51,7 @@ struct Uploader: Sendable {
                     return
                 }
                 let msg = String(decoding: data.prefix(300), as: UTF8.self)
+                if code == 401 { throw UploadError.unauthorized }
                 if code == 408 || code == 429 || code >= 500 {
                     lastError = .failed("HTTP \(code): \(msg)")
                     continue

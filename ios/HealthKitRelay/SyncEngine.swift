@@ -15,7 +15,7 @@ enum SyncError: LocalizedError {
         case let .disallowed(reason): "HealthKit refused the query: \(reason)"
         case .notAuthorized: "Not authorized"
         case .noAnchor: "HealthKit returned no anchor"
-        case .noAccess: "No Health data is readable yet: tap Grant access and allow the data types"
+        case .noAccess: "Health Relay cannot read any Health data yet."
         }
     }
 }
@@ -27,6 +27,10 @@ final class SyncStatus: ObservableObject {
 
     @Published var running = false
     @Published var detail = ""
+    /// Share of the data types done in the running sync, 0 to 1.
+    @Published var progress: Double?
+    /// iOS 27+: Health shares only data since this date (the user chose recent history).
+    @Published var historyLimit: Date?
     @Published var lastError: String?
     @Published var lastSuccess: Date? {
         didSet { UserDefaults.standard.set(lastSuccess, forKey: "lastSuccess") }
@@ -68,6 +72,8 @@ struct Coverage: Sendable {
     var requested = 0
     var excluded: [String: String] = [:]
     var unavailable: [String] = []
+    /// Identifiers of the types read.
+    var readable: [String] = []
     /// Types of the main request never asked (an update added them).
     var notYetRequested = 0
 }
@@ -266,6 +272,45 @@ actor SyncEngine {
         Task { await self.startObserving() }
     }
 
+    // MARK: History limit (iOS 27)
+
+    private static let historyLimitKey = "historyLimit"
+
+    /// The latest "earliest readable date" Health sets for any read type when the user shares
+    /// only recent history; nil with full access or before iOS 27.
+    func historyLimit() async -> Date? {
+        guard #available(iOS 27.0, *) else { return nil }
+        let types = Set((await authPlan()).read)
+        let store = store
+        return await withCheckedContinuation { (cont: CheckedContinuation<Date?, Never>) in
+            let once = ResumeOnce(cont)
+            let raised = HKRTry {
+                store.getEarliestAuthorizedSampleDate(for: types) { dates, _ in once.resume(dates?.values.max()) }
+            }
+            if raised != nil { once.resume(nil) }
+        }
+    }
+
+    /// Anchored queries never return samples from before a limit that is later lifted (their
+    /// anchors are past them), so when the user widens access, history is read again; the
+    /// server skips what it has.
+    private func checkHistoryLimit() async {
+        let limit = await historyLimit()
+        let defaults = UserDefaults.standard
+        let previous = defaults.object(forKey: Self.historyLimitKey) as? Date
+        if let previous, limit == nil || limit! < previous {
+            Log.info("sync: Health now shares older data (limit was \(previous.formatted(.iso8601.year().month().day()))): reading all history again")
+            anchors.reset()
+        }
+        if let limit {
+            defaults.set(limit, forKey: Self.historyLimitKey)
+            if limit != previous { Log.info("sync: Health shares data since \(limit.formatted(.iso8601.year().month().day())) only") }
+        } else {
+            defaults.removeObject(forKey: Self.historyLimitKey)
+        }
+        await MainActor.run { SyncStatus.shared.historyLimit = limit }
+    }
+
     // MARK: Per-object authorization
 
     static let perObjectKey = "perObjectOutcomes"
@@ -296,7 +341,7 @@ actor SyncEngine {
         switch identifier {
         case HKVisionPrescriptionTypeIdentifier: "Vision prescriptions"
         case HKDocumentTypeIdentifier.CDA.rawValue: "Clinical documents (CDA)"
-        case "HKDataTypeIdentifierUserAnnotatedMedicationConcept": "Medications"
+        case "HKDataTypeUserAnnotatedMedicationConcept", "HKDataTypeIdentifierUserAnnotatedMedicationConcept": "Medications"
         default: shortName(identifier)
         }
     }
@@ -459,6 +504,7 @@ actor SyncEngine {
             requested: req.count,
             excluded: p.excluded,
             unavailable: catalog.unavailable,
+            readable: req.sorted(),
             notYetRequested: p.read.filter { !askedRead.contains($0.identifier) }.count)
     }
 
@@ -539,13 +585,14 @@ actor SyncEngine {
             firstError = error
         }
         let req = await requestedTypes()
+        await checkHistoryLimit()
         let types = HealthTypes.all.filter { $0.sampleType != nil && req.contains($0.key) }
         Log.info("sync: \(types.count) readable sample types")
         if types.isEmpty && firstError == nil {
             firstError = SyncError.noAccess
         }
         for (i, synced) in types.enumerated() where !Self.isFatal(firstError) {
-            await show("\(i + 1)/\(types.count) \(Self.shortName(synced.key))")
+            await show(Self.readableName(synced.key), progress: Double(i) / Double(max(1, types.count)))
             do {
                 total += try await sync(synced)
             } catch SyncError.notAuthorized, SyncError.disallowed {
@@ -567,6 +614,7 @@ actor SyncEngine {
             let status = SyncStatus.shared
             status.running = false
             status.detail = ""
+            status.progress = nil
             if let failure {
                 Log.error("sync: \(failure)")
                 status.lastError = failure.localizedDescription
@@ -585,7 +633,7 @@ actor SyncEngine {
         if error is CancellationError { return true }
         if let e = error as? UploadError {
             switch e {
-            case .notConfigured, .serverTooOld: return true
+            case .notConfigured, .serverTooOld, .unauthorized: return true
             default: return false
             }
         }
@@ -703,7 +751,7 @@ actor SyncEngine {
 
             total += items.count
             let shown = total
-            await show("\(Self.shortName(key)): \(shown) uploaded")
+            await show("\(Self.readableName(key)) · \(shown.formatted()) sent")
         }
     }
 
@@ -960,14 +1008,41 @@ actor SyncEngine {
 
     // MARK: Helpers
 
-    private func show(_ text: String) async {
-        await MainActor.run { SyncStatus.shared.detail = text }
+    private func show(_ text: String, progress: Double? = nil) async {
+        await MainActor.run {
+            SyncStatus.shared.detail = text
+            if let progress { SyncStatus.shared.progress = progress }
+        }
+    }
+
+    /// "HKQuantityTypeIdentifierHeartRateVariabilitySDNN" -> "Heart rate variability SDNN".
+    static func readableName(_ identifier: String) -> String {
+        let short = shortName(identifier).replacingOccurrences(of: "TypeIdentifier", with: "")
+        var words: [String] = []
+        var word = ""
+        let chars = Array(short)
+        for (i, c) in chars.enumerated() {
+            let next = i + 1 < chars.count ? chars[i + 1] : nil
+            // A new word at a capital after a lower-case letter or a digit, or at the last
+            // capital of a run followed by lower case ("SDNNValue" -> "SDNN", "Value").
+            if c.isUppercase, !word.isEmpty,
+               word.last?.isLowercase == true || word.last?.isNumber == true
+               || (next?.isLowercase == true && word.last?.isUppercase == true) {
+                words.append(word)
+                word = ""
+            }
+            word.append(c)
+        }
+        if !word.isEmpty { words.append(word) }
+        return words.enumerated().map { i, w in
+            i > 0 && w.count > 1 && w.dropFirst().allSatisfy(\.isLowercase) ? w.lowercased() : w
+        }.joined(separator: " ")
     }
 
     static func shortName(_ identifier: String) -> String {
         for p in ["HKQuantityTypeIdentifier", "HKCategoryTypeIdentifier", "HKCorrelationTypeIdentifier",
                   "HKClinicalTypeIdentifier", "HKDocumentTypeIdentifier", "HKScoredAssessmentTypeIdentifier",
-                  "HKDataTypeIdentifier", "HK"] where identifier.hasPrefix(p) && identifier.count > p.count {
+                  "HKCharacteristicTypeIdentifier", "HKDataTypeIdentifier", "HKDataType", "HK"] where identifier.hasPrefix(p) && identifier.count > p.count {
             return String(identifier.dropFirst(p.count))
         }
         return identifier

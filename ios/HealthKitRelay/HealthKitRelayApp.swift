@@ -8,6 +8,7 @@ struct HealthKitRelayApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .onOpenURL { url in Task { await AppModel.shared.open(url) } }
         }
     }
 }
@@ -15,6 +16,9 @@ struct HealthKitRelayApp: App {
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-hkr-reset-state") { AppModel.resetForTesting() }
+        #endif
         let info = Bundle.main.infoDictionary
         Log.info("app: \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?")) launched, "
             + "state \(application.applicationState.rawValue)")

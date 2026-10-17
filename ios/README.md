@@ -40,12 +40,13 @@ case names of every HealthKit enum. At run time each type is built from its iden
 string through the Objective-C runtime, so a type the running iOS lacks is skipped rather
 than crashing. To see what a new Xcode adds: build, then `git diff` the generated file.
 
-**Grant access** asks for everything in one sheet. HealthKit's own rules shape it: types
+The app asks for everything in one sheet. HealthKit's own rules shape it: types
 needing a companion are requested together (routes with workouts, heartbeat series with HRV),
 and correlations and medication dose events are read through their parts. Types granted
 object by object (vision prescriptions, medications, CDA documents) and Health Records are
-not part of it: each has its own row under **Optional**, since their sheets can be slow,
-lead to Apple's provider setup, or never come when Health has nothing to list. Health
+not part of it: each is one tap under **Advanced**, since their sheets can be slow, lead to
+Apple's provider setup, or never come when Health has nothing to list, and an app cannot
+see beforehand whether there is anything to pick. Health
 records need the Clinical Health Records capability on your App ID (Automatic signing adds
 it).
 
@@ -55,15 +56,21 @@ exception guard (`HealthKitSafe.swift`), so such a type is skipped and logged, n
 
 ## Use
 
-1. Enter the server URL (`https://…`; the app appends `/v1/samples`) and the token. Save.
-2. **Grant access** and allow the data types you want to share. After an update that brings
-   new types, the button comes back: tap it again to include them. Optionally, tap the rows
-   under **Optional** (vision prescriptions, medications...) to pick items to share.
-3. **Sync now**. The first sync uploads all history, which can take a while; keep the app
+1. **Set up**: open your server's setup page (`https://<server>/setup`) on a computer and
+   scan its code with the iPhone's Camera, then tap **Open in Health Relay** (on the iPhone
+   itself, tap the page's button). Or run `healthkit-relay pair` on the server and scan the
+   code it prints. **Enter Server Details Instead** takes an address and the server token,
+   which the app swaps for a token of its own.
+2. Health asks once what Health Relay may read: select everything, then confirm. The app
+   asks again by itself only when an update brings data types the sheet never showed.
+3. That is all. The first sync uploads all history, which can take a while; keep the app
    open. After that iOS wakes the app in the background when new data arrives (about
-   hourly, at the system's discretion; Low Power Mode and force-quitting the app pause it).
+   hourly, at the system's discretion; Low Power Mode and force-quitting the app pause it),
+   and it also syncs whenever it is opened. **Sync Now** (or pulling down) syncs at once.
 
-**Re-send all history** forgets the sync position; the server drops what it already has.
+The main screen shows only how syncing goes. **Advanced** (the gear) has the server and
+this iPhone's pairing, which data types are read, the types shared item by item, re-sending
+all history and a diagnostic log (steps and counts, no health values).
 
 ## Code
 
@@ -82,4 +89,8 @@ exception guard (`HealthKitSafe.swift`), so such a type is skipped and logged, n
 | `WireFormat.swift` | batches (wire format v2), source and device fields |
 | `AnchorStore.swift` | persisted query anchors |
 | `Settings.swift` | server URL and token in the Keychain |
-| `ContentView.swift` | the single screen |
+| `AppModel.swift` | setup from a link, the Health request, syncing on open |
+| `Pairing.swift` | setup links, pairing and status calls |
+| `ContentView.swift` | the main screen (status), first-run welcome, manual setup |
+| `AdvancedView.swift` | server, data types, item-by-item types, maintenance |
+| `HealthKitRelayUITests/` | the setup flow end to end on a simulator (`Scripts/ui-test`) |

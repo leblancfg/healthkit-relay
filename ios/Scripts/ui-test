@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Runs the setup-flow UI test on a simulator against a throwaway local server, and copies
+# its screenshots to ios/build/ui-screenshots. macOS with Xcode and XcodeGen; the server is
+# built with Go, or taken from HKR_SERVER_BIN.
+#   ios/Scripts/ui-test [simulator name]       (default: iPhone 17)
+set -euo pipefail
+cd "$(dirname "$0")/.."
+sim=${1:-iPhone 17}
+work=$(mktemp -d)
+trap 'kill "${server_pid:-}" 2>/dev/null || true; rm -rf "$work"' EXIT
+
+bin=${HKR_SERVER_BIN:-}
+if [ -z "$bin" ]; then
+  bin=$work/healthkit-relay
+  (cd ../server && CGO_ENABLED=0 go build -o "$bin" .)
+fi
+port=18180
+head -c 32 /dev/urandom | base64 > "$work/token"
+"$bin" -listen 127.0.0.1:$port -archive-dir "$work/archive" -token-file "$work/token" \
+  -public-url http://127.0.0.1:$port > "$work/server.log" 2>&1 &
+server_pid=$!
+for _ in $(seq 50); do curl -fs http://127.0.0.1:$port/healthz >/dev/null && break; sleep 0.1; done
+setup=$("$bin" pair -listen 127.0.0.1:$port -token-file "$work/token" -public-url http://127.0.0.1:$port \
+  | sed -n 's|^ *\(http://[^ ]*/setup?code=[A-Z0-9]*\)$|\1|p')
+echo "setup page: $setup"
+
+# A fresh simulator, so Health asks as on a new phone.
+xcrun simctl shutdown "$sim" 2>/dev/null || true
+xcrun simctl erase "$sim"
+xcodegen generate -q
+rm -rf build/ui.xcresult
+rc=0
+TEST_RUNNER_HKR_SETUP_URL=$setup xcodebuild test -project HealthKitRelay.xcodeproj -scheme HealthKitRelay \
+  -destination "platform=iOS Simulator,name=$sim" -derivedDataPath build -resultBundlePath build/ui.xcresult \
+  -only-testing:HealthKitRelayUITests CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+  PROVISIONING_PROFILE_SPECIFIER= > "$work/test.log" 2>&1 || rc=$?
+cp "$work/test.log" build/ui-test.log
+grep -E "error:|Test Case|TEST (SUCCEEDED|FAILED)" build/ui-test.log || tail -30 build/ui-test.log
+rm -rf build/ui-screenshots
+xcrun xcresulttool export attachments --path build/ui.xcresult --output-path build/ui-screenshots >/dev/null || true
+echo "server log:"; sed 's/^/  /' "$work/server.log"
+echo "screenshots: $(pwd)/build/ui-screenshots"
+exit $rc

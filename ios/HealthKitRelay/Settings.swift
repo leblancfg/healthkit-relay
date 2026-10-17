@@ -18,6 +18,28 @@ struct ServerSettings: Equatable, Sendable {
         return c.url
     }
 
+    /// The server URL without /v1/samples.
+    var baseURL: URL? {
+        endpoint?.deletingLastPathComponent().deletingLastPathComponent()
+    }
+
+    /// host[:port], for display.
+    var host: String {
+        guard let c = baseURL.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }), let host = c.host else { return url }
+        return c.port.map { "\(host):\($0)" } ?? host
+    }
+
+    /// Whether both point to the same server (case, default ports and a trailing slash aside).
+    func sameServer(as other: String) -> Bool {
+        func key(_ s: String) -> String? {
+            guard let u = ServerSettings(url: s, token: "x").endpoint,
+                  let c = URLComponents(url: u, resolvingAgainstBaseURL: false), let scheme = c.scheme?.lowercased() else { return nil }
+            let port = c.port ?? (scheme == "https" ? 443 : 80)
+            return "\(scheme)://\(c.host?.lowercased() ?? ""):\(port)\(c.path)"
+        }
+        return key(url) != nil && key(url) == key(other)
+    }
+
     static func load() -> ServerSettings {
         ServerSettings(url: Keychain.get("server-url") ?? "", token: Keychain.get("server-token") ?? "")
     }
@@ -25,6 +47,11 @@ struct ServerSettings: Equatable, Sendable {
     func save() throws {
         try Keychain.set(url.trimmingCharacters(in: .whitespacesAndNewlines), for: "server-url")
         try Keychain.set(token.trimmingCharacters(in: .whitespacesAndNewlines), for: "server-token")
+    }
+
+    static func clear() {
+        Keychain.delete("server-url")
+        Keychain.delete("server-token")
     }
 }
 
@@ -43,6 +70,14 @@ enum Keychain {
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
               let data = item as? Data else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    static func delete(_ account: String) {
+        SecItemDelete([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ] as CFDictionary)
     }
 
     static func set(_ value: String, for account: String) throws {

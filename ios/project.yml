@@ -14,8 +14,8 @@ configFiles:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.3.0"
-    CURRENT_PROJECT_VERSION: "3"
+    MARKETING_VERSION: "0.4.0"
+    CURRENT_PROJECT_VERSION: "4"
 targets:
   HealthKitRelay:
     type: application
@@ -41,6 +41,14 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
+        # Setup links from the server: healthrelay://pair?server=…&code=…
+        CFBundleURLTypes:
+          - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER).pair
+            CFBundleURLSchemes: [healthrelay]
+        # Servers on a home network often have no TLS certificate: plain HTTP is allowed to
+        # local addresses (IPs, .local and single-label names) only.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         UIApplicationSupportsIndirectInputEvents: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSHealthShareUsageDescription: Health Relay reads your health data to copy it to your own server.
@@ -60,6 +68,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: false
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         SWIFT_OBJC_BRIDGING_HEADER: HealthKitRelay/Support/HealthKitRelay-Bridging-Header.h
         ENABLE_USER_SCRIPT_SANDBOXING: NO
   HealthKitRelayTests:
@@ -74,6 +83,22 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(HKR_BUNDLE_ID).tests
         DEVELOPMENT_TEAM: $(HKR_TEAM_ID)
         GENERATE_INFOPLIST_FILE: true
+  # The setup flow end to end (setup page, link, Health sheet, sync, screenshots). Needs a
+  # running server: Scripts/ui-test starts one and passes its setup page in
+  # TEST_RUNNER_HKR_SETUP_URL; without it the test is skipped.
+  HealthKitRelayUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: HealthKitRelayUITests
+    dependencies:
+      - target: HealthKitRelay
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(HKR_BUNDLE_ID).uitests
+        DEVELOPMENT_TEAM: $(HKR_TEAM_ID)
+        GENERATE_INFOPLIST_FILE: true
+        TEST_TARGET_NAME: HealthKitRelay
 schemes:
   HealthKitRelay:
     build:
@@ -82,3 +107,4 @@ schemes:
     test:
       targets:
         - HealthKitRelayTests
+        - HealthKitRelayUITests

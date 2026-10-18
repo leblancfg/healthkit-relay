@@ -690,6 +690,17 @@ actor SyncEngine {
         anchors.reset()
     }
 
+    /// Runs `erase` (the server deleting what this iPhone sent) with no sync in between, then
+    /// forgets all sync positions. Nothing is reset if `erase` throws. A sync of another type
+    /// waits, so no anchor advances past data the server just deleted.
+    func resetAnchors(after erase: @escaping @Sendable () async throws -> Void) async throws {
+        _ = try await exclusive("erase") {
+            try await erase()
+            await self.resetAnchors()
+            return 0
+        }
+    }
+
     private struct Context {
         let uploader: Uploader
         let device: JSON

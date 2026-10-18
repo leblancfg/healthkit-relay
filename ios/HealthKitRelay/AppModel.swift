@@ -20,6 +20,8 @@ final class AppModel: ObservableObject {
     /// The Health sheet has types it never showed (first setup, or an update added some).
     @Published private(set) var needsHealthAccess = false
     @Published private(set) var askingHealth = false
+    /// The server is deleting this iPhone's data (Erase Server Data and Start Over).
+    @Published private(set) var erasing = false
 
     var isConfigured: Bool { settings.isComplete }
 
@@ -213,6 +215,33 @@ final class AppModel: ObservableObject {
         UIApplication.shared.isIdleTimerDisabled = false
         if SyncStatus.shared.lastError == UploadError.unauthorized.errorDescription { revoked = true }
         await refreshServer()
+    }
+
+    /// Has the server permanently delete everything this iPhone uploaded, then sends all
+    /// Health data again from scratch. Throws, with nothing reset, unless the server erased
+    /// (HTTP 200); a server too old to erase throws ServerError.eraseUnsupported.
+    /// `thenSync` replaces the full sync in tests.
+    func eraseServerDataAndStartOver(thenSync: (@MainActor () async -> Void)? = nil) async throws {
+        guard !erasing else { return }
+        guard isConfigured, let base = settings.baseURL else { throw UploadError.notConfigured }
+        guard !SyncStatus.shared.running else { throw ServerError.notAllowed("A sync is running: erase once it is done.") }
+        erasing = true
+        let token = settings.token
+        Log.info("erase: asking \(settings.host) to delete this iPhone's data")
+        do {
+            try await SyncEngine.shared.resetAnchors {
+                let erased = try await ServerClient(base: base).erase(token: token)
+                Log.info("erase: server deleted \(erased.erased) items of device \(erased.device.flatMap { $0.isEmpty ? nil : $0 } ?? "(server token)")")
+            }
+        } catch {
+            erasing = false
+            Log.error("erase: \(error.localizedDescription)")
+            throw error
+        }
+        erasing = false
+        Log.info("erase: sync positions reset, sending all history")
+        await refreshServer()
+        if let thenSync { await thenSync() } else { await sync() }
     }
 
     func refreshServer() async {

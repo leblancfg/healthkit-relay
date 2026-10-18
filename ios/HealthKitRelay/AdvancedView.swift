@@ -4,12 +4,13 @@ import SwiftUI
 struct AdvancedView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var model = AppModel.shared
+    @ObservedObject private var status = SyncStatus.shared
     @State private var coverage: Coverage?
     @State private var perObjectRows: [PerObjectRow] = []
     @State private var healthRecordsAvailable = false
     @State private var healthRecordsOptedIn = false
     @State private var busy: Set<String> = []
-    @State private var confirmReset = false
+    @State private var confirmErase = false
     @State private var confirmDisconnect = false
     @State private var showManual = false
     @State private var alert: String?
@@ -69,14 +70,22 @@ struct AdvancedView: View {
                 }
 
                 Section {
-                    Button("Re-send All History", role: .destructive) { confirmReset = true }
+                    if model.erasing {
+                        HStack {
+                            ProgressView()
+                            Text("Erasing server data…").foregroundStyle(.secondary).padding(.leading, 4)
+                        }
+                    } else {
+                        Button("Erase Server Data and Start Over", role: .destructive) { confirmErase = true }
+                            .disabled(status.running)
+                    }
                     ShareLink(item: Log.fileURL) {
                         Text("Share Diagnostic Log")
                     }
                 } header: {
                     Text("Maintenance")
                 } footer: {
-                    Text("Re-sending uploads everything again on the next sync; the server skips what it already has. The log lists sync steps and counts, never health values.")
+                    Text(maintenanceFooter)
                 }
 
                 Section {
@@ -93,13 +102,19 @@ struct AdvancedView: View {
             .onReceive(NotificationCenter.default.publisher(for: SyncEngine.perObjectChanged)) { _ in
                 Task { await load() }
             }
-            .confirmationDialog("Re-send all history?", isPresented: $confirmReset, titleVisibility: .visible) {
-                Button("Re-send", role: .destructive) {
+            .confirmationDialog("Erase server data and start over?", isPresented: $confirmErase, titleVisibility: .visible) {
+                Button("Erase and Start Over", role: .destructive) {
+                    Log.info("ui: erase confirmed")
                     Task {
-                        await SyncEngine.shared.resetAnchors()
-                        await model.sync()
+                        do {
+                            try await model.eraseServerDataAndStartOver()
+                        } catch {
+                            alert = "Could not erase server data: \(error.localizedDescription)"
+                        }
                     }
                 }
+            } message: {
+                Text("This permanently deletes everything this iPhone uploaded to \(model.settings.host), then uploads all its Health data again from scratch. It cannot be undone.")
             }
             .confirmationDialog("Disconnect from \(model.settings.host)?", isPresented: $confirmDisconnect, titleVisibility: .visible) {
                 Button("Disconnect", role: .destructive) {
@@ -114,6 +129,17 @@ struct AdvancedView: View {
             }
             .sheet(isPresented: $showManual) { ManualSetupView() }
         }
+    }
+
+    private var maintenanceFooter: String {
+        let log = "The log lists sync steps and counts, never health values."
+        if model.erasing {
+            return "The server is deleting everything this iPhone uploaded; with a long history this can take several minutes. All Health data is sent again once it is done. " + log
+        }
+        if status.running {
+            return "Erasing is possible once the running sync is done. " + log
+        }
+        return "Erasing permanently deletes everything this iPhone uploaded to the server, then sends all Health data again from scratch. " + log
     }
 
     private func itemRow(_ name: String, symbol: String, result: String?, id: String,

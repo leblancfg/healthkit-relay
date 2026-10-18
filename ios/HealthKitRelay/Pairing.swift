@@ -57,12 +57,15 @@ enum ServerError: LocalizedError, Equatable {
     case notAllowed(String)
     case http(Int, String)
     case network(String)
+    /// DELETE /v1/data answered 404 or 405: a server from before erasing existed.
+    case eraseUnsupported
 
     var errorDescription: String? {
         switch self {
         case let .badCode(msg): msg
         case .unauthorized: "The server did not accept this token."
         case .tooOld: "This server is too old for one-tap setup: update healthkit-relay."
+        case .eraseUnsupported: "This server is too old to erase data: update healthkit-relay on the server, then try again. Nothing was erased or reset."
         case let .notAllowed(msg): msg
         case let .http(code, msg): "The server answered \(code): \(msg)"
         case let .network(msg): msg
@@ -75,8 +78,9 @@ struct ServerClient: Sendable {
     let base: URL
     var session: URLSession = .shared
 
-    private func request(_ method: String, _ path: String, token: String? = nil, body: [String: String]? = nil) async throws -> Data {
-        var req = URLRequest(url: base.appending(path: path), timeoutInterval: 20)
+    private func request(_ method: String, _ path: String, token: String? = nil, body: [String: String]? = nil,
+                         timeout: TimeInterval = 20) async throws -> Data {
+        var req = URLRequest(url: base.appending(path: path), timeoutInterval: timeout)
         req.httpMethod = method
         if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body {
@@ -129,6 +133,33 @@ struct ServerClient: Sendable {
 
     func status(token: String) async throws -> ServerStatus {
         try JSONDecoder().decode(ServerStatus.self, from: try await request("GET", "v1/status", token: token))
+    }
+
+    /// The server's answer to DELETE /v1/data.
+    struct Erased: Decodable, Equatable, Sendable {
+        /// How many stored items the server deleted.
+        let erased: Int
+        /// The device whose data was deleted; empty for the server token.
+        let device: String?
+    }
+
+    /// Long: the server deletes a whole history before it answers.
+    static let eraseTimeout: TimeInterval = 600
+
+    /// Permanently deletes everything the token's device uploaded.
+    func erase(token: String) async throws -> Erased {
+        let data: Data
+        do {
+            data = try await request("DELETE", "v1/data", token: token, timeout: Self.eraseTimeout)
+        } catch ServerError.tooOld {
+            throw ServerError.eraseUnsupported
+        }
+        do {
+            return try JSONDecoder().decode(Erased.self, from: data)
+        } catch {
+            // Not the answer of a server that erased: nothing may be reset on it.
+            throw ServerError.http(200, "unexpected answer: \(String(decoding: data.prefix(200), as: UTF8.self))")
+        }
     }
 
     static var model: String {

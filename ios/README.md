@@ -69,8 +69,12 @@ exception guard (`HealthKitSafe.swift`), so such a type is skipped and logged, n
    and it also syncs whenever it is opened. **Sync Now** (or pulling down) syncs at once.
 
 The main screen shows only how syncing goes. **Advanced** (the gear) has the server and
-this iPhone's pairing, which data types are read, the types shared item by item, re-sending
-all history and a diagnostic log (steps and counts, no health values).
+this iPhone's pairing, which data types are read, the types shared item by item and a
+diagnostic log (steps and counts, no health values). **Erase Server Data and Start Over**
+asks once, then has the server permanently delete everything this iPhone uploaded
+(`DELETE /v1/data`) and sends all Health data again from scratch. The app resets its sync
+positions only once the server confirms the erase; a server too old to erase (404 or 405)
+gets a message to update it, and nothing changes.
 
 ## Code
 
@@ -89,8 +93,8 @@ all history and a diagnostic log (steps and counts, no health values).
 | `WireFormat.swift` | batches (wire format v2), source and device fields |
 | `AnchorStore.swift` | persisted query anchors |
 | `Settings.swift` | server URL and token in the Keychain |
-| `AppModel.swift` | setup from a link, the Health request, syncing on open |
-| `Pairing.swift` | setup links, pairing and status calls |
+| `AppModel.swift` | setup from a link, the Health request, syncing on open, erasing and starting over |
+| `Pairing.swift` | setup links, pairing, status and erase calls |
 | `ContentView.swift` | the main screen (status), first-run welcome, manual setup |
 | `AdvancedView.swift` | server, data types, item-by-item types, maintenance |
 | `HealthKitRelayUITests/` | the setup flow end to end on a simulator (`Scripts/ui-test`) |

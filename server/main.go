@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -86,6 +87,13 @@ func run(args []string) error {
 	maxBody := fs.Int64("max-body-bytes", 32<<20, "largest accepted request body")
 	flushEvery := fs.Duration("flush-interval", time.Hour, "how often staged records are written to Parquet")
 	compactAt := fs.String("compact-at", "03:30", "local time of the nightly compaction, HH:MM")
+	queryDuckDB := fs.String("query-duckdb", "", "duckdb executable for the read-only query API (/v1/types..., /openapi.json, /docs); empty: the query API is off")
+	queryDir := fs.String("query-archive-dir", "", "archive the query API reads (its parquet/), e.g. a replica; default: -archive-dir")
+	queryTimeout := fs.Duration("query-timeout", 30*time.Second, "longest a query may run, waiting for a free slot included")
+	queryMaxRows := fs.Int("query-max-rows", 50000, "most rows one query may return")
+	queryMemory := fs.String("query-memory-limit", "512MB", "DuckDB memory_limit per query; queries needing more fail (nothing spills to disk)")
+	queryThreads := fs.Int("query-threads", 2, "DuckDB threads per query")
+	queryConcurrency := fs.Int("query-concurrency", 2, "queries that may run at once; others wait (within -query-timeout)")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -132,6 +140,19 @@ func run(args []string) error {
 	}
 	srv := &Server{Archive: archive, Token: token, MaxBodyBytes: *maxBody, Devices: devices, Codes: NewCodes(),
 		PublicURL: strings.TrimRight(cfg.publicURL, "/"), SetupFrom: cfg.setupFrom, Listen: *listen}
+	if *queryDuckDB != "" {
+		dir := cmpOr(*queryDir, *archiveDir)
+		db, err := NewDuckDB(*queryDuckDB, dir, *queryTimeout, *queryMaxRows, *queryMemory, *queryThreads, *queryConcurrency)
+		if err != nil {
+			return err
+		}
+		srv.Query = &queryAPI{db: db, now: time.Now}
+		log.Printf("query API on: %s reads %s/parquet; /docs, /openapi.json", db.Path, db.ArchiveDir)
+		// A broken duckdb or archive path shows now, not at the first query; uploads work regardless.
+		if err := db.Query(context.Background(), "SELECT count(*) AS n FROM deleted", func(json.RawMessage) error { return nil }); err != nil {
+			log.Printf("query API: the test query failed, queries will too: %v", err)
+		}
+	}
 	if *forwardURL != "" {
 		f := &Forwarder{URL: *forwardURL, Measurement: *measurement, Client: &http.Client{}}
 		if *forwardTokenFile != "" {

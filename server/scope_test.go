@@ -114,7 +114,7 @@ func TestReadTokenCannotUpload(t *testing.T) {
 	if r, _ := post(t, ts.URL, pr.Token, `{"samples":[`+hrSample+`]}`); r.StatusCode != http.StatusOK {
 		t.Errorf("upload with the new device token: %d", r.StatusCode)
 	}
-	resp, body = call(t, http.MethodGet, ts.URL+"/v1/devices", testToken, nil)
+	_, body = call(t, http.MethodGet, ts.URL+"/v1/devices", testToken, nil)
 	if !bytes.Contains(body, []byte(`"scope":"read"`)) || !bytes.Contains(body, []byte(`"scope":"upload"`)) {
 		t.Errorf("devices list shows no scopes: %s", body)
 	}

@@ -1,0 +1,377 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Health Relay query API",
+    "version": "set by the server",
+    "summary": "Read-only access to one person's Apple Health archive.",
+    "description": "Health Relay archives everything the Health Relay iPhone app syncs from Apple Health (HealthKit). This API reads that archive. It is read-only and typed: there is no SQL endpoint.\n\n**How to use it**\n\n1. `GET /v1/types?present=true` lists the HealthKit types that have data, with their kind, unit, aggregation style and date range. Type identifiers are HealthKit's, for example `HKQuantityTypeIdentifierStepCount`, `HKQuantityTypeIdentifierHeartRate`, `HKCategoryTypeIdentifierSleepAnalysis`.\n2. `GET /v1/types/{type}/aggregates` gives daily or hourly totals or averages: what most questions need (\"steps per day last week\", \"average resting heart rate per day\", \"hours of deep sleep per night\"). Pass `tz` (an IANA time zone such as `America/Toronto`) so days start at local midnight.\n3. `GET /v1/types/{type}/samples` gives the individual samples, paginated, for detail.\n\n**Conventions**\n\n- Times are RFC 3339 with an offset (in `tz` when given, else UTC). `start` and `end` parameters accept an RFC 3339 timestamp or a date (`2026-10-11`, midnight in `tz`); `end` is exclusive.\n- A sample has a start and an end; point measurements (a heart rate reading) have start = end.\n- Cumulative quantities (steps, distance, energy) are summed; when an Apple Watch and an iPhone both counted the same time, aggregates count it once (see `dedup`). Discrete quantities (heart rate, body mass) are averaged, with min and max. Categories (sleep stages, stand hours) give per value the number of samples and the time they cover.\n- Values are in the unit the app sent (usually Apple's canonical unit: `count`, `count/min`, `kcal`, `m`, `kg`, `%` as a fraction from 0 to 1).\n- The archive is written hourly: samples received in the last hour may not be visible yet.\n- Errors are JSON: `{\"error\": \"what went wrong and how to fix the request\"}`.\n\n**Authentication**: a bearer token. Query endpoints need a read token (`healthkit-relay token create -name <client>`) or the server token; tokens of paired iPhones (upload scope) are refused with 403. Token management needs the server token. This document and `/docs` need no token.\n\nNot a medical device: values may be incomplete, delayed or wrong.",
+    "license": { "name": "MIT", "identifier": "MIT" }
+  },
+  "tags": [
+    { "name": "catalog", "description": "What types exist and which have data." },
+    { "name": "data", "description": "Samples and aggregates of one type." },
+    { "name": "tokens", "description": "Read tokens for query clients (server token only)." }
+  ],
+  "security": [ { "bearerAuth": [] } ],
+  "paths": {
+    "/v1/kinds": {
+      "get": {
+        "tags": [ "catalog" ],
+        "operationId": "listKinds",
+        "summary": "List sample kinds",
+        "description": "The families of sample types (`quantity`, `category`, `workout`...), what each holds, whether it has aggregates, and how many catalog types are of that kind.",
+        "x-required-scope": "read",
+        "responses": {
+          "200": {
+            "description": "The kinds.",
+            "content": { "application/json": { "schema": {
+              "type": "object", "required": [ "kinds" ],
+              "properties": { "kinds": { "type": "array", "items": { "$ref": "#/components/schemas/KindInfo" } } }
+            },
+            "example": { "kinds": [ { "name": "quantity", "description": "A number with a unit (steps, heart rate, body mass...). Aggregates: sum for cumulative types, average/min/max for discrete ones.", "aggregates": true, "types": 121 } ] } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/v1/types": {
+      "get": {
+        "tags": [ "catalog" ],
+        "operationId": "listTypes",
+        "summary": "List HealthKit types, with what the archive holds of each",
+        "description": "Every sample type the app can sync, from the iOS SDK, with its kind, display name, unit, aggregation style, category value labels, and how many samples the archive holds with the first and last start time. Start here: use `present=true` to see what data exists.",
+        "x-required-scope": "read",
+        "parameters": [
+          { "name": "kind", "in": "query", "description": "Only types of this kind.", "schema": { "$ref": "#/components/schemas/Kind" }, "example": "quantity" },
+          { "name": "present", "in": "query", "description": "Only types with at least one sample in the archive.", "schema": { "type": "boolean", "default": false }, "example": true }
+        ],
+        "responses": {
+          "200": {
+            "description": "The types, in SDK order.",
+            "content": { "application/json": { "schema": {
+              "type": "object", "required": [ "types" ],
+              "properties": { "types": { "type": "array", "items": { "$ref": "#/components/schemas/TypeInfo" } } }
+            },
+            "example": { "types": [ { "identifier": "HKQuantityTypeIdentifierStepCount", "kind": "quantity", "display_name": "Step Count", "unit": "count", "aggregation": "cumulative", "aggregates": true, "data": { "samples": 266191, "first_start": "2016-09-21T21:38:16.417Z", "last_start": "2026-10-18T12:51:48.717Z" } } ] } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/v1/types/{type}": {
+      "get": {
+        "tags": [ "catalog" ],
+        "operationId": "getType",
+        "summary": "Describe one type",
+        "description": "The catalog entry of one type and what the archive holds of it.",
+        "x-required-scope": "read",
+        "parameters": [ { "$ref": "#/components/parameters/Type" } ],
+        "responses": {
+          "200": {
+            "description": "The type.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TypeInfo" },
+              "example": { "identifier": "HKCategoryTypeIdentifierSleepAnalysis", "kind": "category", "display_name": "Sleep Analysis", "value_enum": "HKCategoryValueSleepAnalysis", "values": [ { "value": 0, "label": "inBed" }, { "value": 1, "label": "asleepUnspecified" }, { "value": 2, "label": "awake" }, { "value": 3, "label": "asleepCore" }, { "value": 4, "label": "asleepDeep" }, { "value": 5, "label": "asleepREM" } ], "aggregates": true, "data": { "samples": 40667, "first_start": "2016-10-24T02:40:00Z", "last_start": "2026-10-18T10:34:57.557Z" } } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/v1/types/{type}/samples": {
+      "get": {
+        "tags": [ "data" ],
+        "operationId": "listSamples",
+        "summary": "List the samples of a type in a time range",
+        "description": "Individual samples whose start is in [start, end), oldest first (or newest first with `order=desc`), `limit` per page. When there are more, the response has `next_cursor`: pass it as `cursor`, with the same other parameters, for the next page. Prefer `/aggregates` for totals and averages: a type such as heart rate has millions of samples.",
+        "x-required-scope": "read",
+        "parameters": [
+          { "$ref": "#/components/parameters/Type" },
+          { "name": "start", "in": "query", "description": "Inclusive lower bound of the sample start: RFC 3339 timestamp, or a date (midnight in `tz`). Default: 24 hours before `end`.", "schema": { "type": "string" }, "example": "2026-10-17" },
+          { "name": "end", "in": "query", "description": "Exclusive upper bound of the sample start: RFC 3339 timestamp, or a date (midnight in `tz`). Default: now.", "schema": { "type": "string" }, "example": "2026-10-18T00:00:00-04:00" },
+          { "$ref": "#/components/parameters/TZ" },
+          { "name": "limit", "in": "query", "description": "Samples per page (at most 10000, and less than the server's -query-max-rows).", "schema": { "type": "integer", "minimum": 1, "maximum": 10000, "default": 100 } },
+          { "name": "order", "in": "query", "description": "By start time: `asc` (oldest first) or `desc` (newest first).", "schema": { "type": "string", "enum": [ "asc", "desc" ], "default": "asc" } },
+          { "name": "cursor", "in": "query", "description": "`next_cursor` of the previous page.", "schema": { "type": "string" } },
+          { "name": "raw", "in": "query", "description": "Include each sample exactly as the app sent it (metadata, device details, workout statistics...), as `raw`. Larger; lower `limit` with it.", "schema": { "type": "boolean", "default": false } }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of samples.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SamplesPage" },
+              "example": { "type": "HKQuantityTypeIdentifierHeartRate", "start": "2026-10-17T00:00:00-04:00", "end": "2026-10-18T00:00:00-04:00", "tz": "America/Toronto", "order": "asc", "count": 1, "samples": [ { "uuid": "1B4E28BA-2FA1-11D2-883F-0016D3CCA427", "start": "2026-10-17T07:04:05.123-04:00", "end": "2026-10-17T07:04:05.123-04:00", "value": 62, "unit": "count/min", "source": { "name": "Apple Watch", "bundle_id": "com.apple.health.DFE193B9-0736-47A3-86C4-9EF880007F2E", "device": "Apple Watch", "product_type": "Watch6,14" } } ], "next_cursor": "MTphOjE3OTA4MTMwNzI1NjMwMDA6MUI0RTI4QkEtMkZBMS0xMUQyLTg4M0YtMDAxNkQzQ0NBNDI3" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/TooLarge" },
+          "503": { "$ref": "#/components/responses/Busy" },
+          "504": { "$ref": "#/components/responses/Timeout" }
+        }
+      }
+    },
+    "/v1/types/{type}/aggregates": {
+      "get": {
+        "tags": [ "data" ],
+        "operationId": "getAggregates",
+        "summary": "Daily or hourly aggregates of a quantity or category type",
+        "description": "One bucket per local day (or hour) of `tz` from `start` to `end` (rounded out to whole buckets), empty buckets included. At most 366 days or 744 hours per request.\n\n- **Cumulative quantities** (`aggregation: cumulative`: steps, distance, active energy, exercise minutes): `sum`. A sample spanning two buckets is split in proportion to the time in each.\n- **Discrete quantities** (heart rate, HRV, body mass, blood oxygen...): `avg`, `min`, `max` of the samples that start in the bucket. Sound levels (`discreteEquivalentContinuousLevel`) average as energy, as Apple does.\n- **Categories** (sleep analysis, stand hours, mindful sessions, symptoms...): per value, the number of samples and the seconds they cover inside the bucket. For sleep: `asleepCore`, `asleepDeep`, `asleepREM`, `awake`, `inBed`, `asleepUnspecified`. Night sleep straddles midnight: a day bucket holds the part of each night after its local midnight; use hourly buckets, or the samples, to cut nights elsewhere.\n\n**dedup** (cumulative quantities and categories): an Apple Watch and an iPhone carried together both count steps, and other apps may write the same thing. With `dedup=priority` (default), sources are ranked Apple Watch, then iPhone, then any other source; a sample counts only for the part of its time that no sample from a higher-ranked source covers (for categories, of the same value). This is what Apple Health does with its default source order; checked against Apple's own daily Activity totals, it is within about 1% for active energy and 2% for exercise minutes, where summing everything overcounts by 5 to 20%. `dedup=none` sums every sample.",
+        "x-required-scope": "read",
+        "parameters": [
+          { "$ref": "#/components/parameters/Type" },
+          { "name": "interval", "in": "query", "description": "Bucket size.", "schema": { "type": "string", "enum": [ "day", "hour" ], "default": "day" } },
+          { "name": "start", "in": "query", "description": "First bucket: the day or hour containing this RFC 3339 timestamp or date (in `tz`). Default: 6 days before `end` (interval=day, so 7 buckets with today), or 23 hours before (interval=hour).", "schema": { "type": "string" }, "example": "2026-10-11" },
+          { "name": "end", "in": "query", "description": "Exclusive end: buckets run until the one containing this instant (a date means its midnight, so `end=2026-10-18` stops after October 17). Default: now (the current bucket is partial).", "schema": { "type": "string" }, "example": "2026-10-18" },
+          { "$ref": "#/components/parameters/TZ" },
+          { "name": "dedup", "in": "query", "description": "How overlapping sources are counted (cumulative quantities and categories; ignored for discrete quantities). See the operation description.", "schema": { "type": "string", "enum": [ "priority", "none" ], "default": "priority" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The buckets, oldest first.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Aggregates" },
+              "examples": {
+                "steps": { "summary": "Daily steps", "value": { "type": "HKQuantityTypeIdentifierStepCount", "kind": "quantity", "aggregation": "cumulative", "interval": "day", "tz": "America/Toronto", "dedup": "priority", "start": "2026-10-16T00:00:00-04:00", "end": "2026-10-18T00:00:00-04:00", "buckets": [ { "start": "2026-10-16T00:00:00-04:00", "end": "2026-10-17T00:00:00-04:00", "date": "2026-10-16", "unit": "count", "sum": 9132, "samples": 132, "sources": [ "Apple Watch", "iPhone" ] }, { "start": "2026-10-17T00:00:00-04:00", "end": "2026-10-18T00:00:00-04:00", "date": "2026-10-17", "unit": "count", "sum": 11870, "samples": 160, "sources": [ "Apple Watch" ] } ] } },
+                "heartRate": { "summary": "Hourly heart rate", "value": { "type": "HKQuantityTypeIdentifierHeartRate", "kind": "quantity", "aggregation": "discreteArithmetic", "interval": "hour", "tz": "UTC", "start": "2026-10-17T10:00:00Z", "end": "2026-10-17T11:00:00Z", "buckets": [ { "start": "2026-10-17T10:00:00Z", "end": "2026-10-17T11:00:00Z", "unit": "count/min", "avg": 64.2, "min": 55, "max": 81, "samples": 58, "sources": [ "Apple Watch" ] } ] } },
+                "sleep": { "summary": "Sleep per day", "value": { "type": "HKCategoryTypeIdentifierSleepAnalysis", "kind": "category", "interval": "day", "tz": "America/Toronto", "dedup": "priority", "start": "2026-10-17T00:00:00-04:00", "end": "2026-10-18T00:00:00-04:00", "buckets": [ { "start": "2026-10-17T00:00:00-04:00", "end": "2026-10-18T00:00:00-04:00", "date": "2026-10-17", "values": [ { "value": 3, "label": "asleepCore", "samples": 14, "seconds": 13500, "sources": [ "Apple Watch" ] }, { "value": 4, "label": "asleepDeep", "samples": 5, "seconds": 3300, "sources": [ "Apple Watch" ] } ], "samples": 19, "sources": [ "Apple Watch" ] } ] } }
+              } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/TooLarge" },
+          "503": { "$ref": "#/components/responses/Busy" },
+          "504": { "$ref": "#/components/responses/Timeout" }
+        }
+      }
+    },
+    "/v1/tokens": {
+      "post": {
+        "tags": [ "tokens" ],
+        "operationId": "createToken",
+        "summary": "Create a token",
+        "description": "Mints a token for a client other than the iPhone app (Grafana, a script, an agent). The token is in the response only: the server keeps its SHA-256. Read tokens use the query API and nothing else. List tokens with `GET /v1/devices` and revoke them with `DELETE /v1/devices/{id}`. Needs the server token.",
+        "x-required-scope": "admin",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object", "required": [ "name" ],
+            "properties": {
+              "name": { "type": "string", "maxLength": 100, "description": "What the token is for, shown in the device list." },
+              "scope": { "$ref": "#/components/schemas/Scope" }
+            }
+          }, "example": { "name": "grafana", "scope": "read" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "The new token, shown this once.",
+            "content": { "application/json": { "schema": {
+              "type": "object", "required": [ "token", "device" ],
+              "properties": { "token": { "type": "string" }, "device": { "$ref": "#/components/schemas/Device" } }
+            } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/v1/devices": {
+      "get": {
+        "tags": [ "tokens" ],
+        "operationId": "listDevices",
+        "summary": "List paired iPhones and tokens",
+        "description": "Every stored token: paired iPhones (scope `upload`) and query clients (scope `read`), oldest first, with when each was last used. Needs the server token.",
+        "x-required-scope": "admin",
+        "responses": {
+          "200": {
+            "description": "The devices.",
+            "content": { "application/json": { "schema": {
+              "type": "object", "required": [ "devices" ],
+              "properties": { "devices": { "type": "array", "items": { "$ref": "#/components/schemas/Device" } } }
+            } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/v1/devices/{id}": {
+      "delete": {
+        "tags": [ "tokens" ],
+        "operationId": "revokeDevice",
+        "summary": "Revoke a paired iPhone or a token",
+        "description": "Its token stops working at once. Records it uploaded stay. Needs the server token.",
+        "x-required-scope": "admin",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "description": "The device id from `GET /v1/devices`.", "schema": { "type": "string" }, "example": "0a1b2c3d" } ],
+        "responses": {
+          "204": { "description": "Revoked." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "tags": [ "catalog" ],
+        "operationId": "getOpenAPI",
+        "summary": "This document",
+        "description": "The OpenAPI 3.1 description of this API. Needs no token; holds no health data. `/docs` shows it in Swagger UI.",
+        "security": [],
+        "x-required-scope": "none",
+        "responses": { "200": { "description": "The document.", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "`Authorization: Bearer <token>`. Query endpoints: a read token (`healthkit-relay token create -name <client>`, or the setup page) or the server token. Token management: the server token. Tokens of paired iPhones may not query (403)."
+      }
+    },
+    "parameters": {
+      "Type": { "name": "type", "in": "path", "required": true, "description": "A HealthKit sample type identifier, from `GET /v1/types`.", "schema": { "$ref": "#/components/schemas/HealthType" }, "example": "HKQuantityTypeIdentifierStepCount" },
+      "TZ": { "name": "tz", "in": "query", "description": "IANA time zone for day and hour boundaries, dates in `start`/`end`, and the times returned. Default UTC.", "schema": { "type": "string", "default": "UTC" }, "example": "America/Toronto" }
+    },
+    "responses": {
+      "BadRequest": { "description": "A parameter is invalid; the message says which and what is accepted.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "tz \"Mars/Olympus\" is not in the time zone database" } } } },
+      "Unauthorized": { "description": "No token, or not a valid one (for token management: not the server token).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "unauthorized" } } } },
+      "Forbidden": { "description": "The token is valid but its scope does not allow this: an upload token (a paired iPhone's) cannot query.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "NotFound": { "description": "No such type or device.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "TooLarge": { "description": "The result exceeds the server's limits: lower `limit`, shorten the range or leave out `raw`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Busy": { "description": "Too many queries are running; retry after the Retry-After header's seconds.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Timeout": { "description": "The query ran out of time (the server's -query-timeout); ask for a shorter range.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+    },
+    "schemas": {
+      "Error": { "type": "object", "required": [ "error" ], "properties": { "error": { "type": "string" } } },
+      "HealthType": { "type": "string", "description": "HealthKit sample type identifier. The list is generated from the iOS SDK the app was built with.", "enum": [] },
+      "Kind": { "type": "string", "description": "Family of sample types.", "enum": [] },
+      "Scope": { "type": "string", "enum": [ "read", "upload" ], "default": "read", "description": "`read`: the query API only. `upload`: what a paired iPhone may do (upload, status, erase what it uploaded)." },
+      "Aggregation": { "type": "string", "enum": [ "cumulative", "discreteArithmetic", "discreteTemporallyWeighted", "discreteEquivalentContinuousLevel" ], "description": "HealthKit's HKQuantityAggregationStyle. Cumulative values add up over time (sum); discrete ones are levels (average). discreteTemporallyWeighted types are averaged per sample here, not weighted by duration." },
+      "KindInfo": {
+        "type": "object", "required": [ "name", "description", "aggregates", "types" ],
+        "properties": {
+          "name": { "$ref": "#/components/schemas/Kind" },
+          "description": { "type": "string" },
+          "aggregates": { "type": "boolean", "description": "Types of this kind have /aggregates." },
+          "types": { "type": "integer", "description": "Catalog types of this kind." }
+        }
+      },
+      "TypeInfo": {
+        "type": "object", "required": [ "identifier", "kind", "display_name", "aggregates", "data" ],
+        "properties": {
+          "identifier": { "$ref": "#/components/schemas/HealthType" },
+          "kind": { "$ref": "#/components/schemas/Kind" },
+          "display_name": { "type": "string", "examples": [ "Step Count" ] },
+          "unit": { "type": "string", "description": "Apple's canonical unit (quantities). Samples carry their own unit; it is almost always this one.", "examples": [ "count" ] },
+          "aggregation": { "$ref": "#/components/schemas/Aggregation" },
+          "value_enum": { "type": "string", "description": "Categories: the HealthKit enum of the values.", "examples": [ "HKCategoryValueSleepAnalysis" ] },
+          "values": { "type": "array", "description": "Categories: the possible values and their labels.", "items": { "$ref": "#/components/schemas/CategoryValue" } },
+          "aggregates": { "type": "boolean", "description": "Whether /aggregates works for this type (quantity and category kinds)." },
+          "data": { "$ref": "#/components/schemas/TypeStats" }
+        }
+      },
+      "CategoryValue": { "type": "object", "required": [ "value", "label" ], "properties": { "value": { "type": "integer" }, "label": { "type": "string" } } },
+      "TypeStats": {
+        "type": "object", "required": [ "samples" ],
+        "description": "What the archive holds of the type (refreshed every 5 minutes).",
+        "properties": {
+          "samples": { "type": "integer", "description": "Number of samples." },
+          "first_start": { "type": "string", "format": "date-time", "description": "Start of the oldest sample." },
+          "last_start": { "type": "string", "format": "date-time", "description": "Start of the newest sample." }
+        }
+      },
+      "Sample": {
+        "type": "object", "required": [ "uuid", "start", "end", "value", "source" ],
+        "properties": {
+          "uuid": { "type": "string", "description": "HealthKit's UUID of the sample." },
+          "start": { "type": "string", "format": "date-time" },
+          "end": { "type": "string", "format": "date-time" },
+          "value": { "type": [ "number", "null" ], "description": "Quantities: the value in `unit`. Categories: the enum value (see `value_label`). Other kinds: null; see `raw`." },
+          "unit": { "type": "string" },
+          "value_label": { "type": "string", "description": "Categories: the name of the value, e.g. asleepDeep." },
+          "source": { "$ref": "#/components/schemas/Source" },
+          "raw": { "type": "object", "description": "With raw=true: the sample exactly as the app sent it." }
+        }
+      },
+      "Source": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "The app or device that wrote the sample, e.g. the watch's name." },
+          "bundle_id": { "type": "string", "description": "Its bundle identifier; com.apple.health.<UUID> for an Apple device." },
+          "device": { "type": "string", "description": "The device that measured it, e.g. Apple Watch." },
+          "product_type": { "type": "string", "description": "Hardware model, e.g. Watch6,14 or iPhone17,5." }
+        }
+      },
+      "SamplesPage": {
+        "type": "object", "required": [ "type", "start", "end", "tz", "order", "count", "samples" ],
+        "properties": {
+          "type": { "$ref": "#/components/schemas/HealthType" },
+          "start": { "type": "string", "format": "date-time" },
+          "end": { "type": "string", "format": "date-time" },
+          "tz": { "type": "string" },
+          "order": { "type": "string", "enum": [ "asc", "desc" ] },
+          "count": { "type": "integer", "description": "Samples in this page." },
+          "samples": { "type": "array", "items": { "$ref": "#/components/schemas/Sample" } },
+          "next_cursor": { "type": "string", "description": "Present when there are more samples: pass it as `cursor`." }
+        }
+      },
+      "Aggregates": {
+        "type": "object", "required": [ "type", "kind", "interval", "tz", "start", "end", "buckets" ],
+        "properties": {
+          "type": { "$ref": "#/components/schemas/HealthType" },
+          "kind": { "type": "string", "enum": [ "quantity", "category" ] },
+          "aggregation": { "$ref": "#/components/schemas/Aggregation" },
+          "interval": { "type": "string", "enum": [ "day", "hour" ] },
+          "tz": { "type": "string" },
+          "dedup": { "type": "string", "enum": [ "priority", "none" ], "description": "The rule applied (cumulative quantities and categories)." },
+          "start": { "type": "string", "format": "date-time", "description": "Start of the first bucket." },
+          "end": { "type": "string", "format": "date-time", "description": "End of the last bucket." },
+          "buckets": { "type": "array", "items": { "$ref": "#/components/schemas/Bucket" } }
+        }
+      },
+      "Bucket": {
+        "type": "object", "required": [ "start", "end", "samples", "sources" ],
+        "description": "One day or hour. Quantities have `unit` and `sum` (cumulative) or `avg`, `min`, `max` (discrete; absent when there are no samples). Categories have `values`. In the rare case a bucket has samples in two units, it appears once per unit.",
+        "properties": {
+          "start": { "type": "string", "format": "date-time" },
+          "end": { "type": "string", "format": "date-time" },
+          "date": { "type": "string", "format": "date", "description": "interval=day: the local date." },
+          "unit": { "type": "string" },
+          "sum": { "type": "number", "description": "Cumulative quantities: the total (0 for an empty bucket)." },
+          "avg": { "type": "number" },
+          "min": { "type": "number" },
+          "max": { "type": "number" },
+          "values": { "type": "array", "items": { "$ref": "#/components/schemas/CategoryBucket" } },
+          "samples": { "type": "integer", "description": "Samples that counted in the bucket (with dedup=priority, those not wholly covered by a higher-ranked source)." },
+          "sources": { "type": "array", "items": { "type": "string" }, "description": "Names of the sources that counted." }
+        }
+      },
+      "CategoryBucket": {
+        "type": "object", "required": [ "value", "samples", "seconds", "sources" ],
+        "properties": {
+          "value": { "type": "integer" },
+          "label": { "type": "string", "examples": [ "asleepDeep" ] },
+          "samples": { "type": "integer", "description": "Samples of this value overlapping the bucket." },
+          "seconds": { "type": "number", "description": "Time they cover inside the bucket, in seconds (0 for instantaneous events)." },
+          "sources": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "Device": {
+        "type": "object", "required": [ "id", "name", "created_at", "scope" ],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "model": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "last_seen_at": { "type": "string", "format": "date-time", "description": "Last use, to the nearest ten minutes." },
+          "scope": { "$ref": "#/components/schemas/Scope" }
+        }
+      }
+    }
+  }
+}

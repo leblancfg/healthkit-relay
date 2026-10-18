@@ -19,9 +19,10 @@ type Server struct {
 	MaxBodyBytes int64
 	Devices      *Devices
 	Codes        *Codes
-	PublicURL    string // how phones reach the server, for setup links; "" offers what it finds (address.go)
-	SetupFrom    string // who may use /setup and pairing: "private" (default), "any", "off"
-	Listen       string // the listen address, to tell which local addresses reach the server
+	PublicURL    string    // how phones reach the server, for setup links; "" offers what it finds (address.go)
+	SetupFrom    string    // who may use /setup and pairing: "private" (default), "any", "off"
+	Listen       string    // the listen address, to tell which local addresses reach the server
+	Query        *queryAPI // nil: no query API (-query-duckdb not set)
 
 	netInfo *netInfo // nil: the real interfaces and tailscale CLI
 
@@ -51,25 +52,53 @@ type Response struct {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", s.healthz)
-	mux.HandleFunc("GET /metrics", s.metrics)
-	mux.HandleFunc("POST /v1/samples", s.samples)
-	mux.HandleFunc("GET /v1/status", s.statusHandler)
-	mux.HandleFunc("DELETE /v1/data", s.eraseHandler)
-	mux.HandleFunc("POST /v1/pair", s.pair)
-	mux.HandleFunc("POST /v1/pairing-codes", s.pairingCodes)
-	mux.HandleFunc("GET /v1/devices", s.devicesList)
-	mux.HandleFunc("DELETE /v1/devices/{id}", s.deviceRevoke)
-	mux.HandleFunc("POST /v1/tokens", s.tokensCreate)
-	mux.HandleFunc("GET /setup", s.setupPage)
-	mux.HandleFunc("POST /setup", s.setupLogin)
-	mux.HandleFunc("POST /setup/revoke", s.setupRevoke)
-	mux.HandleFunc("POST /setup/tokens", s.setupToken)
-	mux.HandleFunc("GET /setup/status", s.setupStatus)
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
-	})
+	for _, rt := range s.routes() {
+		mux.HandleFunc(rt.pattern, rt.handler)
+	}
 	return mux
+}
+
+type route struct {
+	pattern string
+	handler http.HandlerFunc
+}
+
+// routes lists every route the server serves; the OpenAPI document must describe the query
+// API's (openapi_test.go).
+func (s *Server) routes() []route {
+	rs := []route{
+		{"GET /healthz", s.healthz},
+		{"GET /metrics", s.metrics},
+		{"POST /v1/samples", s.samples},
+		{"GET /v1/status", s.statusHandler},
+		{"DELETE /v1/data", s.eraseHandler},
+		{"POST /v1/pair", s.pair},
+		{"POST /v1/pairing-codes", s.pairingCodes},
+		{"GET /v1/devices", s.devicesList},
+		{"DELETE /v1/devices/{id}", s.deviceRevoke},
+		{"POST /v1/tokens", s.tokensCreate},
+		{"GET /setup", s.setupPage},
+		{"POST /setup", s.setupLogin},
+		{"POST /setup/revoke", s.setupRevoke},
+		{"POST /setup/tokens", s.setupToken},
+		{"GET /setup/status", s.setupStatus},
+		{"GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		}},
+	}
+	if s.Query != nil {
+		rs = append(rs,
+			route{"GET /openapi.json", s.openAPI},
+			route{"GET /docs", s.docs},
+			route{"GET /docs/{file}", s.docs},
+			route{"GET /v1/kinds", s.queryKinds},
+			route{"GET /v1/types", s.queryTypes},
+			route{"GET /v1/types/{type}", s.queryType},
+			route{"GET /v1/types/{type}/samples", s.querySamples},
+			route{"GET /v1/types/{type}/aggregates", s.queryAggregates},
+		)
+	}
+	return rs
 }
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
@@ -234,9 +263,9 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	fmt.Fprintln(w, "# HELP healthkit_relay_requests_total Uploads (POST /v1/samples), pairings and refused tokens by result.")
+	fmt.Fprintln(w, "# HELP healthkit_relay_requests_total Uploads (POST /v1/samples), pairings, refused tokens and failed queries by result.")
 	fmt.Fprintln(w, "# TYPE healthkit_relay_requests_total counter")
-	for _, res := range []string{"ok", "unauthorized", "bad_request", "incomplete", "archive_error", "paired", "pair_rejected", "erased", "forbidden"} {
+	for _, res := range []string{"ok", "unauthorized", "bad_request", "incomplete", "archive_error", "paired", "pair_rejected", "erased", "forbidden", "query_error", "query_timeout", "query_busy"} {
 		fmt.Fprintf(w, "healthkit_relay_requests_total{result=%q} %d\n", res, s.stats["requests_"+res])
 	}
 	fmt.Fprintln(w, "# HELP healthkit_relay_records_total Records received, by outcome.")

@@ -135,6 +135,7 @@ func (s *Server) render(w http.ResponseWriter, code int, v setupView) {
 	h.Set("Cache-Control", "no-store")
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("X-Frame-Options", "DENY") // frame-ancestors, for browsers without CSP 2
 	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; "+
 		"script-src 'nonce-"+v.Nonce+"'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 	w.WriteHeader(code)
@@ -145,6 +146,25 @@ func (s *Server) render(w http.ResponseWriter, code int, v setupView) {
 
 func (s *Server) setupForbidden(w http.ResponseWriter) {
 	http.Error(w, "The setup page only answers on private networks (see -setup-from).", http.StatusForbidden)
+}
+
+// setupForm checks a form post to the setup page and reads it. Browsers say where a request
+// comes from in Sec-Fetch-Site: only the page itself may post. The session cookie is
+// SameSite=Strict, but "site" ignores the port: without this check, any other web app on the
+// same host or a sibling subdomain could revoke devices or sign the browser in. Requests without the header (curl, old browsers) pass.
+func setupForm(w http.ResponseWriter, r *http.Request) bool {
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "", "same-origin", "none":
+	default:
+		http.Error(w, "Cross-origin request refused.", http.StatusForbidden)
+		return false
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Bad form.", http.StatusBadRequest)
+		return false
+	}
+	return true
 }
 
 func (s *Server) admin(r *http.Request) bool {
@@ -225,6 +245,9 @@ func (s *Server) setupLogin(w http.ResponseWriter, r *http.Request) {
 		s.setupForbidden(w)
 		return
 	}
+	if !setupForm(w, r) {
+		return
+	}
 	if !s.isAdminToken(strings.TrimSpace(r.PostFormValue("token"))) {
 		time.Sleep(500 * time.Millisecond) // slows down guessing; tokens are long anyway
 		s.count("unauthorized")
@@ -242,6 +265,9 @@ func (s *Server) setupLogin(w http.ResponseWriter, r *http.Request) {
 func (s *Server) setupRevoke(w http.ResponseWriter, r *http.Request) {
 	if !s.setupAllowed(r) {
 		s.setupForbidden(w)
+		return
+	}
+	if !setupForm(w, r) {
 		return
 	}
 	if !s.admin(r) {

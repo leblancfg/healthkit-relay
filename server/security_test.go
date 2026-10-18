@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -71,5 +73,40 @@ func TestPairRejectsControlCharactersInNames(t *testing.T) {
 	c = mint(t, ts.URL)
 	if resp, b := call(t, "POST", ts.URL+"/v1/pair", "", PairRequest{Code: c.Code, Name: "Zoë’s iPhone 📱"}); resp.StatusCode != 200 {
 		t.Fatalf("unicode name: %d %s", resp.StatusCode, b)
+	}
+}
+
+func TestSetupFormsRefuseCrossOrigin(t *testing.T) {
+	s := testServer(t)
+	const lan = "192.168.1.20:5000"
+	w := setupRequest(t, s, "POST", "/setup", lan, nil, url.Values{"token": {testToken}})
+	cookie := w.Result().Cookies()[0].String()
+	_, dev, _ := s.Devices.Add("iPhone", "")
+
+	for _, site := range []string{"cross-site", "same-site"} {
+		h := http.Header{"Sec-Fetch-Site": {site}}
+		if w := setupRequest(t, s, "POST", "/setup", lan, h, url.Values{"token": {testToken}}); w.Code != 403 || len(w.Result().Cookies()) > 0 {
+			t.Errorf("%s sign-in: %d", site, w.Code)
+		}
+		h.Set("Cookie", cookie)
+		if w := setupRequest(t, s, "POST", "/setup/revoke", lan, h, url.Values{"id": {dev.ID}}); w.Code != 403 {
+			t.Errorf("%s revoke: %d", site, w.Code)
+		}
+	}
+	if s.Devices.Len() != 1 {
+		t.Fatal("a cross-origin post revoked the device")
+	}
+	// The page's own forms still work.
+	h := http.Header{"Sec-Fetch-Site": {"same-origin"}, "Cookie": {cookie}}
+	if w := setupRequest(t, s, "POST", "/setup/revoke", lan, h, url.Values{"id": {dev.ID}}); w.Code != 303 || s.Devices.Len() != 0 {
+		t.Fatalf("same-origin revoke: %d, %d devices", w.Code, s.Devices.Len())
+	}
+	// Huge form bodies are refused before parsing.
+	big := url.Values{"token": {strings.Repeat("x", 1<<20)}}
+	if w := setupRequest(t, s, "POST", "/setup", lan, nil, big); w.Code != 400 {
+		t.Errorf("1 MB form: %d", w.Code)
+	}
+	if got := setupRequest(t, s, "GET", "/setup", lan, nil, nil).Header().Get("X-Frame-Options"); got != "DENY" {
+		t.Errorf("X-Frame-Options %q", got)
 	}
 }

@@ -3,9 +3,44 @@
 Notable changes to the server and the app. Versions follow [Semantic Versioning](https://semver.org);
 server releases and the app are versioned separately.
 
-## Unreleased
+## 0.6.0 (2026-10-18)
 
-- Docs: documentation site, setup guides, security policy and contribution guidelines.
+### Server
+
+- Erasing requires `?confirm=erase`; only the app before 0.6 may leave it out.
+- An archive directory, or `parquet/` in it, that is a symlink works (systemd's
+  `DynamicUser` makes `/var/lib/<name>` one): de-duplication and file modes no longer miss
+  what is behind it. File modes are set only on what the store owns.
+- Line protocol escapes backslashes and control characters; paired device names refuse
+  control characters; the setup page refuses cross-origin form posts, caps form size and
+  cannot be framed.
+- Packaging: Docker image, release binaries with a systemd unit, a NixOS module with a VM
+  test, and an end-to-end smoke test run on every install path in CI.
+
+### App 0.6.0
+
+- Asks before sending Health data to a server it was not set up with, when a setup link
+  names a new one.
+- Sends `confirm=erase` with **Erase Server Data and Start Over**.
+
+### Docs
+
+- Documentation site, setup guides, security policy and contribution guidelines.
+
+## 0.5 (2026-10-17)
+
+### Server 0.5.0 to 0.5.2
+
+- Storage: a SQLite staging database (durable before the `200`, de-duplication on disk),
+  flushed hourly to Parquet partitioned by dataset, type and month, compacted nightly, with
+  deletions applied at compaction. DuckDB views in `server/sql/views.sql`.
+- `migrate` converts the JSON Lines archive of 0.4 and earlier; `flush` and `compact` run
+  the maintenance at once.
+- `DELETE /v1/data` erases what a device uploaded, for good.
+
+### App 0.5.0
+
+- **Erase Server Data and Start Over**.
 
 ## 2026-10-17
 

@@ -1,11 +1,9 @@
 # Grafana
 
-Two ways to chart your health data in [Grafana](https://grafana.com):
-
-- **Forward to a time-series database** (VictoriaMetrics, InfluxDB) and query it with
-  PromQL or InfluxQL. Fast, live, and the usual way.
-- **Query the Parquet archive with DuckDB** through a DuckDB data source plugin, for anything
-  that is not a number over time (workouts, routes, sleep sessions).
+Grafana charts the numbers the server forwards to a time-series database (`-forward-url`):
+VictoriaMetrics is the simplest, InfluxDB works too. Grafana does not read the Parquet
+archive; for what is not a number over time (routes, ECGs, sleep sessions as rows), query the
+archive with [DuckDB](data.md#querying-with-duckdb).
 
 ## VictoriaMetrics (Prometheus-compatible)
 
@@ -55,19 +53,23 @@ Prometheus does not accept pushed line protocol. Put VictoriaMetrics next to it 
 added to Grafana as a second Prometheus data source), or receive the lines with Telegraf's
 `influxdb_listener` input and expose them with its `prometheus_client` output.
 
-## DuckDB
-
-The community [DuckDB data source](https://grafana.com/grafana/plugins/motherduck-duckdb-datasource/)
-lets panels run SQL against the Parquet archive (see
-[Data model & querying](data.md#querying-with-duckdb) for queries). Give Grafana read-only
-access to the data directory.
-
 ## Monitoring the server itself
 
 `/metrics` exposes Prometheus metrics about the server, never health data:
 `healthkit_relay_requests_total{result}`, `healthkit_relay_records_total{outcome}`,
-`healthkit_relay_devices`, `healthkit_relay_forward_errors_total` and
-`healthkit_relay_last_upload_timestamp_seconds`. A useful alert: no upload for a day,
+`healthkit_relay_archive_records`, `healthkit_relay_staged_records`,
+`healthkit_relay_last_success_timestamp_seconds{job="flush"|"compaction"}`,
+`healthkit_relay_maintenance_errors_total{job}`, `healthkit_relay_devices`,
+`healthkit_relay_forward_errors_total` and `healthkit_relay_last_upload_timestamp_seconds`.
+Scrape it with VictoriaMetrics (or Prometheus). Useful alerts: the hourly flush has not
+succeeded for two hours, or the nightly compaction for a day and a half,
+
+```promql
+time() - healthkit_relay_last_success_timestamp_seconds{job="flush"} > 7200
+time() - healthkit_relay_last_success_timestamp_seconds{job="compaction"} > 129600
+```
+
+and no upload for a day,
 
 ```promql
 time() - healthkit_relay_last_upload_timestamp_seconds > 86400

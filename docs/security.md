@@ -66,8 +66,11 @@ lasts an hour; its responses are not cached, send no referrer and cannot be fram
 
 ## Deleting your data
 
-**Erase server data** in the app deletes everything the server holds. Or stop the server and
-delete the data directory. Data already forwarded to a metrics database must be deleted there
+**Erase Server Data and Start Over** in the app permanently deletes everything that iPhone
+uploaded (Parquet rows, staged rows, de-duplication entries), then uploads its history again. To delete
+a device's data without a new upload, revoke it and erase with the server token (see
+[Pairing](pairing.md#leaving)). To delete everything, stop the server and delete the data
+directory. Data already forwarded to a metrics database must be deleted there
 too.
 
 ## Reporting a vulnerability

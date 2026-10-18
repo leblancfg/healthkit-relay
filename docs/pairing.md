@@ -64,7 +64,14 @@ swaps that token for a device token of its own straight away.
 
 ## Leaving
 
-In the app, **Advanced** › **Disconnect** forgets the server on the phone. To also delete
-everything the server holds, use **Erase server data** in the app (it asks for
-confirmation), or delete the data directory on the server. See [Backups](backups.md) before
+In the app, **Advanced** › **Disconnect** forgets the server on the phone. **Erase Server Data and Start Over**
+deletes what this iPhone uploaded, for good, and then uploads it again. To delete it without
+a new upload, revoke the device, then erase its data with the server token:
+
+```sh
+curl -X DELETE -H "Authorization: Bearer $(cat token)" \
+  "http://127.0.0.1:8080/v1/data?confirm=erase&device=<device id>"
+```
+
+To delete everything, stop the server and delete the data directory. See [Backups](backups.md) before
 you do either.

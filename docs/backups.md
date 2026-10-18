@@ -13,8 +13,9 @@ sake: everything forwarded to it is also in the archive.
 
 ## Consistent copies
 
-Parquet files are written once and never modified, so copying them is always safe. The
-staging database changes during uploads; for a consistent copy, either:
+Parquet files are never modified in place: flush, nightly compaction and erase write a new
+file and rename it into place, so a copied file is always complete. `staging.db` (SQLite)
+changes during uploads, and compaction replaces files; for a consistent copy, either:
 
 - stop the server for the copy (`systemctl stop healthkit-relay` or `docker compose stop`),
   which is fine: the phone retries later and nothing is lost; or

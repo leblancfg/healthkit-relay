@@ -31,81 +31,141 @@ The wire format is documented in the
 
 ## Storage
 
-<!-- storage: keep this section in step with the server's storage layer. -->
+<!-- storage: keep this section in step with the server's storage layer (server/README.md, Archive). -->
 
-!!! info "Storage layout"
-    This section describes the storage design of the current release. Run `DESCRIBE`
-    (below) to see the exact columns your server writes.
-
-Incoming batches land in a **SQLite staging database** in the data directory, which makes
-each batch durable before the server answers and deduplicates on disk (by sample UUID, and
-by record key and content), so memory use does not grow with history. Staged rows are
-compacted into **Parquet** files, partitioned by data type and month:
+Everything lives in the archive directory (`-archive-dir`, `HKR_ARCHIVE_DIR`):
 
 ```text
-<data-dir>/
+<archive-dir>/
+  staging.db                 SQLite: batches not flushed yet, the de-duplication index, tombstones
+  devices.json               paired devices (token hashes only)
   parquet/
-    type=HKQuantityTypeIdentifierHeartRate/
-      month=2026-10/part-*.parquet
-    type=HKWorkoutTypeIdentifier/
-      month=2026-10/part-*.parquet
-    ...
-  staging.sqlite      # recent batches, before compaction
-  devices.json        # paired devices (token hashes only)
+    samples/type=HKQuantityTypeIdentifierHeartRate/month=2026-10/c1234.parquet
+    samples/type=.../month=.../f5678.parquet     an hourly flush, not compacted yet
+    records/type=activity_summary/month=2026-10/...
+    route_points/type=HKWorkoutRouteTypeIdentifier/month=.../...
+    heartbeats/type=HKDataTypeIdentifierHeartbeatSeries/month=.../...
+    ecg_voltages/type=HKDataTypeIdentifierElectrocardiogram/month=.../...
+    quantity_series/type=HKQuantityTypeIdentifierStepCount/month=.../...
+    */type=_/month=_/schema.parquet              no rows: queries work before any data arrives
+    deleted/deleted.parquet                      tombstones
 ```
 
+- **Write path.** A batch is validated whole and committed to `staging.db` (fsynced) before
+  the app gets its `200`. De-duplication is an on-disk index of every record ever stored, so
+  memory does not grow with history: re-sending a batch stores nothing twice.
+- **Flush, hourly** (`-flush-interval`). Staged rows are streamed into a new Parquet file per
+  dataset, type and month, `f<seq>.parquet`, then removed from staging.
+- **Compaction, nightly** (`-compact-at`, 03:30 local time by default). Each partition with
+  more than one file is merged into one, `c<seq>.parquet`, and samples deleted in Apple
+  Health are dropped from the files on the way. Months that received nothing are not
+  rewritten.
+- **Partitions.** `month` is the month of the sample's start, in UTC (`YYYY-MM`). `type` is the
+  HealthKit type identifier, or the record kind in `records`.
+
+Flush, compaction and erase are journaled and atomic (temp file, fsync, rename): a crash
+loses nothing and duplicates nothing. DuckDB can read the files while the server runs.
+
+### Columns
+
+`samples` and `records`: `uuid`, `type`, `kind`, `key` (records), `start`, `end`
+(timestamps, UTC), `value` (double), `unit`, `source_name`, `source_bundle`,
+`source_version`, `device`, `uploader` (the paired device's ID, empty for the server token),
+`wire` (wire format, 1 or 2), `received_at`, and `json`, the record exactly as the app sent
+it, so fields without a column (metadata, category value names, Apple's serialized object)
+are kept. In `records`, `type` is the record kind (`activity_summary`, `characteristics`,
+`medication`, `series`...) and `uuid` the sample a chunk belongs to.
+
+The series datasets have one row per point, joined to `samples.uuid` by `sample_uuid`, and
+ordered by `chunk` then `i`:
+
+| Dataset | Columns |
+|---|---|
+| `route_points` | `sample_uuid`, `chunk`, `i`, `time`, `lat`, `lon`, `alt`, `h_acc`, `v_acc`, `speed`, `speed_acc`, `course`, `course_acc`, `ellipsoidal_alt`, `floor` |
+| `heartbeats` | `sample_uuid`, `chunk`, `i`, `time`, `t` (seconds since the sample's start), `gap` |
+| `ecg_voltages` | `sample_uuid`, `chunk`, `i`, `time`, `t`, `microvolts` (lead I) |
+| `quantity_series` | `sample_uuid`, `chunk`, `i`, `start`, `end`, `value`, `unit` |
+| `deleted` | `uuid`, `wire`, `type`, `reason`, `uploader`, `received_at`, `json` |
+
+Every point dataset also has `uploader` and `received_at`; with `hive_partitioning`, DuckDB
+adds `type` and `month` from the folder names.
+
 Parquet is columnar and compressed, readable by DuckDB, pandas, Polars, Spark, ClickHouse and
-most data tools, and stays readable without this project. **Erase server data** in the app
-deletes all of it on the server.
+most data tools, and stays readable without this project.
+
+### Erasing
+
+**Erase Server Data and Start Over** in the app calls `DELETE /v1/data?confirm=erase`, which
+permanently deletes everything that iPhone uploaded: Parquet files are rewritten without its
+rows (or removed), its staged rows, tombstones and de-duplication entries are deleted, and
+SQLite's log is truncated. There is no soft delete. The app then uploads its history again.
+Not erased: numbers already forwarded to the metrics database (they age out with its
+retention) and copies outside the archive directory, such as backups and snapshots. With the
+server token, `?confirm=erase` is required; `?device=<id>` erases one device's data.
 
 ## Querying with DuckDB
 
 [DuckDB](https://duckdb.org) reads the Parquet files in place; no import, no server. Install
-it (`brew install duckdb`, or the binary from duckdb.org), then from the data directory:
+it (`brew install duckdb`, or the binary from duckdb.org), download
+[`server/sql/views.sql`](https://github.com/leblancfg/healthkit-relay/blob/main/server/sql/views.sql),
+and start DuckDB in the archive directory with it:
+
+```sh
+cd /var/lib/healthkit-relay && duckdb -init /path/to/views.sql
+```
+
+It defines the views `samples`, `records`, `records_latest` (the latest version of a record
+that changes, such as today's activity summary), `route_points`, `heartbeats`,
+`ecg_voltages`, `quantity_series` and `deleted`. They hide what was deleted in Apple Health
+but not compacted away yet. Filtering on `type` and `month` reads only the matching files.
 
 ```sql
--- Everything, as one table, with type and month as columns from the folder names.
-CREATE VIEW health AS
-SELECT * FROM read_parquet('parquet/**/*.parquet', hive_partitioning = true, union_by_name = true);
-
-DESCRIBE health;
+DESCRIBE samples;
 
 -- What is there, and how much.
 SELECT type, count(*) AS n, min(start) AS first, max(start) AS last
-FROM health GROUP BY type ORDER BY n DESC;
-```
+FROM samples GROUP BY type ORDER BY n DESC;
 
-Read one type only, so DuckDB opens only that folder:
-
-```sql
 -- Daily resting heart rate.
-SELECT date_trunc('day', start) AS day, avg(value) AS resting_hr
-FROM read_parquet('parquet/type=HKQuantityTypeIdentifierRestingHeartRate/*/*.parquet')
+SELECT date_trunc('day', timezone('America/New_York', start)) AS day, avg(value) AS resting_hr
+FROM samples WHERE type = 'HKQuantityTypeIdentifierRestingHeartRate'
 GROUP BY day ORDER BY day;
 
 -- Heart rate variability (SDNN), weekly median, last year.
 SELECT date_trunc('week', start) AS week, median(value) AS hrv_ms
-FROM read_parquet('parquet/type=HKQuantityTypeIdentifierHeartRateVariabilitySDNN/*/*.parquet')
-WHERE start > now() - INTERVAL 1 YEAR
+FROM samples WHERE type = 'HKQuantityTypeIdentifierHeartRateVariabilitySDNN'
+  AND start > now() - INTERVAL 1 YEAR
 GROUP BY week ORDER BY week;
 
--- Hours asleep per night, by stage.
-SELECT date_trunc('day', "end") AS night, value_label AS stage,
+-- Hours asleep per night, by stage (the stage name is in the sample as sent).
+SELECT date_trunc('day', timezone('America/New_York', "end")) AS night,
+       json_extract_string(json, '$.value_label') AS stage,
        round(sum(epoch("end") - epoch(start)) / 3600, 2) AS hours
-FROM read_parquet('parquet/type=HKCategoryTypeIdentifierSleepAnalysis/*/*.parquet')
-WHERE value_label LIKE 'asleep%'
+FROM samples WHERE type = 'HKCategoryTypeIdentifierSleepAnalysis'
 GROUP BY ALL ORDER BY night, stage;
 
--- Steps per day, counting each source once (iPhone and Watch both count steps).
+-- Steps per day and source (iPhone and Watch both count steps).
 SELECT date_trunc('day', start) AS day, source_name, sum(value) AS steps
-FROM read_parquet('parquet/type=HKQuantityTypeIdentifierStepCount/*/*.parquet')
+FROM samples WHERE type = 'HKQuantityTypeIdentifierStepCount'
 GROUP BY ALL ORDER BY day;
+
+-- A workout route.
+SELECT time, lat, lon, alt, speed FROM route_points
+WHERE sample_uuid = '<route uuid>' ORDER BY chunk, i;
+
+-- Activity rings, latest version of each day.
+SELECT json_extract_string(json, '$.date') AS day,
+       json_extract(json, '$.values.active_energy_burned.value')::double AS kcal
+FROM records_latest WHERE type = 'activity_summary' ORDER BY day;
 ```
+
+Records received in the last hour may still be in `staging.db` only; `healthkit-relay flush`
+(with the server stopped) writes them out at once.
 
 Export anything to CSV or another Parquet file:
 
 ```sql
-COPY (SELECT * FROM health WHERE type = 'HKWorkoutTypeIdentifier')
+COPY (SELECT * FROM samples WHERE type = 'HKWorkoutTypeIdentifier')
 TO 'workouts.csv' (HEADER);
 ```
 
@@ -114,11 +174,14 @@ From Python:
 ```python
 import duckdb
 con = duckdb.connect()
+con.execute(open("/path/to/views.sql").read())
 df = con.sql("""
-    SELECT start, value FROM read_parquet(
-      'parquet/type=HKQuantityTypeIdentifierHeartRate/*/*.parquet')
+    SELECT start, value FROM samples
+    WHERE type = 'HKQuantityTypeIdentifierHeartRate'
 """).df()
 ```
+
+Run it from the archive directory: the views use paths relative to it.
 
 !!! tip "Sum versus average"
     Steps, distance and energy are additive: sum them, but de-duplicate overlapping sources

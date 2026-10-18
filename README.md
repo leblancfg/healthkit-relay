@@ -99,19 +99,21 @@ for a binary, systemd, NixOS, macOS, NAS or Raspberry Pi):
 
 ```sh
 mkdir -p healthkit-relay && cd healthkit-relay
-head -c 32 /dev/urandom | base64 > token && chmod 600 token   # the admin token
-docker run -d --name healthkit-relay --restart unless-stopped \
-  -p 8080:8080 \
-  -v "$PWD/data:/data" -v "$PWD/token:/run/secrets/token:ro" \
-  -e HKR_LISTEN=0.0.0.0:8080 -e HKR_ARCHIVE_DIR=/data -e HKR_TOKEN_FILE=/run/secrets/token \
-  ghcr.io/leblancfg/healthkit-relay:latest
+curl -fsSLO https://raw.githubusercontent.com/leblancfg/healthkit-relay/main/docker-compose.yml
+mkdir -p data
+(umask 077; head -c 32 /dev/urandom | base64 > token)   # the admin token
+printf 'HKR_USER=%s\nHKR_PUBLIC_URL=%s\n' "$(id -u):$(id -g)" http://192.168.1.10:8080 > .env
+docker compose up -d
 ```
+
+`HKR_PUBLIC_URL` is the address your iPhone uses to reach the server.
 
 **iPhone app.** Not on the App Store yet: build it with Xcode and a paid Apple Developer
 account (HealthKit requires one). See [ios/README.md](ios/README.md).
 
-**Pair.** Open `http://<server>:8080/setup` in a browser on the same network, enter the
-token, and scan the QR code with the iPhone's Camera. Allow Health access once and the first
+**Pair.** Run `docker compose exec relay healthkit-relay pair` for a QR code in the
+terminal, or open `http://192.168.1.10:8080/setup` in a browser on the same network and enter
+the token; scan the QR code with the iPhone's Camera. Allow Health access once and the first
 sync starts. For syncing away from home,
 [put it behind HTTPS](https://leblancfg.github.io/healthkit-relay/networking/) (Tailscale is
 the easiest).

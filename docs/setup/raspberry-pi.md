@@ -14,9 +14,11 @@ Then pick one:
 
 - **Docker:** install it (`curl -fsSL https://get.docker.com | sh`) and follow
   [Docker & Compose](docker.md); the image is multi-arch, so the same Compose file works.
+  Keep the Compose directory, and so `data/`, on the SSD.
 - **Binary + systemd:** follow [Linux binary + systemd](linux.md); the script there picks
-  the `arm64` archive by itself. Point `StateDirectory` at the SSD, or mount the SSD at
-  `/var/lib/healthkit-relay`.
+  the `arm64` archive by itself. The unit uses a dynamic user, so the archive really lives in
+  `/var/lib/private/healthkit-relay` (`/var/lib/healthkit-relay` is a symlink to it): mount
+  the SSD, or a directory on it, there before the first start.
 
 ## Tips
 

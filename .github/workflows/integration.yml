@@ -1,4 +1,4 @@
-# End-to-end tests of the documented install paths (docs/install.md). Each one installs the
+# End-to-end tests of the documented install paths (docs/setup/). Each one installs the
 # server as a user would, then runs scripts/smoke-test.sh: pair like the app, upload a
 # batch, check it is stored and survives a restart.
 name: Integration
@@ -29,7 +29,7 @@ jobs:
       HKR_RESTART_CMD: docker compose down && docker compose up -d --wait
     steps:
       - uses: actions/checkout@v7
-      - name: Set up as docs/install.md says
+      - name: Set up as docs/setup/docker.md says
         run: |
           mkdir -p data
           (umask 077; head -c 32 /dev/urandom | base64 > token)
@@ -95,7 +95,7 @@ jobs:
           ls ./*.tar.gz
           mkdir -p ../release && tar -xzf healthkit-relay_*_linux_amd64.tar.gz -C ../release
           ls -l ../release
-      - name: Install as docs/install.md says
+      - name: Install as docs/setup/linux.md says
         working-directory: release
         run: |
           sudo install -m 755 healthkit-relay /usr/local/bin/

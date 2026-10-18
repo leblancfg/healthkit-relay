@@ -7,12 +7,15 @@ scrub addresses before sharing them.
 ## Server
 
 **It exits at start with a token error.** The token file must exist, be readable by the
-service user and hold at least 16 characters. Make one with
-`head -c 32 /dev/urandom | base64 > token`.
+user the server runs as (in Docker, `HKR_USER`; it is mounted at `/run/secrets/hkr_token`)
+and hold at least 16 characters. Make one with
+`(umask 077; head -c 32 /dev/urandom | base64 > token)`.
 
-**Other machines cannot connect.** The default is `-listen 127.0.0.1:8080`, which only the
-server itself can reach. Use `0.0.0.0:8080` for LAN access (always, inside a container), and
-check the host firewall (`ufw allow 8080/tcp`, `firewall-cmd --add-port=8080/tcp`).
+**Other machines cannot connect.** The binary's default, also in the systemd unit and the
+NixOS module, is `-listen 127.0.0.1:8080`, which only the server itself can reach. Set
+`HKR_LISTEN=0.0.0.0:8080` (in `/etc/healthkit-relay/env`, or `listen` and `openFirewall` on
+NixOS) for LAN access; the Docker image already listens on all interfaces. Then check the
+host firewall (`ufw allow 8080/tcp`, `firewall-cmd --add-port=8080/tcp`).
 
 **"permission denied" on the data directory (Docker).** See
 [Docker & Compose](setup/docker.md#permissions).

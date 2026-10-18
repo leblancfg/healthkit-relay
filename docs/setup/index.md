@@ -3,10 +3,14 @@
 The server is one static binary with no runtime dependencies, published as:
 
 - a multi-arch **Docker image**, `ghcr.io/leblancfg/healthkit-relay` (`linux/amd64`,
-  `linux/arm64`);
-- **release archives** for Linux, macOS and Windows on amd64 and arm64, on the
-  [releases page](https://github.com/leblancfg/healthkit-relay/releases);
-- a **Nix flake** (`github:leblancfg/healthkit-relay`).
+  `linux/arm64`), with a Compose file;
+- **release archives** for Linux, macOS and FreeBSD on amd64 and arm64, with a systemd unit,
+  on the [releases page](https://github.com/leblancfg/healthkit-relay/releases);
+- a **Nix flake** (`github:leblancfg/healthkit-relay`) with a package and a NixOS module.
+
+Each of the Docker Compose, binary + systemd and NixOS setups is tested end to end in CI: the
+server is installed as these guides say, then a smoke test pairs like the app, uploads a
+batch, checks it is stored, restarts the server and checks it is still there.
 
 | Where | Guide |
 |---|---|
@@ -34,7 +38,7 @@ dashes as underscores (`-archive-dir` is `HKR_ARCHIVE_DIR`). Flags win over the 
 | Flag | Default | |
 |---|---|---|
 | `-listen` | `127.0.0.1:8080` | address to listen on; `0.0.0.0:8080` to accept other machines (and in containers) |
-| `-archive-dir` | required | data directory (archive, staging, paired devices) |
+| `-archive-dir` | required | data directory: `staging.db`, `parquet/`, `devices.json` |
 | `-token-file` | required | file holding the server token (16+ characters) |
 | `-public-url` | offered | the URL phones use, put in setup codes, e.g. `https://health.example.com` |
 | `-setup-from` | `private` | who may open `/setup` and pair: `private`, `any` or `off` |
@@ -42,6 +46,22 @@ dashes as underscores (`-archive-dir` is `HKR_ARCHIVE_DIR`). Flags win over the 
 | `-forward-token-file` | | bearer token for `-forward-url` |
 | `-measurement` | `healthkit` | line-protocol measurement name |
 | `-max-body-bytes` | `33554432` | largest accepted request |
+| `-flush-interval` | `1h` | how often staged records are written to Parquet |
+| `-compact-at` | `03:30` | local time of the nightly compaction, `HH:MM` |
+| `-group-read` | off | make the archive readable by the service's group (0750/0640) for backups or queries |
+| `-version` | | print the version and exit |
+
+## Commands
+
+The same binary has subcommands, which take the same flags and `HKR_` variables as the
+server:
+
+- against the **running** server, authenticated with the token file: `pair` (a setup QR code
+  in the terminal; `-valid 2h` for a longer-lived code), `devices` (list paired phones) and
+  `revoke <id>`. They connect to the `-listen` address, or `-server <url>`;
+- on the archive directory with the server **stopped**: `migrate` (convert the JSON Lines
+  archive of versions before 0.5), `flush` and `compact` (run the hourly and nightly
+  maintenance now).
 
 The authoritative list is `healthkit-relay -help` and the
 [server README](https://github.com/leblancfg/healthkit-relay/blob/main/server/README.md).

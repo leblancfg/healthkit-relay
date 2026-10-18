@@ -1,4 +1,4 @@
-# healthkit-relay with Docker Compose. See docs/install.md#docker. In this directory:
+# healthkit-relay with Docker Compose. See docs/setup/docker.md. In this directory:
 #
 #   mkdir -p data
 #   (umask 077; head -c 32 /dev/urandom | base64 > token)

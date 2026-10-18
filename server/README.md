@@ -202,9 +202,9 @@ A batch is stored entirely or not at all, so a client can safely retry until it 
 
 Erases, permanently, everything the caller uploaded: with a device token, that device's
 records; with the server token, what was uploaded with the server token, or with
-`?device=<id>` what that device uploaded (also after it was revoked). Send `?confirm=erase`
-too: any other value is refused (`400`, nothing erased); a request without it is still
-accepted for apps before 0.6, and a later version will require it. `200`
+`?device=<id>` what that device uploaded (also after it was revoked). It requires
+`?confirm=erase`: any other value, or none, is refused (`400`, nothing erased). Only the app
+before 0.6 may leave it out (a device token, or iOS's CFNetwork user agent). `200`
 `{"erased": 12571973, "device": "3f9a1c2e"}`. The app's **Erase Server Data and Start Over**
 calls it, then uploads its history again from scratch. Numbers already forwarded to the
 metrics database are not erased. See [Erasing](#erasing).
@@ -297,7 +297,7 @@ rows: `samples`, `records`, `records_latest`, `route_points`, `heartbeats`, `ecg
 `quantity_series`, `deleted`. Start DuckDB in the archive directory with it:
 
 ```sh
-cd /var/lib/healthkit-relay && duckdb -readonly -init /path/to/server/sql/views.sql
+cd /var/lib/healthkit-relay && duckdb -init /path/to/server/sql/views.sql
 ```
 
 ```sql

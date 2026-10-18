@@ -484,8 +484,6 @@ func removeEmptyDirs(root string) {
 
 // Conversions from received JSON to rows.
 
-func micros(t time.Time) int64 { return t.UnixMicro() }
-
 func ptr[T any](v T) *T { return &v }
 
 func optString(s string) *string {

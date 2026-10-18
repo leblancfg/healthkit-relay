@@ -245,8 +245,7 @@ func TestMigrateMemoryBounded(t *testing.T) {
 		}
 		f.Close()
 		var out strings.Builder
-		var p uint64
-		p = peakHeap(func() {
+		p := peakHeap(func() {
 			if err := runMigrate([]string{"-archive-dir", dir, "-uploader", "abcd1234"}, &out); err != nil {
 				t.Errorf("migrate: %v\n%s", err, out.String())
 			}

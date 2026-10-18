@@ -3,6 +3,29 @@
 Notable changes to the server and the app. Versions follow [Semantic Versioning](https://semver.org);
 server releases and the app are versioned separately.
 
+## 0.6.1 (unreleased)
+
+### Server
+
+- Batches may say what started the app's sync (`trigger`) and the app's state
+  (`app_state`): both appear in the `batch v2:` log line, and
+  `healthkit_relay_batches_total{trigger}` counts batches by trigger (`unknown` for older
+  apps).
+
+### App 0.6.1
+
+- Background sync works: observer queries are set up synchronously at launch from the types
+  the app asked for (saved when it asks), with no HealthKit status call first, so a launch
+  on a locked phone no longer ends with nothing observed.
+- An authorization plan or readable-type list HealthKit could not fully answer (phone
+  locked) is no longer kept for the life of the process; it is computed again at unlock and
+  when the app opens.
+- A sync skipped while locked, or failed, is remembered across launches and run at the next
+  unlock, background refresh or open.
+- A background app refresh about hourly runs a full incremental sync as a fallback.
+- Each batch says what started it (`foreground`, `observer`, `refresh`, `unlock`, `retry`).
+  Each observer wake is logged with the app's state and whether protected data is readable.
+
 ## 0.6.0 (2026-10-18)
 
 ### Server

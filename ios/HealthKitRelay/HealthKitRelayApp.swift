@@ -21,14 +21,36 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         #endif
         let info = Bundle.main.infoDictionary
         Log.info("app: \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?")) launched, "
-            + "state \(application.applicationState.rawValue)")
-        // HealthKit background delivery relaunches the app in the background: the observer
-        // queries must be registered on every launch.
+            + "\(AppState.now.description)")
+        // HealthKit background delivery relaunches the app in the background and wants the
+        // observer queries set up before launch ends: started here, synchronously, from the
+        // types saved when they were asked for. HealthKit's answers are added once it can be
+        // read (the phone may be locked now).
+        SyncEngine.shared.observeAtLaunch()
+        RefreshTask.register()
+        RefreshTask.schedule()
         Task { await SyncEngine.shared.startObserving() }
         NotificationCenter.default.addObserver(
             forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: .main
         ) { _ in
-            Task { await SyncEngine.shared.syncAfterUnlockIfPending() }
+            Log.info("app: protected data available (unlocked)")
+            Task {
+                let task = await BackgroundTask.begin("sync after unlock")
+                await SyncEngine.shared.dataBecameAvailable(.unlock)
+                await task.end()
+            }
+        }
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+        ) { _ in RefreshTask.schedule() }
+        // Woken in the background (HealthKit, refresh) with the phone unlocked since a sync was
+        // skipped or failed in an earlier process: make up for it now, not at the next unlock.
+        if application.applicationState == .background, application.isProtectedDataAvailable {
+            Task {
+                let task = await BackgroundTask.begin("owed sync")
+                if await SyncEngine.shared.pending != nil { await SyncEngine.shared.dataBecameAvailable(.unlock) }
+                await task.end()
+            }
         }
         return true
     }

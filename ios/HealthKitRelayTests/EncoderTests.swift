@@ -116,5 +116,17 @@ final class EncoderTests: XCTestCase {
         XCTAssertEqual((o["records"] as? [Any])?.count, 1)
         XCTAssertEqual((o["deletions"] as? [Any])?.count, 1)
         XCTAssertEqual(batch.recordCount, 1)
+        XCTAssertNil(o["trigger"])
+        XCTAssertNil(o["app_state"])
+    }
+
+    func testBatchTrigger() throws {
+        let batch = WireBatch(device: ["model": "x"], items: [try WireItem(.sample, ["uuid": "u"])],
+                              trigger: SyncTrigger.observer.rawValue, appState: "background")
+        let o = try XCTUnwrap(JSONSerialization.jsonObject(with: batch.body()) as? [String: Any])
+        XCTAssertEqual(o["trigger"] as? String, "observer")
+        XCTAssertEqual(o["app_state"] as? String, "background")
+        XCTAssertEqual((o["device"] as? [String: Any])?["model"] as? String, "x")
+        XCTAssertEqual((o["samples"] as? [Any])?.count, 1)
     }
 }

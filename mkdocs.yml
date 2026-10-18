@@ -1,0 +1,87 @@
+site_name: Health Relay
+site_description: >-
+  Self-hosted Apple Health export: sync HealthKit data from your iPhone and Apple Watch
+  to your own server, archive it losslessly in Parquet, query it with DuckDB and chart it
+  in Grafana. No cloud.
+site_url: https://leblancfg.github.io/healthkit-relay/
+repo_url: https://github.com/leblancfg/healthkit-relay
+repo_name: leblancfg/healthkit-relay
+edit_uri: edit/main/docs/
+copyright: MIT licensed. Not a medical device.
+
+exclude_docs: |
+  REPO_METADATA.md
+  requirements.txt
+
+theme:
+  name: material
+  logo: assets/logo.png
+  favicon: assets/logo.png
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: pink
+      accent: red
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: pink
+      accent: red
+      toggle:
+        icon: material/brightness-4
+        name: Light mode
+  features:
+    - content.code.copy
+    - content.action.edit
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - search.suggest
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Quick start: quickstart.md
+  - Setup guides:
+      - setup/index.md
+      - Docker & Compose: setup/docker.md
+      - Linux binary + systemd: setup/linux.md
+      - NixOS: setup/nixos.md
+      - macOS (launchd): setup/macos.md
+      - Synology, Unraid, TrueNAS: setup/nas.md
+      - Raspberry Pi & ARM: setup/raspberry-pi.md
+  - Networking & HTTPS: networking.md
+  - Pairing a phone: pairing.md
+  - Data model & querying: data.md
+  - Grafana: grafana.md
+  - Backups: backups.md
+  - Security & privacy: security.md
+  - Troubleshooting: troubleshooting.md
+  - Contributing: contributing.md
+  - Changelog: changelog.md

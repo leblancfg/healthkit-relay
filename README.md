@@ -1,136 +1,224 @@
-# healthkit-relay
+<p align="center">
+  <img src="docs/assets/logo.png" width="96" alt="Health Relay logo: a coral heart">
+</p>
 
-Copy your Apple Health data, continuously, to a server you run.
+<h1 align="center">Health Relay</h1>
 
-Apple Health keeps years of heart rate, sleep, activity and workout data on your iPhone,
-with no way to query it from elsewhere short of a manual XML export. healthkit-relay is two
-small pieces:
+<p align="center">
+  <b>Self-hosted Apple Health export: sync your iPhone and Apple Watch health data to a server you own, continuously, with no cloud in between.</b>
+</p>
 
-- **`ios/`**: an iPhone app that reads HealthKit (read-only) and uploads new samples, and
-  deletions, to your server. It syncs incrementally and in the background, about hourly.
-- **`server/`**: a single static Go binary that receives those uploads, archives every
-  record on disk as Parquet files you can query with DuckDB, and can forward the numbers to a
-  time-series database (VictoriaMetrics, InfluxDB, anything that speaks InfluxDB line
-  protocol) for dashboards.
+<p align="center">
+  <a href="https://github.com/leblancfg/healthkit-relay/actions/workflows/ci.yml"><img src="https://github.com/leblancfg/healthkit-relay/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/leblancfg/healthkit-relay/releases/latest"><img src="https://img.shields.io/github/v/release/leblancfg/healthkit-relay?sort=semver" alt="Latest release"></a>
+  <a href="https://github.com/leblancfg/healthkit-relay/pkgs/container/healthkit-relay"><img src="https://img.shields.io/badge/docker-ghcr.io%2Fleblancfg%2Fhealthkit--relay-2496ED?logo=docker&logoColor=white" alt="Docker image"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/leblancfg/healthkit-relay" alt="MIT license"></a>
+  <a href="https://leblancfg.github.io/healthkit-relay/"><img src="https://img.shields.io/badge/docs-mkdocs-ff2d55" alt="Documentation"></a>
+</p>
 
-## Architecture
+Health Relay is an open-source **HealthKit sync and backup** tool. A small iPhone app reads
+everything in Apple Health (heart rate, HRV, sleep stages, steps, workouts with GPS routes,
+ECG recordings, blood pressure, cycle tracking, medications, Health Records and the rest)
+and uploads it in the background to **your own server**: a single Go binary or Docker
+container on a NAS, a Raspberry Pi, a home server or a VPS. The server keeps a lossless
+archive in **Parquet** files you can query with **DuckDB**, and forwards the numbers as
+InfluxDB line protocol to **Prometheus-compatible stores** such as **VictoriaMetrics** or
+**InfluxDB**, so your Apple Watch data shows up in **Grafana**. No account, no analytics, no
+vendor cloud: a private, free alternative to paid Apple Health exporter apps and to the
+manual `export.zip` XML dump.
 
+**[Documentation](https://leblancfg.github.io/healthkit-relay/)** ·
+[Quick start](#quick-start) ·
+[Setup guides](https://leblancfg.github.io/healthkit-relay/setup/) ·
+[FAQ](#faq)
+
+## Features
+
+- **Everything HealthKit has.** The list of data types is generated from the iOS SDK at
+  build time: all quantity and category types, workouts (activities, events, statistics,
+  every GPS point of the route), heartbeat series, ECG voltages, audiograms, blood pressure
+  and food correlations, State of Mind, GAD-7/PHQ-9, medications, vision prescriptions,
+  clinical records (FHIR), activity rings and characteristics. A newer Xcode means new types,
+  with no code change.
+- **Continuous and incremental.** The first sync uploads your whole history; after that iOS
+  wakes the app in the background as new data lands (about hourly). Deletions sync too.
+- **Lossless.** Every sample is stored exactly as sent, with source, device and metadata,
+  plus the raw `NSKeyedArchiver` archive for most kinds, so nothing is dropped for want of a
+  field.
+- **Nothing lost, nothing duplicated.** Batches are stored whole or not at all; the app only
+  moves on once the server confirms, and the server ignores records it already has.
+- **Query it like a data lake.** Parquet partitioned by type and month: open it in DuckDB,
+  pandas, Polars or Spark.
+- **Dashboards.** Numeric samples go to VictoriaMetrics, InfluxDB or anything that accepts
+  line protocol; build Grafana dashboards for resting heart rate, HRV, sleep, VO2 max or
+  steps.
+- **One-tap pairing.** Scan a QR code from the setup page; each iPhone gets its own
+  revocable token. Erase all server data from the app if you want out.
+- **Small and boring to run.** One static binary, no database server to manage, `/metrics`
+  for Prometheus, runs on amd64 and arm64.
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/assets/screenshots/flow.png" width="860" alt="Setup page, Health access, synced status screen and Advanced settings of the Health Relay iPhone app">
+</p>
+
+<!-- More welcome: a Grafana dashboard, the setup page with its QR code. Put them in docs/assets/screenshots/. -->
+
+## How it works
+
+```mermaid
+flowchart LR
+  subgraph iPhone
+    HK[(Apple Health<br/>HealthKit)] -->|observer + anchored queries| APP[Health Relay app]
+  end
+  APP -->|HTTPS, device token<br/>POST /v1/samples| SRV[healthkit-relay server]
+  subgraph Your server
+    SRV --> STG[(SQLite staging<br/>+ dedup)]
+    STG --> PQ[(Parquet archive<br/>type / month)]
+    SRV -->|InfluxDB line protocol| TSDB[(VictoriaMetrics<br/>InfluxDB · Prometheus-compatible)]
+  end
+  PQ --> DUCK[DuckDB · pandas · Polars]
+  TSDB --> GRAF[Grafana]
 ```
- iPhone                                         your server
-┌──────────────────────────┐   HTTPS + token   ┌───────────────────────────────┐
-│ HealthKit                │  POST /v1/samples │ healthkit-relay               │
-│   │ observer queries     │ ────────────────▶ │  ├─ staging.db (SQLite)       │  acked once committed,
-│   ▼ anchored queries     │   JSON batches    │  │   └─ hourly ─▶ parquet/    │  deduped; Parquet by
-│ Health Relay app         │ ◀──────────────── │  └─ line protocol ───────────▶│  type and month
-│  anchors · retry/backoff │   200 stored/dup  │                               │ VictoriaMetrics /
-│                          │                   │                               │ InfluxDB (optional)
-└──────────────────────────┘                   └───────────────────────────────┘
-```
 
-1. At launch the app registers an `HKObserverQuery` per data type and enables hourly
-   background delivery, so iOS wakes it when new data lands.
-2. For each type an `HKAnchoredObjectQuery` returns what changed since the last persisted
-   anchor: new samples and deleted ones. The first run uploads all history.
-3. Batches (up to 4 MB) are posted with retries and exponential backoff; long series such
-   as routes and ECG voltages are split into chunks. The anchor advances only after the
-   server confirms the whole page is stored, so failures lose nothing and an interrupted
-   first upload resumes where it stopped; the server ignores records it already has, so
-   retries duplicate nothing.
-4. While the phone is locked HealthKit data is encrypted; the app defers and syncs after
-   the next unlock.
-5. The server validates a batch as a whole, commits the new records (each with the sample
-   exactly as sent) to a SQLite staging database, and only then answers 200. Every hour they
-   move to Parquet files partitioned by data type and month; every night each month's files
-   are merged into one. Deletions are recorded as tombstones and applied at the next merge.
-
-### What it syncs: everything
-
-There is no hand-written list of data types. At build time,
-[`ios/Scripts/gen-health-types`](ios/Scripts/gen-health-types) reads the HealthKit headers of
-the SDK the app is compiled with and generates every type identifier HealthKit declares, with
-Apple's documented unit for each quantity and the names of every enum value
-([`Generated/SDKHealthTypes.swift`](ios/HealthKitRelay/Generated/SDKHealthTypes.swift)). Build
-with a newer Xcode and the types Apple added are synced, with no code change; types the
-phone's iOS does not have yet are skipped. With the iOS 27 SDK that is 222 types:
-
-- all 121 quantity types (heart rate, HRV, steps, energy, nutrition, mobility, audio
-  exposure...) and 71 category types (sleep stages, symptoms, cycle tracking, events...), with
-  full metadata, source, device and the individual values of series samples;
-- workouts with their activities, events, per-type statistics and routes (every GPS point);
-- heartbeat series (beat-to-beat timing), ECGs (every voltage sample, classification,
-  symptoms), audiograms, blood pressure and food correlations with their members, state of
-  mind, GAD-7 and PHQ-9 assessments, medications and dose events, vision prescriptions (with
-  attached scans), health records (FHIR) and CDA documents;
-- daily activity summaries (rings and goals) and characteristics (date of birth, biological
-  sex, blood type, skin type, wheelchair use, move mode).
-
-Nothing is dropped for want of a unit: each quantity type gets one unit for its whole history
-(the one the Health app shows, else Apple's canonical one), and every value is sent with its
-unit string. Each object is also uploaded with its complete `NSKeyedArchiver` archive (except
-the bulk quantity and category samples), so even properties this app has no field for yet are
-kept.
-
-## Privacy
-
-- Your data goes to your server and nowhere else: no analytics, no third-party SDKs, no
-  vendor cloud. The app has no network destination other than the URL you enter.
-- The app asks for **read** access only and never writes to Health.
-- The server URL and the app's token live in the iPhone Keychain (this device only), never
-  in the source or the app bundle. Each iPhone gets a token of its own when it scans a setup
-  code; the server keeps only a hash of it and can revoke it.
-- The server needs a token for uploads. Run it behind HTTPS (a reverse proxy, or a private
-  network such as a VPN or Tailscale); do not expose it publicly without TLS. Setup and
-  pairing answer private networks only, by default.
-- `/healthz` and `/metrics` carry no health data (`/metrics` exposes request counts).
-- The archive is plain Parquet files (DuckDB, pandas, Polars, Spark read them), with each
-  record also kept as the JSON the app sent. The app's **Erase Server Data and Start Over**
-  deletes everything that iPhone uploaded, for good, then uploads it again.
+1. The app registers a HealthKit observer per data type and asks iOS for background
+   delivery. An anchored query returns what changed since the last confirmed upload: new
+   samples and deletions.
+2. Batches are posted with retries and backoff. The app's position only advances when the
+   server confirms the batch is durably stored, so an interrupted first upload resumes where
+   it stopped.
+3. The server deduplicates, stages and writes everything to the archive, then forwards
+   numeric samples to your time-series database if you configured one. The archive is the
+   source of truth; the metrics database is just a view.
 
 ## Quick start
 
-Server (needs Go 1.26+, or `nix build`):
+**Server** (Docker; see the [setup guides](https://leblancfg.github.io/healthkit-relay/setup/)
+for a binary, systemd, NixOS, macOS, NAS or Raspberry Pi):
 
 ```sh
-make server-build
-head -c 32 /dev/urandom | base64 > token     # keep this file private (chmod 600)
-./bin/healthkit-relay -listen 127.0.0.1:8080 -archive-dir ./archive -token-file ./token \
-  -forward-url http://127.0.0.1:8428/influx/write   # optional
+mkdir -p healthkit-relay && cd healthkit-relay
+head -c 32 /dev/urandom | base64 > token && chmod 600 token   # the admin token
+docker run -d --name healthkit-relay --restart unless-stopped \
+  -p 8080:8080 \
+  -v "$PWD/data:/data" -v "$PWD/token:/run/secrets/token:ro" \
+  -e HKR_LISTEN=0.0.0.0:8080 -e HKR_ARCHIVE_DIR=/data -e HKR_TOKEN_FILE=/run/secrets/token \
+  ghcr.io/leblancfg/healthkit-relay:latest
 ```
 
-See [server/README.md](server/README.md) for the API, the archive format, DuckDB queries
-([`server/sql/views.sql`](server/sql/views.sql)) and all flags, and
-[docs/install.md](docs/install.md) for Docker, release binaries with systemd, and NixOS.
-Upgrading from 0.4 or earlier: stop the server and run
-`healthkit-relay migrate -archive-dir ./archive` once.
+**iPhone app.** Not on the App Store yet: build it with Xcode and a paid Apple Developer
+account (HealthKit requires one). See [ios/README.md](ios/README.md).
 
-iPhone app (needs a Mac with Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen) and
-a paid Apple Developer account, which HealthKit requires):
+**Pair.** Open `http://<server>:8080/setup` in a browser on the same network, enter the
+token, and scan the QR code with the iPhone's Camera. Allow Health access once and the first
+sync starts. For syncing away from home,
+[put it behind HTTPS](https://leblancfg.github.io/healthkit-relay/networking/) (Tailscale is
+the easiest).
 
-```sh
-cp ios/Config/Local.xcconfig.example ios/Config/Local.xcconfig   # set your team id and bundle id
-make ios-build    # or: make ios-project, then open ios/HealthKitRelay.xcodeproj
+## Privacy
+
+- Your health data goes to the server you run and nowhere else. No analytics, no crash
+  reporting, no third-party SDKs, no vendor account.
+- The app asks for **read** access only and never writes to Apple Health.
+- Each iPhone has its own token, stored in the Keychain; the server keeps only a hash and
+  can revoke it. Pairing and the setup page answer private networks only, by default.
+- `/healthz` and `/metrics` expose no health data.
+- Your data is plain files on your disk: easy to back up, easy to delete.
+
+More in [Security & privacy](https://leblancfg.github.io/healthkit-relay/security/).
+
+> [!IMPORTANT]
+> **Not a medical device.** Health Relay copies data; it does not diagnose, treat or
+> monitor any condition, and it is not a substitute for professional medical advice.
+> Values may be incomplete, delayed or wrong. See [DISCLAIMER.md](DISCLAIMER.md).
+
+## FAQ
+
+<details>
+<summary><b>How is this different from the Health app's "Export All Health Data"?</b></summary>
+
+The built-in export is a manual, one-off zip of a large XML file that you have to redo to
+get anything new, and it does not tell you what was deleted since last time. Health Relay
+syncs continuously and incrementally, in the background, includes deletions, and stores the
+data typed and ready to query.
+</details>
+
+<details>
+<summary><b>Do I need an Apple Developer account?</b></summary>
+
+Today, yes: the app is built from source, and HealthKit apps can only be signed with a paid
+Apple Developer Program membership. A TestFlight or App Store build may come later.
+</details>
+
+<details>
+<summary><b>Does my data go through any cloud?</b></summary>
+
+No. The app talks only to the server address you pair it with. There is no Health Relay
+service, account or telemetry.
+</details>
+
+<details>
+<summary><b>Does it work with Apple Watch data?</b></summary>
+
+Yes. Apple Watch writes into Apple Health on the iPhone, and Health Relay reads it from
+there: heart rate, HRV, resting heart rate, VO2 max, sleep stages, workouts and routes, ECGs,
+blood oxygen, wrist temperature and so on. There is no separate watch app.
+</details>
+
+<details>
+<summary><b>Can I use Prometheus, InfluxDB, VictoriaMetrics or Grafana?</b></summary>
+
+Anything that accepts InfluxDB line protocol over HTTP works as a forwarding target:
+VictoriaMetrics, InfluxDB 1.x/2.x, or Telegraf's HTTP listener in front of Prometheus.
+Forwarding is optional; the Parquet archive always has everything.
+</details>
+
+<details>
+<summary><b>Does it need to be reachable from the internet?</b></summary>
+
+No. The phone syncs whenever it can reach the server, so a LAN-only setup works (syncs
+happen at home). For syncing from anywhere without opening ports, use Tailscale or another
+VPN. See [Networking & HTTPS](https://leblancfg.github.io/healthkit-relay/networking/).
+</details>
+
+<details>
+<summary><b>Android, Google Fit, Health Connect?</b></summary>
+
+Not supported. The server's API is documented, so another client could send data to it.
+</details>
+
+<details>
+<summary><b>Several people, several iPhones?</b></summary>
+
+Pair as many iPhones as you like; each gets its own token and appears in the device list.
+Records keep the source and device they came from.
+</details>
+
+## Repository layout
+
 ```
-
-Then set up the app in one tap: open `http://127.0.0.1:8080/setup` (or your server's
-address) in a browser, enter the token, and scan the code with the iPhone's Camera. Or, on
-the server, run `./bin/healthkit-relay pair -token-file ./token -public-url <address phones
-use>` and scan the code it prints. The app connects, asks for Health access once (select
-everything, then confirm) and starts syncing; there is nothing else to set. See
-[server/README.md](server/README.md#setting-up-the-app) for how pairing works, and
-[ios/README.md](ios/README.md).
-
-## Layout
-
-```
-server/     Go receiver and archive (SQLite staging, Parquet), tests; sql/views.sql for DuckDB
-ios/        SwiftUI app; project.yml is the XcodeGen spec
-flake.nix   Nix package and NixOS module (nix/) for the server
-docs/       install guide: Docker, binary + systemd, NixOS
+server/     Go server: receiver, archive (SQLite staging, Parquet), pairing, forwarding
+ios/        SwiftUI iPhone app (XcodeGen spec in project.yml)
+docs/       documentation site (MkDocs Material)
+flake.nix   Nix package, NixOS module (nix/) and its VM test
 packaging/  systemd unit shipped in the release archives
 scripts/    smoke-test.sh, the end-to-end check every install path runs in CI
 Makefile    server-test, server-build, ios-build, ios-test
 ```
 
+API, flags and archive details: [server/README.md](server/README.md); DuckDB views in
+[`server/sql/views.sql`](server/sql/views.sql). App internals: [ios/README.md](ios/README.md).
+Upgrading from 0.4 or earlier: stop the server and run
+`healthkit-relay migrate -archive-dir <archive>` once.
+
+## Contributing
+
+Bug reports, data types that look wrong, setup guides for platforms we missed: all welcome.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Report
+security issues privately, as described in [SECURITY.md](SECURITY.md).
+
 ## License
 
-MIT, see [LICENSE](LICENSE).
+[MIT](LICENSE). Apple, Apple Health, HealthKit, Apple Watch and iPhone are trademarks of
+Apple Inc. This project is not affiliated with or endorsed by Apple.

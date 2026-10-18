@@ -36,5 +36,5 @@ Out of scope: a server exposed to the internet over plain HTTP against the docum
 attacks that need the admin token or root on the server, a compromised or jailbroken iPhone,
 and issues in Apple's HealthKit itself (report those to Apple).
 
-See [Security & privacy](https://leblancfg.github.io/healthkit-relay/security/) for the
+See [Security & privacy](https://leblancfg.com/healthkit-relay/security/) for the
 threat model.

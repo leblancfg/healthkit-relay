@@ -9,7 +9,7 @@ This file is excluded from the docs site.
 
 ## Website
 
-https://leblancfg.github.io/healthkit-relay/
+https://leblancfg.com/healthkit-relay/
 
 ## Topics (max 20)
 
@@ -41,7 +41,7 @@ data-export
 ```sh
 gh repo edit leblancfg/healthkit-relay \
   --description "Self-hosted Apple Health export: sync iPhone and Apple Watch HealthKit data (heart rate, HRV, sleep, workouts, GPS routes, ECG) to your own server. Lossless Parquet archive, DuckDB queries, Grafana via VictoriaMetrics/InfluxDB. No cloud." \
-  --homepage "https://leblancfg.github.io/healthkit-relay/" \
+  --homepage "https://leblancfg.com/healthkit-relay/" \
   --add-topic apple-health,healthkit,apple-watch,self-hosted,health-data,quantified-self,ios,swiftui,golang,grafana,prometheus,victoriametrics,influxdb,parquet,duckdb,privacy,homelab,heart-rate-variability,sleep-tracking,data-export
 ```
 

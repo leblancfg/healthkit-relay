@@ -13,7 +13,7 @@
   <a href="https://github.com/leblancfg/healthkit-relay/releases/latest"><img src="https://img.shields.io/github/v/release/leblancfg/healthkit-relay?sort=semver" alt="Latest release"></a>
   <a href="https://github.com/leblancfg/healthkit-relay/pkgs/container/healthkit-relay"><img src="https://img.shields.io/badge/docker-ghcr.io%2Fleblancfg%2Fhealthkit--relay-2496ED?logo=docker&logoColor=white" alt="Docker image"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/leblancfg/healthkit-relay" alt="MIT license"></a>
-  <a href="https://leblancfg.github.io/healthkit-relay/"><img src="https://img.shields.io/badge/docs-mkdocs-ff2d55" alt="Documentation"></a>
+  <a href="https://leblancfg.com/healthkit-relay/"><img src="https://img.shields.io/badge/docs-mkdocs-ff2d55" alt="Documentation"></a>
 </p>
 
 Your iPhone and Apple Watch know a lot about you: every heartbeat, every night of sleep, every
@@ -37,9 +37,9 @@ are yours to keep, chart, query or delete.
 - **Runs on what you already have.** A NAS, a Raspberry Pi, a home server or a small VPS: one
   small program, no database to look after.
 
-**[Documentation](https://leblancfg.github.io/healthkit-relay/)** ·
+**[Documentation](https://leblancfg.com/healthkit-relay/)** ·
 [Quick start](#quick-start) ·
-[Setup guides](https://leblancfg.github.io/healthkit-relay/setup/) ·
+[Setup guides](https://leblancfg.com/healthkit-relay/setup/) ·
 [FAQ](#faq)
 
 ## Features
@@ -114,7 +114,7 @@ flowchart LR
 
 ## Quick start
 
-**Server** (Docker; see the [setup guides](https://leblancfg.github.io/healthkit-relay/setup/)
+**Server** (Docker; see the [setup guides](https://leblancfg.com/healthkit-relay/setup/)
 for a binary, systemd, NixOS, macOS, NAS or Raspberry Pi):
 
 ```sh
@@ -135,7 +135,7 @@ account (HealthKit requires one). See [ios/README.md](ios/README.md).
 terminal, or open `http://192.168.1.10:8080/setup` in a browser on the same network and enter
 the token; scan the QR code with the iPhone's Camera. Allow Health access once and the first
 sync starts. For syncing away from home,
-[put it behind HTTPS](https://leblancfg.github.io/healthkit-relay/networking/) (Tailscale is
+[put it behind HTTPS](https://leblancfg.com/healthkit-relay/networking/) (Tailscale is
 the easiest).
 
 ## Privacy
@@ -148,7 +148,7 @@ the easiest).
 - `/healthz` and `/metrics` expose no health data.
 - Your data is plain files on your disk: easy to back up, easy to delete.
 
-More in [Security & privacy](https://leblancfg.github.io/healthkit-relay/security/).
+More in [Security & privacy](https://leblancfg.com/healthkit-relay/security/).
 
 > [!IMPORTANT]
 > **Not a medical device.** Health Relay copies data; it does not diagnose, treat or
@@ -201,7 +201,7 @@ Forwarding is optional; the Parquet archive always has everything.
 
 No. The phone syncs whenever it can reach the server, so a LAN-only setup works (syncs
 happen at home). For syncing from anywhere without opening ports, use Tailscale or another
-VPN. See [Networking & HTTPS](https://leblancfg.github.io/healthkit-relay/networking/).
+VPN. See [Networking & HTTPS](https://leblancfg.com/healthkit-relay/networking/).
 </details>
 
 <details>

@@ -47,9 +47,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // skipped or failed in an earlier process: make up for it now, not at the next unlock.
         if application.applicationState == .background, application.isProtectedDataAvailable {
             Task {
-                let task = await BackgroundTask.begin("owed sync")
+                let task = BackgroundTask.begin("owed sync")
                 if await SyncEngine.shared.pending != nil { await SyncEngine.shared.dataBecameAvailable(.unlock) }
-                await task.end()
+                task.end()
             }
         }
         return true

@@ -594,14 +594,14 @@ actor SyncEngine {
                 do {
                     _ = try await self.sync(synced)
                 } catch {
-                    await self.notePending(error)
+                    self.notePending(error)
                 }
             }
             done.call()
             do {
                 _ = try await self.syncAuxIfDue()
             } catch {
-                await self.notePending(error)
+                self.notePending(error)
             }
         }
     }

@@ -104,16 +104,18 @@ final class Observers: @unchecked Sendable {
         for synced in types {
             guard let type = synced.sampleType else { continue }
             let key = synced.key
+            // Marked observed before the query starts: a query ending at once (an error) must
+            // find itself there to forget, and a concurrent caller must not start a second one.
             lock.lock()
-            let start = !observed.contains(key) && !unobservable.contains(key)
+            let start = !unobservable.contains(key) && observed.insert(key).inserted
             let enable = delivery.insert(key).inserted
             lock.unlock()
-            if start {
-                let raised = store.safeExecute { Self.query(type, key) }
+            if start, store.safeExecute({ self.query(type, key, store: store) }) != nil {
                 lock.lock()
-                if raised == nil { observed.insert(key) } else { unobservable.insert(key) }
+                observed.remove(key)
+                unobservable.insert(key)
                 lock.unlock()
-                if raised != nil { refused.append(SyncEngine.shortName(key)) }
+                refused.append(SyncEngine.shortName(key))
             }
             if enable { deliver.append((key, type)) }
         }
@@ -123,11 +125,20 @@ final class Observers: @unchecked Sendable {
         enableDelivery(deliver, store: store)
     }
 
-    private static func query(_ type: HKSampleType, _ key: String) -> HKObserverQuery {
-        HKObserverQuery(sampleType: type, predicate: nil) { _, completion, error in
+    private func query(_ type: HKSampleType, _ key: String, store: HKHealthStore) -> HKObserverQuery {
+        HKObserverQuery(sampleType: type, predicate: nil) { query, completion, error in
             let done = CompletionOnce(completion)
             if let error {
-                Log.info("observe: \(SyncEngine.shortName(key)) woke with an error: \(error.localizedDescription)")
+                // The query is over: stopped and forgotten, so the next startObserving (the
+                // app opening, an unlock) starts it again. Not determined is expected for each
+                // type never asked about while the asked types are unknown: not logged.
+                store.stop(query)
+                self.lock.lock()
+                self.observed.remove(key)
+                self.lock.unlock()
+                if (error as? HKError)?.code != .errorAuthorizationNotDetermined {
+                    Log.info("observe: \(SyncEngine.shortName(key)) woke with an error: \(error.localizedDescription)")
+                }
                 done.call()
                 return
             }

@@ -153,13 +153,17 @@ func metricName(id string) string {
 	return b.String()
 }
 
+// escape backslash-escapes chars and backslashes. Tag values come from the phone (source
+// names of any app writing to Health, units, record value names): a trailing backslash left
+// as is would escape the separator after it and shift the rest of the line. Control
+// characters, which would end or corrupt the line, become spaces.
 func escape(s, chars string) string {
 	var b strings.Builder
 	for _, c := range s {
-		if c == '\n' || c == '\r' {
+		if unicode.IsControl(c) {
 			c = ' '
 		}
-		if strings.ContainsRune(chars, c) {
+		if c == '\\' || strings.ContainsRune(chars, c) {
 			b.WriteByte('\\')
 		}
 		b.WriteRune(c)

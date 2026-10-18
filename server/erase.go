@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -166,12 +167,17 @@ func (s *Server) eraseHandler(w http.ResponseWriter, r *http.Request) {
 		s.unauthorized(w)
 		return
 	}
-	// confirm=erase guards against an erase by mistake (a bare curl -X DELETE). Apps before
-	// 0.6 do not send it, so for now it is checked only when present.
+	// confirm=erase guards against an erase by mistake (a bare curl -X DELETE). The app before
+	// 0.6 does not send it, so a request without it is still accepted when it comes from the
+	// app: a paired device, or iOS's URL loading system (a CFNetwork user agent).
 	switch r.URL.Query().Get("confirm") {
 	case "erase":
 	case "":
-		log.Printf("erase: request without confirm=erase (app before 0.6); a later version will require it")
+		if c.Device == nil && !strings.Contains(r.UserAgent(), "CFNetwork/") {
+			httpError(w, http.StatusBadRequest, "add ?confirm=erase to erase; nothing was erased")
+			return
+		}
+		log.Printf("erase: request without confirm=erase (app before 0.6)")
 	default:
 		httpError(w, http.StatusBadRequest, "confirm must be \"erase\"; nothing was erased")
 		return

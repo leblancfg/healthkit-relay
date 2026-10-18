@@ -392,7 +392,10 @@ func TestErase(t *testing.T) {
 		t.Fatalf("re-upload: %+v", r)
 	}
 	// The server token erases what it uploaded, or a device's.
-	if resp, body := call(t, "DELETE", ts.URL+"/v1/data", testToken, nil); resp.StatusCode != 200 || !strings.Contains(string(body), `"erased":5`) {
+	if resp, body := call(t, "DELETE", ts.URL+"/v1/data", testToken, nil); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("admin erase without confirm=erase: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := call(t, "DELETE", ts.URL+"/v1/data?confirm=erase", testToken, nil); resp.StatusCode != 200 || !strings.Contains(string(body), `"erased":5`) {
 		t.Fatalf("admin erase: %d %s", resp.StatusCode, body)
 	}
 	if resp, body := call(t, "DELETE", ts.URL+"/v1/data?confirm=erase&device="+b.Device.ID, testToken, nil); resp.StatusCode != 200 || !strings.Contains(string(body), `"erased":10`) {

@@ -49,3 +49,27 @@ func splitUnescaped(s string, sep byte) []string {
 	}
 	return append(out, s[start:])
 }
+
+func TestPairRejectsControlCharactersInNames(t *testing.T) {
+	ts, _ := newTestServer(t, t.TempDir())
+	for _, name := range []string{"iPhone\x1b]0;pwned\x07", "iPhone\nrevoked device x", "iPhone\u0085\u009b31m"} {
+		c := mint(t, ts.URL)
+		resp, b := call(t, "POST", ts.URL+"/v1/pair", "", PairRequest{Code: c.Code, Name: name})
+		if resp.StatusCode != 400 {
+			t.Errorf("name %q: %d %s", name, resp.StatusCode, b)
+		}
+		resp, b = call(t, "POST", ts.URL+"/v1/pair", "", PairRequest{Code: c.Code, Name: "iPhone", Model: name})
+		if resp.StatusCode != 400 {
+			t.Errorf("model %q: %d %s", name, resp.StatusCode, b)
+		}
+	}
+	// Names people give phones still work.
+	c := mint(t, ts.URL)
+	if code, p := pairWith(t, ts.URL, c.Code, ""); code != 200 {
+		t.Fatalf("plain name: %d %+v", code, p)
+	}
+	c = mint(t, ts.URL)
+	if resp, b := call(t, "POST", ts.URL+"/v1/pair", "", PairRequest{Code: c.Code, Name: "Zoë’s iPhone 📱"}); resp.StatusCode != 200 {
+		t.Fatalf("unicode name: %d %s", resp.StatusCode, b)
+	}
+}

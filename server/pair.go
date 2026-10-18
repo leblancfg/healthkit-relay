@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 // Pairing. The server token is the admin credential: whoever holds it mints one-time setup
@@ -400,6 +401,12 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "name or model too long")
 		return
 	}
+	// Names end up in logs, the setup page and `healthkit-relay devices` in a terminal: no
+	// escape sequences or line breaks from whoever holds a code.
+	if !printable(name) || !printable(req.Model) {
+		httpError(w, http.StatusBadRequest, "name or model has control characters")
+		return
+	}
 	var token string
 	dev, err := s.Codes.Redeem(req.Code, func() (Device, error) {
 		t, d, err := s.Devices.Add(name, strings.TrimSpace(req.Model))
@@ -411,7 +418,8 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusForbidden, err.Error())
 		return
 	} else if err != nil {
-		httpError(w, http.StatusInternalServerError, "could not save the device: "+err.Error())
+		log.Printf("pair: %v", err) // names server paths: not for an unauthenticated caller
+		httpError(w, http.StatusInternalServerError, "could not save the device")
 		return
 	}
 	if req.Replaces != "" && !s.isAdminToken(req.Replaces) {
@@ -422,6 +430,10 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	s.count("paired")
 	log.Printf("paired device %s (%s, %s)", dev.ID, dev.Name, dev.Model)
 	writeJSON(w, http.StatusOK, PairResponse{Token: token, Device: dev, Server: s.status(&dev)})
+}
+
+func printable(s string) bool {
+	return !strings.ContainsFunc(s, unicode.IsControl) // JSON decoding already made it valid UTF-8
 }
 
 func (s *Server) statusHandler(w http.ResponseWriter, r *http.Request) {

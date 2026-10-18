@@ -267,13 +267,21 @@ func (s *Store) init() error {
 	return s.chmodAll()
 }
 
-// chmodAll sets the modes of what is already in the archive directory (written by an
-// earlier version, or with another -group-read).
+// chmodAll sets the modes of what the store keeps in the archive directory (written by an
+// earlier version, or with another -group-read): the directory, staging.db and its logs, the
+// Parquet tree and the JSON Lines files from before 0.5. Other files there, such as a token
+// file or devices.json, keep their own (owner-only) modes.
 func (s *Store) chmodAll() error {
-	roots := []string{s.dir}
-	if r, err := filepath.Rel(s.dir, s.parquet); err != nil || strings.HasPrefix(r, "..") {
-		roots = append(roots, s.parquet) // parquet/ is a symlink out of the archive directory
+	if err := os.Chmod(s.dir, s.dirMode); err != nil {
+		return err
 	}
+	for _, name := range []string{".lock", "staging.db", "staging.db-wal", "staging.db-shm", "staging.db-journal"} {
+		if err := os.Chmod(filepath.Join(s.dir, name), s.fileMode); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	roots, _ := filepath.Glob(filepath.Join(s.dir, "[0-9][0-9][0-9][0-9]")) // JSON Lines, by year
+	roots = append(roots, s.parquet)
 	for _, root := range roots {
 		if err := s.chmodTree(root); err != nil {
 			return err

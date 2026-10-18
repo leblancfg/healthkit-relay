@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -423,5 +424,53 @@ func TestV2RecordValuesOfAnyShape(t *testing.T) {
 	}
 	if strings.Join(fm.lines, "\n") != strings.Join(want, "\n") {
 		t.Errorf("forwarded:\n%s\nwant:\n%s", strings.Join(fm.lines, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// App 0.6.1 says what started each sync; older apps say nothing and count as "unknown", and
+// so does a value the server does not know (the label set stays fixed).
+func TestBatchTriggerCounted(t *testing.T) {
+	ts, _ := newTestServer(t, t.TempDir())
+	var logs strings.Builder
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	for _, body := range []string{
+		`{"version":2,"trigger":"observer","app_state":"background","samples":[` + hrSample + `]}`,
+		`{"version":2,"trigger":"observer","samples":[` + hrSample + `]}`,
+		`{"version":2,"trigger":"refresh","samples":[]}`,
+		`{"version":2,"samples":[` + sleepSample + `]}`,
+		`{"samples":[],"deletions":[` + deletion + `]}`,
+		`{"version":2,"trigger":"bogus{\"x\"}","samples":[]}`,
+	} {
+		if resp, r := post(t, ts.URL, testToken, body); resp.StatusCode != 200 {
+			t.Fatalf("post %s: %d %+v", body, resp.StatusCode, r)
+		}
+	}
+	resp, err := http.Get(ts.URL + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	for _, want := range []string{
+		`healthkit_relay_batches_total{trigger="observer"} 2`,
+		`healthkit_relay_batches_total{trigger="refresh"} 1`,
+		`healthkit_relay_batches_total{trigger="unknown"} 3`,
+		`healthkit_relay_batches_total{trigger="foreground"} 0`,
+		`healthkit_relay_batches_total{trigger="unlock"} 0`,
+		`healthkit_relay_batches_total{trigger="retry"} 0`,
+	} {
+		if !strings.Contains(string(b), want+"\n") {
+			t.Errorf("metrics lack %q:\n%s", want, b)
+		}
+	}
+	if strings.Contains(string(b), "bogus") {
+		t.Errorf("an unknown trigger became a label:\n%s", b)
+	}
+	for _, want := range []string{"1 stored, 0 duplicates, trigger observer, app background",
+		"0 stored, 1 duplicates, trigger observer, app unknown", "trigger unknown, app unknown"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("log lacks %q:\n%s", want, logs.String())
+		}
 	}
 }

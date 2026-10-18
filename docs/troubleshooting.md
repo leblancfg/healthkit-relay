@@ -49,7 +49,10 @@ resumes where it stopped if interrupted.
 **No background syncs.** iOS decides when to wake the app, about hourly at best. Low Power
 Mode, force-quitting the app from the app switcher, and Background App Refresh being off
 (Settings › General › Background App Refresh) all stop it. Opening the app always syncs. With
-Tailscale, turn on VPN On Demand so the server is reachable in the background.
+Tailscale, turn on VPN On Demand so the server is reachable in the background. The server's
+log says what started each batch (`batch v2: … trigger observer, app background`), and
+`healthkit_relay_batches_total{trigger}` counts them: only `foreground` means iOS never woke
+the app.
 
 **"Could not connect" on a LAN.** Allow Local Network access (Settings › Privacy & Security ›
 Local Network › Health Relay). Plain HTTP works only with IP addresses and `.local` names;

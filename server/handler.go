@@ -195,8 +195,10 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 	s.count("ok")
 	s.add("stored", int64(added))
 	s.add("duplicates", int64(resp.Duplicates))
-	log.Printf("batch v%d: %d samples, %d records, %d deletions, %d stored, %d duplicates",
-		v, len(b.Samples), len(b.Records), len(b.Deletions), added, resp.Duplicates)
+	trigger := b.trigger()
+	s.add("batches_"+trigger, 1)
+	log.Printf("batch v%d: %d samples, %d records, %d deletions, %d stored, %d duplicates, trigger %s, app %s",
+		v, len(b.Samples), len(b.Records), len(b.Deletions), added, resp.Duplicates, trigger, b.appState())
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
@@ -240,6 +242,11 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "# TYPE healthkit_relay_records_total counter")
 	fmt.Fprintf(w, "healthkit_relay_records_total{outcome=\"stored\"} %d\n", s.stats["stored"])
 	fmt.Fprintf(w, "healthkit_relay_records_total{outcome=\"duplicate\"} %d\n", s.stats["duplicates"])
+	fmt.Fprintln(w, "# HELP healthkit_relay_batches_total Accepted batches, by what started the app's sync (unknown: app before 0.6.1).")
+	fmt.Fprintln(w, "# TYPE healthkit_relay_batches_total counter")
+	for _, t := range Triggers {
+		fmt.Fprintf(w, "healthkit_relay_batches_total{trigger=%q} %d\n", t, s.stats["batches_"+t])
+	}
 	fmt.Fprintln(w, "# HELP healthkit_relay_archive_records Distinct records in the archive.")
 	fmt.Fprintln(w, "# TYPE healthkit_relay_archive_records gauge")
 	fmt.Fprintf(w, "healthkit_relay_archive_records %d\n", s.Archive.Len())

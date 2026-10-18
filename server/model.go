@@ -27,6 +27,34 @@ type Batch struct {
 	Records []json.RawMessage `json:"records,omitempty"`
 	// Deletions are samples HealthKit reported as deleted.
 	Deletions []json.RawMessage `json:"deletions"`
+	// Trigger (app 0.6.1) says what started the sync that sent the batch, see Triggers.
+	// Logged and counted, not archived.
+	Trigger string `json:"trigger,omitempty"`
+	// AppState (app 0.6.1) is the app's state when the sync started: "active",
+	// "inactive" or "background". Logged only.
+	AppState string `json:"app_state,omitempty"`
+}
+
+// Triggers are the values of Batch.Trigger the server counts. "unknown" counts batches
+// without one (apps before 0.6.1) or with a value not listed here, which keeps the metric's
+// label set fixed.
+var Triggers = []string{"foreground", "observer", "refresh", "unlock", "retry", "unknown"}
+
+func (b *Batch) trigger() string {
+	for _, t := range Triggers {
+		if b.Trigger == t {
+			return t
+		}
+	}
+	return "unknown"
+}
+
+func (b *Batch) appState() string {
+	switch b.AppState {
+	case "active", "inactive", "background":
+		return b.AppState
+	}
+	return "unknown"
 }
 
 func (b *Batch) version() int {

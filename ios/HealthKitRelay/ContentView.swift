@@ -32,6 +32,15 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showAdvanced) { AdvancedView() }
             .sheet(isPresented: $showManual) { ManualSetupView() }
+            .alert("Connect to \(model.pendingLink?.host ?? "this server")?",
+                   isPresented: Binding(get: { model.pendingLink != nil }, set: { if !$0 { model.pendingLink = nil } }),
+                   presenting: model.pendingLink) { link in
+                Button("Connect") { Task { await model.confirm(link) } }
+                Button("Cancel", role: .cancel) {}
+            } message: { link in
+                Text("Health Relay will send all your Health data to \(link.host). Connect only if you opened this link from your own server's setup page."
+                     + (link.isUnencrypted ? " This server uses plain HTTP: anyone on the network can read what is sent." : ""))
+            }
         }
         .onChange(of: phase, initial: true) { _, phase in
             if phase == .active { Task { await model.becameActive() } }

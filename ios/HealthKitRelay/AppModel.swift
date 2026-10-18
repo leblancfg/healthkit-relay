@@ -30,14 +30,37 @@ final class AppModel: ObservableObject {
 
     // MARK: Setup
 
-    /// healthrelay://pair?server=…&code=…: pairs, asks for Health access, syncs.
+    /// A setup link for a server other than the current one, until the user confirms it (see
+    /// `confirm`) or cancels (sets it to nil).
+    @Published var pendingLink: PairingLink?
+
+    /// healthrelay://pair?server=…&code=…: pairs, asks for Health access, syncs. Any web page
+    /// or message can open such a link, and pairing sends all Health history to the server it
+    /// names, so a new server waits for the user to confirm it; re-pairing with the server
+    /// that already has the data does not ask.
     func open(_ url: URL) async {
         guard let link = PairingLink(url) else {
             Log.error("setup: not a setup link: \(url.scheme ?? "")://\(url.host ?? "")")
             setupError = "This link is not a Health Relay setup link."
             return
         }
-        let host = ServerSettings(url: link.server.absoluteString, token: "").host
+        if settings.sameServer(as: link.server.absoluteString) {
+            await connect(with: link)
+        } else {
+            Log.info("setup: link for \(link.host), waiting for confirmation")
+            setupError = nil
+            pendingLink = link
+        }
+    }
+
+    /// The user confirmed a setup link `open` held back.
+    func confirm(_ link: PairingLink) async {
+        if pendingLink == link { pendingLink = nil }
+        await connect(with: link)
+    }
+
+    private func connect(with link: PairingLink) async {
+        let host = link.host
         Log.info("setup: link for \(host)")
         await connect(to: link.server.absoluteString, host: host, token: nil) { old in
             try await ServerClient(base: link.server).pair(code: link.code, replacing: old)
@@ -268,6 +291,7 @@ final class AppModel: ObservableObject {
         server = nil
         connecting = nil
         setupError = nil
+        pendingLink = nil
     }
 
     /// UI tests start from a fresh install: -hkr-reset-state.

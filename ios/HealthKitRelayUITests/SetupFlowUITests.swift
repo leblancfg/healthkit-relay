@@ -31,6 +31,12 @@ final class SetupFlowUITests: XCTestCase {
         if openApp.waitForExistence(timeout: 5) { openApp.tap() }
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
 
+        // A link for a new server asks first: it names where Health data will go.
+        let connect = app.alerts.buttons["Connect"]
+        XCTAssertTrue(connect.waitForExistence(timeout: 20), "no confirmation:\n\(app.debugDescription)")
+        snapshot("2b-confirm-server")
+        connect.tap()
+
         // The app says what to pick, then Health's sheet comes on Continue.
         let primer = app.buttons["health.continue"]
         XCTAssertTrue(primer.waitForExistence(timeout: 20), "no Health step:\n\(app.debugDescription)")

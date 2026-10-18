@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  server:
+    name: Server (Go)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: server
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          # Latest Go, for the newest standard library security fixes; go.mod states the minimum.
+          go-version: stable
+          check-latest: true
+          cache-dependency-path: server/go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "::error::not gofmt-ed: $unformatted"; exit 1; fi
+      - run: go vet ./...
+      - name: go test -race
+        # The race detector needs cgo; the shipped binary does not.
+        run: CGO_ENABLED=1 go test -race -count=1 ./...
+      - name: staticcheck
+        uses: dominikh/staticcheck-action@v1
+        with:
+          working-directory: server
+          install-go: false
+      - name: govulncheck
+        uses: golang/govulncheck-action@v1
+        with:
+          work-dir: server
+          go-version-input: stable
+          check-latest: true
+      - name: Build (static)
+        run: go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_SHA::7}" -o healthkit-relay . && ./healthkit-relay -version
+      - name: Healthcheck helper
+        working-directory: docker/healthcheck
+        run: go vet ./... && go build -o /dev/null .
+
+  scripts:
+    name: Shell, workflows
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck
+        run: shellcheck scripts/*.sh ios/Scripts/ui-test
+      - name: actionlint
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color
+
+  ios:
+    name: iOS (build, unit tests)
+    # The app uses iOS 27 SDK APIs, so it needs Xcode 27.
+    runs-on: xcode-27
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tools
+        run: |
+          brew install xcodegen
+          xcodebuild -version
+      - name: Generate the HealthKit type list from this SDK
+        # Every build does this too (project.yml); here it shows in the log whether the
+        # committed file matches this Xcode's SDK.
+        run: |
+          xcrun python3 -I Scripts/gen-health-types HealthKitRelay/Generated/SDKHealthTypes.swift
+          git diff --stat --exit-code -- HealthKitRelay/Generated ||
+            echo "::notice::Generated/SDKHealthTypes.swift differs from what $(xcodebuild -version | head -1) generates; commit it after updating Xcode"
+      - name: Generate the Xcode project
+        run: xcodegen generate
+      - name: Pick a simulator
+        id: sim
+        run: |
+          udid=$(xcrun simctl list devices available -j |
+            jq -r '[.devices | to_entries[] | select(.key | contains("iOS")) | .value[] | select(.name | startswith("iPhone"))] | last | .udid')
+          [ -n "$udid" ] && [ "$udid" != null ] || { xcrun simctl list devices available; exit 1; }
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+      - name: Build for device (unsigned)
+        run: |
+          mkdir -p build
+          xcodebuild build -project HealthKitRelay.xcodeproj -scheme HealthKitRelay \
+            -configuration Release -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+            CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO | tee build/device-build.log | grep -E 'error:|warning:|BUILD (SUCCEEDED|FAILED)' || true
+          grep -q 'BUILD SUCCEEDED' build/device-build.log
+      - name: Unit tests (simulator)
+        run: |
+          xcodebuild test -project HealthKitRelay.xcodeproj -scheme HealthKitRelay \
+            -destination "id=${{ steps.sim.outputs.udid }}" -derivedDataPath build \
+            -resultBundlePath build/unit.xcresult -only-testing:HealthKitRelayTests \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+            > build/unit-test.log 2>&1 || { tail -80 build/unit-test.log; exit 1; }
+          grep -E 'error:|Test Suite .* (passed|failed)|Executed|TEST (SUCCEEDED|FAILED)' build/unit-test.log
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-test-results
+          path: |
+            ios/build/*.log
+            ios/build/unit.xcresult
+          retention-days: 7

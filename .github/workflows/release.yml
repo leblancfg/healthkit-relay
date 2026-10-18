@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write        # create the GitHub release and upload assets
+      id-token: write        # sign the provenance attestation
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0     # the changelog needs history
+      - uses: actions/setup-go@v7
+        with:
+          # Latest Go, for the newest standard library security fixes; go.mod states the minimum.
+          go-version: stable
+          check-latest: true
+          cache-dependency-path: server/go.mod
+      - name: GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-checksums: dist/checksums.txt

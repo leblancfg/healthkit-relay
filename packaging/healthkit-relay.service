@@ -1,0 +1,60 @@
+# healthkit-relay as a systemd service. See docs/install.md#binary-and-systemd.
+#
+#   install -m 755 healthkit-relay /usr/local/bin/
+#   install -m 644 healthkit-relay.service /etc/systemd/system/
+#   install -d -m 700 /etc/healthkit-relay
+#   (umask 077; head -c 32 /dev/urandom | base64 > /etc/healthkit-relay/token)
+#   echo HKR_PUBLIC_URL=https://health.example.com > /etc/healthkit-relay/env
+#   systemctl daemon-reload && systemctl enable --now healthkit-relay
+#   healthkit-relay pair -token-file /etc/healthkit-relay/token    # as root
+#
+# Settings go in /etc/healthkit-relay/env as HKR_<FLAG>=value (see server/README.md), e.g.
+# HKR_LISTEN=0.0.0.0:8080 to accept phones on the LAN without a reverse proxy.
+# The archive is in /var/lib/healthkit-relay.
+
+[Unit]
+Description=healthkit-relay: Apple Health receiver and archive
+Documentation=https://github.com/leblancfg/healthkit-relay
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/healthkit-relay -archive-dir ${STATE_DIRECTORY} -token-file ${CREDENTIALS_DIRECTORY}/token
+Environment=HKR_LISTEN=127.0.0.1:8080
+EnvironmentFile=-/etc/healthkit-relay/env
+LoadCredential=token:/etc/healthkit-relay/token
+StateDirectory=healthkit-relay
+StateDirectoryMode=0700
+DynamicUser=yes
+Restart=on-failure
+RestartSec=5s
+
+# Hardening: the server only needs its state directory and the network.
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+PrivateDevices=yes
+PrivateUsers=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectProc=invisible
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -25,6 +26,16 @@ import (
 // codes (`healthkit-relay pair`, or the setup page). The app exchanges a code for a token of
 // its own; the server keeps only its SHA-256, in <archive-dir>/devices.json, and can revoke
 // it. The server token still authorizes uploads, so apps set up by hand keep working.
+//
+// Each stored token has a scope: "upload" (paired apps: upload, status, erase their data) or
+// "read" (query clients: the query API only). Entries without one, from before scopes, are
+// upload tokens. The server token can do everything.
+
+// Token scopes.
+const (
+	ScopeUpload = "upload"
+	ScopeRead   = "read"
+)
 
 // Device is a paired app.
 type Device struct {
@@ -34,7 +45,12 @@ type Device struct {
 	CreatedAt time.Time `json:"created_at"`
 	LastSeen  time.Time `json:"last_seen_at,omitempty"`
 	TokenHash string    `json:"token_sha256,omitempty"`
+	// Scope is ScopeUpload or ScopeRead; empty (devices.json before scopes) is ScopeUpload.
+	Scope string `json:"scope,omitempty"`
 }
+
+// scope is the device's scope, ScopeUpload when unset.
+func (dev *Device) scope() string { return cmpOr(dev.Scope, ScopeUpload) }
 
 // Devices is the list of paired apps, persisted as JSON.
 type Devices struct {
@@ -81,10 +97,15 @@ func randomString(n int) string {
 
 // Add pairs a new device and returns its token, which is not stored.
 func (d *Devices) Add(name, model string) (string, Device, error) {
+	return d.AddScoped(name, model, ScopeUpload)
+}
+
+// AddScoped adds a token with the given scope and returns it; only its hash is stored.
+func (d *Devices) AddScoped(name, model, scope string) (string, Device, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	token := randomString(32)
-	dev := &Device{Name: name, Model: model, CreatedAt: d.now().UTC().Truncate(time.Second), TokenHash: hashToken(token)}
+	dev := &Device{Name: name, Model: model, CreatedAt: d.now().UTC().Truncate(time.Second), TokenHash: hashToken(token), Scope: scope}
 	dev.LastSeen = dev.CreatedAt
 	for dev.ID == "" || d.find(dev.ID) >= 0 {
 		b := make([]byte, 4)
@@ -107,8 +128,8 @@ func (d *Devices) Rekey(oldToken, name, model string) (token string, dev Device,
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	cur, found := d.byHash[hashToken(oldToken)]
-	if !found {
-		return "", Device{}, false, nil
+	if !found || cur.scope() != ScopeUpload {
+		return "", Device{}, false, nil // a read token is never turned into an app's
 	}
 	prev := *cur
 	token = randomString(32)
@@ -185,6 +206,7 @@ func (d *Devices) Len() int {
 func (dev *Device) public() Device {
 	c := *dev
 	c.TokenHash = ""
+	c.Scope = dev.scope()
 	return c
 }
 
@@ -339,6 +361,12 @@ type Caller struct {
 	Device *Device
 }
 
+// Allows tells whether the caller may use what needs scope: the admin may use everything,
+// a stored token what its own scope covers.
+func (c Caller) Allows(scope string) bool {
+	return c.Admin || (c.Device != nil && c.Device.scope() == scope)
+}
+
 func bearer(r *http.Request) string {
 	got, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	return strings.TrimSpace(got)
@@ -363,6 +391,26 @@ func (s *Server) caller(r *http.Request) (Caller, bool) {
 		}
 	}
 	return Caller{}, false
+}
+
+// authorize authenticates a request and checks its scope: without a valid token it answers
+// 401, with a token of another scope 403. ok is false when it has answered.
+func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string) (Caller, bool) {
+	c, ok := s.caller(r)
+	if !ok {
+		s.unauthorized(w)
+		return Caller{}, false
+	}
+	if !c.Allows(scope) {
+		s.count("forbidden")
+		msg := "this token is for uploads from the app; the query API needs a read token (healthkit-relay token create -scope read)"
+		if scope == ScopeUpload {
+			msg = "this token is a read token: it may only use the query API"
+		}
+		httpError(w, http.StatusForbidden, msg)
+		return Caller{}, false
+	}
+	return c, true
 }
 
 func (s *Server) unauthorized(w http.ResponseWriter) {
@@ -465,9 +513,8 @@ func printable(s string) bool {
 }
 
 func (s *Server) statusHandler(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.caller(r)
+	c, ok := s.authorize(w, r, ScopeUpload)
 	if !ok {
-		s.unauthorized(w)
 		return
 	}
 	writeJSON(w, http.StatusOK, s.status(c.Device))
@@ -532,6 +579,58 @@ func (s *Server) devicesList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string][]Device{"devices": s.Devices.List()})
+}
+
+// TokenRequest is the body of POST /v1/tokens.
+type TokenRequest struct {
+	Name  string `json:"name"`
+	Scope string `json:"scope"` // ScopeRead (default) or ScopeUpload
+}
+
+// TokenResponse answers POST /v1/tokens. The token is shown this once; only its hash is kept.
+type TokenResponse struct {
+	Token  string `json:"token"`
+	Device Device `json:"device"`
+}
+
+// createToken mints a token for a client that is not the app (a dashboard, an agent): read
+// tokens use the query API only. It is listed and revoked with the paired devices.
+func (s *Server) createToken(name, scope string) (TokenResponse, int, error) {
+	name = strings.TrimSpace(name)
+	scope = cmpOr(scope, ScopeRead)
+	switch {
+	case scope != ScopeRead && scope != ScopeUpload:
+		return TokenResponse{}, http.StatusBadRequest, fmt.Errorf("scope must be %q or %q", ScopeRead, ScopeUpload)
+	case name == "":
+		return TokenResponse{}, http.StatusBadRequest, errors.New("name is required: what the token is for, e.g. grafana")
+	case len(name) > 100 || !printable(name):
+		return TokenResponse{}, http.StatusBadRequest, errors.New("name must be at most 100 printable characters")
+	}
+	token, dev, err := s.Devices.AddScoped(name, "", scope)
+	if err != nil {
+		log.Printf("tokens: %v", err)
+		return TokenResponse{}, http.StatusInternalServerError, errors.New("could not save the token")
+	}
+	log.Printf("created %s token %s (%s)", scope, dev.ID, dev.Name)
+	return TokenResponse{Token: token, Device: dev}, http.StatusCreated, nil
+}
+
+func (s *Server) tokensCreate(w http.ResponseWriter, r *http.Request) {
+	if c, ok := s.caller(r); !ok || !c.Admin {
+		s.unauthorized(w)
+		return
+	}
+	var req TokenRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	resp, code, err := s.createToken(req.Name, req.Scope)
+	if err != nil {
+		httpError(w, code, err.Error())
+		return
+	}
+	writeJSON(w, code, resp)
 }
 
 func (s *Server) deviceRevoke(w http.ResponseWriter, r *http.Request) {

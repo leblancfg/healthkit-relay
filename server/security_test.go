@@ -92,6 +92,9 @@ func TestSetupFormsRefuseCrossOrigin(t *testing.T) {
 		if w := setupRequest(t, s, "POST", "/setup/revoke", lan, h, url.Values{"id": {dev.ID}}); w.Code != 403 {
 			t.Errorf("%s revoke: %d", site, w.Code)
 		}
+		if w := setupRequest(t, s, "POST", "/setup/tokens", lan, h, url.Values{"name": {"evil"}}); w.Code != 403 {
+			t.Errorf("%s token: %d", site, w.Code)
+		}
 	}
 	if s.Devices.Len() != 1 {
 		t.Fatal("a cross-origin post revoked the device")

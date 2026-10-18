@@ -17,12 +17,14 @@ import (
 
 // runCommand runs a subcommand against the running server, authenticated with the server
 // token, using the same flags and HKR_ variables as the server itself.
-func runCommand(name string, args []string, out io.Writer) error {
+func runCommand(name string, args []string, out, errOut io.Writer) error {
 	fs := flag.NewFlagSet("healthkit-relay "+name, flag.ContinueOnError)
 	var cfg config
 	cfg.register(fs)
 	server := fs.String("server", "", "URL of the running server (default: http://<-listen>)")
 	valid := fs.Duration("valid", CodeTTL, "pair: how long the code works, at most 24h (e.g. 2h to send the link to a phone)")
+	tokenName := fs.String("name", "", "token create: what the token is for, e.g. grafana (required)")
+	tokenScope := fs.String("scope", ScopeRead, "token create: read (the query API only) or upload (what a paired app may do)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -112,11 +114,23 @@ func runCommand(name string, args []string, out io.Writer) error {
 			return nil
 		}
 		tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "ID\tNAME\tMODEL\tPAIRED\tLAST SEEN")
+		fmt.Fprintln(tw, "ID\tNAME\tMODEL\tSCOPE\tPAIRED\tLAST SEEN")
 		for _, d := range list.Devices {
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", d.ID, d.Name, d.Model, d.CreatedAt.Local().Format("2006-01-02 15:04"), ago(d.LastSeen))
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", d.ID, d.Name, d.Model, d.scope(), d.CreatedAt.Local().Format("2006-01-02 15:04"), ago(d.LastSeen))
 		}
 		tw.Flush()
+	case "token create":
+		if fs.NArg() != 0 {
+			return errors.New("usage: healthkit-relay token create -name <what it is for> [-scope read|upload]")
+		}
+		var t TokenResponse
+		if err := call(http.MethodPost, "/v1/tokens", TokenRequest{Name: *tokenName, Scope: *tokenScope}, &t); err != nil {
+			return err
+		}
+		// The token alone on stdout, so that it can go straight to a file.
+		fmt.Fprintln(out, t.Token)
+		fmt.Fprintf(errOut, "Created %s token %s (%s). It is shown only this once; revoke it with: healthkit-relay revoke %s\n",
+			t.Device.Scope, t.Device.ID, t.Device.Name, t.Device.ID)
 	case "revoke":
 		if fs.NArg() != 1 {
 			return errors.New("usage: healthkit-relay revoke <device id> (see healthkit-relay devices)")

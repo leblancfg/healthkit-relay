@@ -411,7 +411,7 @@ func TestPairCommand(t *testing.T) {
 	tok := filepath.Join(t.TempDir(), "token")
 	os.WriteFile(tok, []byte(testToken+"\n"), 0o600)
 	var out bytes.Buffer
-	if err := runCommand("pair", []string{"-server", ts.URL, "-token-file", tok, "-public-url", "https://health.example.com"}, &out); err != nil {
+	if err := runCommand("pair", []string{"-server", ts.URL, "-token-file", tok, "-public-url", "https://health.example.com"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "https://health.example.com/setup?code=") || !strings.Contains(out.String(), "█") ||
@@ -420,20 +420,20 @@ func TestPairCommand(t *testing.T) {
 		t.Fatalf("pair output:\n%s", out.String())
 	}
 	out.Reset()
-	if err := runCommand("pair", []string{"-server", ts.URL, "-token-file", tok, "-public-url", "https://h.example", "-valid", "3h"}, &out); err != nil {
+	if err := runCommand("pair", []string{"-server", ts.URL, "-token-file", tok, "-public-url", "https://h.example", "-valid", "3h"}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	out.Reset()
 	// The test server listens on loopback only: no address to offer, so no code.
-	if err := runCommand("pair", []string{"-server", ts.URL, "-token-file", tok}, &out); err == nil || !strings.Contains(err.Error(), "-public-url") ||
+	if err := runCommand("pair", []string{"-server", ts.URL, "-token-file", tok}, &out, io.Discard); err == nil || !strings.Contains(err.Error(), "-public-url") ||
 		strings.Contains(out.String(), "127.0.0.1") {
 		t.Fatalf("pair without any reachable address: %v\n%s", err, out.String())
 	}
 	out.Reset()
-	if err := runCommand("devices", []string{"-server", ts.URL, "-token-file", tok}, &out); err != nil || !strings.Contains(out.String(), "No paired devices") {
+	if err := runCommand("devices", []string{"-server", ts.URL, "-token-file", tok}, &out, io.Discard); err != nil || !strings.Contains(out.String(), "No paired devices") {
 		t.Fatalf("devices: %v %s", err, out.String())
 	}
-	if err := runCommand("revoke", []string{"-server", ts.URL, "-token-file", tok, "nope"}, &out); err == nil {
+	if err := runCommand("revoke", []string{"-server", ts.URL, "-token-file", tok, "nope"}, &out, io.Discard); err == nil {
 		t.Fatal("revoke of an unknown device should fail")
 	}
 }

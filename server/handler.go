@@ -60,9 +60,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/pairing-codes", s.pairingCodes)
 	mux.HandleFunc("GET /v1/devices", s.devicesList)
 	mux.HandleFunc("DELETE /v1/devices/{id}", s.deviceRevoke)
+	mux.HandleFunc("POST /v1/tokens", s.tokensCreate)
 	mux.HandleFunc("GET /setup", s.setupPage)
 	mux.HandleFunc("POST /setup", s.setupLogin)
 	mux.HandleFunc("POST /setup/revoke", s.setupRevoke)
+	mux.HandleFunc("POST /setup/tokens", s.setupToken)
 	mux.HandleFunc("GET /setup/status", s.setupStatus)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
@@ -76,9 +78,8 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.caller(r)
+	c, ok := s.authorize(w, r, ScopeUpload)
 	if !ok {
-		s.unauthorized(w)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, s.MaxBodyBytes)
@@ -233,9 +234,9 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	fmt.Fprintln(w, "# HELP healthkit_relay_requests_total Uploads (POST /v1/samples) and pairings by result.")
+	fmt.Fprintln(w, "# HELP healthkit_relay_requests_total Uploads (POST /v1/samples), pairings and refused tokens by result.")
 	fmt.Fprintln(w, "# TYPE healthkit_relay_requests_total counter")
-	for _, res := range []string{"ok", "unauthorized", "bad_request", "incomplete", "archive_error", "paired", "pair_rejected", "erased"} {
+	for _, res := range []string{"ok", "unauthorized", "bad_request", "incomplete", "archive_error", "paired", "pair_rejected", "erased", "forbidden"} {
 		fmt.Fprintf(w, "healthkit_relay_requests_total{result=%q} %d\n", res, s.stats["requests_"+res])
 	}
 	fmt.Fprintln(w, "# HELP healthkit_relay_records_total Records received, by outcome.")

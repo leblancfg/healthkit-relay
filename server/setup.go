@@ -120,8 +120,11 @@ type setupView struct {
 	// Addresses to choose from when -public-url is not set; Chosen is the one in the code.
 	Addresses  []Address
 	Chosen     string
-	Configured bool // -public-url is set
-	Devices    []Device
+	Configured bool     // -public-url is set
+	Devices    []Device // paired apps (upload tokens)
+	Tokens     []Device // read tokens, for the query API
+	NewToken   string   // a token just created, shown once
+	NewName    string
 	LoginErr   bool
 }
 
@@ -235,9 +238,42 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 	v.Mode, v.Code, v.Link, v.QR = "pair", code, template.URL(PairLink(public, code)), template.HTML(q.SVG())
 	v.Expires = exp.Local().Format("15:04")
 	if v.Admin {
-		v.Devices = s.Devices.List()
+		v.Devices, v.Tokens = s.deviceLists()
 	}
 	s.render(w, http.StatusOK, v)
+}
+
+// deviceLists splits the stored tokens into paired apps and read tokens.
+func (s *Server) deviceLists() (apps, read []Device) {
+	for _, d := range s.Devices.List() {
+		if d.Scope == ScopeRead {
+			read = append(read, d)
+		} else {
+			apps = append(apps, d)
+		}
+	}
+	return apps, read
+}
+
+// setupToken creates a read token from the setup page and shows it once.
+func (s *Server) setupToken(w http.ResponseWriter, r *http.Request) {
+	if !s.setupAllowed(r) {
+		s.setupForbidden(w)
+		return
+	}
+	if !setupForm(w, r) {
+		return
+	}
+	if !s.admin(r) {
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		return
+	}
+	t, code, err := s.createToken(r.PostFormValue("name"), ScopeRead)
+	if err != nil {
+		http.Error(w, err.Error(), code)
+		return
+	}
+	s.render(w, http.StatusOK, setupView{Mode: "token", Admin: true, NewToken: t.Token, NewName: t.Device.Name})
 }
 
 func (s *Server) setupLogin(w http.ResponseWriter, r *http.Request) {
@@ -358,6 +394,8 @@ form.login { text-align: left; margin-top: 20px; }
 label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 6px 4px; }
 input[type=password] { width: 100%; font: inherit; padding: 13px 14px; border-radius: 12px; border: 1px solid var(--line);
   background: var(--bg); color: var(--text); margin-bottom: 14px; }
+input[type=text] { font: inherit; font-size: 15px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+code.token { white-space: normal; word-break: break-all; user-select: all; font-size: 15px; }
 input[type=password]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .error { color: var(--accent); font-size: 15px; margin: 0 0 14px; }
 code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); padding: 2px 6px; border-radius: 6px; white-space: nowrap; }
@@ -406,6 +444,13 @@ footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8
   <p class="sub">This page was opened at {{.Server}}, which an iPhone cannot reach, and the server found no other address it answers on.</p>
   <p class="hint">Start the server with <code>-public-url</code> set to the address your iPhone uses (for example <code>https://health.example.com</code> behind a reverse proxy), or with <code>-listen 0.0.0.0:8080</code> so this page can offer the machine's network addresses.</p>
 </section>
+{{else if eq .Mode "token"}}
+<section class="card">
+  <h2>Read token for {{.NewName}}</h2>
+  <p class="sub">Copy it now: it is shown only this once. It reads health data through the query API (<code>/docs</code>), and nothing else.</p>
+  <p><code class="token">{{.NewToken}}</code></p>
+  <a class="button" href="/setup">Done</a>
+</section>
 {{else if eq .Mode "used"}}
 <section class="card">
   <svg class="check" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30" fill="#34c759"/><path d="M19 33l9 9 17-19" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -448,6 +493,19 @@ footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8
   {{else}}
   <p class="empty">None yet.</p>
   {{end}}
+</section>
+<section class="card list">
+  <h3>Read tokens</h3>
+  {{range .Tokens}}
+  <div class="row">
+    <div class="what"><div class="name">{{.Name}}</div><div class="meta">query API · created {{date .CreatedAt}} · used {{ago .LastSeen}}</div></div>
+    <form method="post" action="/setup/revoke"><input type="hidden" name="id" value="{{.ID}}"><button class="link" type="submit">Revoke</button></form>
+  </div>
+  {{end}}
+  <form class="row" method="post" action="/setup/tokens">
+    <input class="what" name="name" type="text" maxlength="100" placeholder="New token, e.g. grafana" required>
+    <button class="link" type="submit">Create</button>
+  </form>
 </section>
 {{end}}
 <script nonce="{{.Nonce}}">

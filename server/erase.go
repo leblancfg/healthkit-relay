@@ -162,9 +162,8 @@ func rewriteWithout[T any](s *Store, path string, drop func(*T) bool) error {
 // erases what was uploaded with the server token, or, with ?device=<id>, what that device
 // uploaded (also after it was revoked).
 func (s *Server) eraseHandler(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.caller(r)
+	c, ok := s.authorize(w, r, ScopeUpload)
 	if !ok {
-		s.unauthorized(w)
 		return
 	}
 	// confirm=erase guards against an erase by mistake (a bare curl -X DELETE). The app before

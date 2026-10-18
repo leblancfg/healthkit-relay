@@ -8,7 +8,7 @@
 //
 // Subcommands talk to the running server with the same configuration: `pair` prints a
 // one-time setup code (QR code and link) for the app, `devices` lists paired devices and
-// `revoke <id>` removes one. Offline commands work on the archive directly, with the server
+// `revoke <id>` removes one, `token create -name grafana` mints a read token for the query API. Offline commands work on the archive directly, with the server
 // stopped: `migrate` converts the JSON Lines archive of versions before 0.5, `flush` and
 // `compact` run the hourly and nightly maintenance at once.
 package main
@@ -64,7 +64,12 @@ func run(args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
 		case "pair", "devices", "revoke":
-			return runCommand(args[0], args[1:], os.Stdout)
+			return runCommand(args[0], args[1:], os.Stdout, os.Stderr)
+		case "token":
+			if len(args) < 2 || args[1] != "create" {
+				return errors.New("usage: healthkit-relay token create -name <what it is for> [-scope read|upload]; list and revoke tokens with devices and revoke")
+			}
+			return runCommand("token create", args[2:], os.Stdout, os.Stderr)
 		case "migrate":
 			return runMigrate(args[1:], os.Stdout)
 		case "flush", "compact":

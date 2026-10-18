@@ -99,9 +99,7 @@ func dirSize(dir string) int64 {
 // archive: the peak heap is the same for 4x the rows, and stays under 64 MB for 400 000
 // samples (200 MB as received). HKR_MEMORY_ROWS sets the larger size.
 func TestMemoryBounded(t *testing.T) {
-	if testing.Short() {
-		t.Skip("writes a few hundred MB")
-	}
+	skipMemoryTest(t)
 	large := 400_000
 	if v, err := strconv.Atoi(os.Getenv("HKR_MEMORY_ROWS")); err == nil {
 		large = v
@@ -172,9 +170,7 @@ func TestMemoryBounded(t *testing.T) {
 // Series chunks are rows of up to a few MB (the JSON of a route or ECG chunk): batches and
 // row groups are bounded by size too, so a month of them merges in the same memory.
 func TestMemoryBoundedLargeRows(t *testing.T) {
-	if testing.Short() {
-		t.Skip("writes a few hundred MB")
-	}
+	skipMemoryTest(t)
 	peak := func(rows int) uint64 {
 		s, err := OpenStore(t.TempDir())
 		if err != nil {
@@ -219,9 +215,7 @@ func TestMemoryBoundedLargeRows(t *testing.T) {
 // Migration reads lines of any size (a route chunk is about 0.5 MB) in batches bounded by
 // size: memory is the same for 4x the lines.
 func TestMigrateMemoryBounded(t *testing.T) {
-	if testing.Short() {
-		t.Skip("writes a few hundred MB")
-	}
+	skipMemoryTest(t)
 	peak := func(chunks int) uint64 {
 		dir := t.TempDir()
 		os.MkdirAll(filepath.Join(dir, "2026"), 0o750)
@@ -256,5 +250,17 @@ func TestMigrateMemoryBounded(t *testing.T) {
 	small, big := peak(100), peak(400)
 	if big > 96<<20 || big > small*3/2+8<<20 {
 		t.Errorf("peak heap: %d MB for 100 lines, %d MB for 400: not bounded", small>>20, big>>20)
+	}
+}
+
+// skipMemoryTest skips the memory tests with -short (they write a few hundred MB) and under
+// the race detector (its shadow memory and slowdown make heap peaks meaningless).
+func skipMemoryTest(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("writes a few hundred MB")
+	}
+	if raceEnabled {
+		t.Skip("heap peaks are not meaningful under the race detector; run without -race")
 	}
 }

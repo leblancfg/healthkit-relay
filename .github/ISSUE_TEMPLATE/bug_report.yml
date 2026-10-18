@@ -1,0 +1,61 @@
+name: Bug report
+description: Something does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Do not paste real health data, tokens or your server's address.**
+        Security problems go through a [private report](https://github.com/leblancfg/healthkit-relay/security/advisories/new), not an issue.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Server
+        - iPhone app
+        - Pairing / setup page
+        - Metrics forwarding / Grafana
+        - Docs
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+  - type: input
+    id: server-version
+    attributes:
+      label: Server version
+      description: "`healthkit-relay -version`, or the image tag"
+  - type: input
+    id: app-version
+    attributes:
+      label: App version and iOS version
+      description: Shown under Advanced (the gear) in the app
+  - type: dropdown
+    id: install
+    attributes:
+      label: How the server runs
+      options:
+        - Docker / Compose
+        - Binary + systemd
+        - NixOS
+        - macOS
+        - NAS (Synology, Unraid, TrueNAS)
+        - Other
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Server log lines, or the app's diagnostic log (Advanced). Remove addresses and tokens.
+      render: text

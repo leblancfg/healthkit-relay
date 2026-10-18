@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -207,6 +208,39 @@ func (s *Store) init() error {
 	s.loadStats()
 	if err := s.recover(); err != nil {
 		return fmt.Errorf("recover: %w", err)
+	}
+	return s.ensureSchemas()
+}
+
+// ensureSchemas gives every dataset a file with its schema and no rows
+// (<dataset>/type=_/month=_/schema.parquet), and writes deleted.parquet if missing, so that
+// queries over a dataset with no data yet (DuckDB's read_parquet fails on a glob matching
+// nothing) find empty tables rather than errors.
+func (s *Store) ensureSchemas() error {
+	for _, ds := range datasets {
+		path := filepath.Join(s.partitionDir(ds, "", ""), "schema.parquet")
+		if _, err := os.Stat(path); err == nil {
+			continue
+		}
+		var err error
+		switch ds {
+		case "samples", "records":
+			_, err = writeParquetKeep(s, path, func() (Row, error) { return Row{}, io.EOF })
+		case "route_points":
+			_, err = writeParquetKeep(s, path, func() (RoutePoint, error) { return RoutePoint{}, io.EOF })
+		case "heartbeats":
+			_, err = writeParquetKeep(s, path, func() (Heartbeat, error) { return Heartbeat{}, io.EOF })
+		case "ecg_voltages":
+			_, err = writeParquetKeep(s, path, func() (Voltage, error) { return Voltage{}, io.EOF })
+		case "quantity_series":
+			_, err = writeParquetKeep(s, path, func() (QuantityPoint, error) { return QuantityPoint{}, io.EOF })
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if _, err := os.Stat(filepath.Join(s.parquet, "deleted", "deleted.parquet")); err != nil {
+		return s.exportDeleted()
 	}
 	return nil
 }

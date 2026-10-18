@@ -113,6 +113,11 @@ func uploaderName(u string) string {
 // statistics usually settle it without reading rows: a file only that uploader wrote is
 // removed, one it has no rows in is left alone.
 func (s *Store) eraseFile(dataset, path, uploader string) (string, error) {
+	if n, err := parquetRows(path); err != nil {
+		return "", err
+	} else if n == 0 {
+		return "kept", nil // a schema file
+	}
 	lo, hi, ok, err := columnRange(path, "uploader")
 	if err != nil {
 		return "", err

@@ -107,6 +107,9 @@ func TestFlushLayout(t *testing.T) {
 		"samples/type=HKQuantityTypeIdentifierHeartRate/month=2026-01/",
 		"samples/type=HKWorkoutRouteTypeIdentifier/month=2026-02/",
 	}
+	for _, ds := range datasets {
+		want = append(want, ds+"/type=_/month=_/schema.parquet")
+	}
 	sort.Strings(want)
 	got := files(t, dir)
 	if len(got) != len(want) {

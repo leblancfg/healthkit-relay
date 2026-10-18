@@ -25,6 +25,10 @@ func TestDuckDBViews(t *testing.T) {
 	}
 	dir := t.TempDir()
 	ts, _ := newTestServer(t, dir)
+	// A new archive: every view works, empty.
+	if got := queryDuckDB(t, duckdb, views, dir, `SELECT (SELECT count(*) FROM samples) + (SELECT count(*) FROM ecg_voltages) + (SELECT count(*) FROM deleted)`); got != "0" {
+		t.Fatalf("empty archive: %s", got)
+	}
 	// hrSample in v1 then v2 (the v1 copy is superseded), a deleted sample, series of each kind.
 	mustPost(t, ts.URL, testToken, `{"samples":[`+hrSample+`,`+sleepSample+`]}`)
 	v2 := strings.Replace(hrSample, `"future_field"`, `"device":{"name":"Apple Watch"},"future_field"`, 1)
@@ -37,18 +41,7 @@ func TestDuckDBViews(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	query := func(sql string) string {
-		t.Helper()
-		cmd := exec.Command(duckdb, "-csv", "-noheader", "-init", views, "-c", sql)
-		cmd.Dir = dir
-		var stderr strings.Builder
-		cmd.Stderr = &stderr
-		out, err := cmd.Output()
-		if err != nil || strings.Contains(stderr.String(), "Error") {
-			t.Fatalf("duckdb %q: %v\n%s%s", sql, err, out, stderr.String())
-		}
-		return strings.TrimSpace(string(out))
-	}
+	query := func(sql string) string { t.Helper(); return queryDuckDB(t, duckdb, views, dir, sql) }
 	for sql, want := range map[string]string{
 		// The v1 heart rate (superseded), the sleep sample and the heartbeat series (deleted) are hidden.
 		`SELECT string_agg(type || ':' || wire, ' ' ORDER BY type) FROM samples`:                                               "HKDataTypeIdentifierElectrocardiogram:2 HKQuantityTypeIdentifierHeartRate:2 HKWorkoutRouteTypeIdentifier:2",
@@ -66,4 +59,17 @@ func TestDuckDBViews(t *testing.T) {
 			t.Errorf("%s\n got: %s\nwant: %s", sql, got, want)
 		}
 	}
+}
+
+func queryDuckDB(t *testing.T, duckdb, views, dir, sql string) string {
+	t.Helper()
+	cmd := exec.Command(duckdb, "-csv", "-noheader", "-init", views, "-c", sql)
+	cmd.Dir = dir
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil || strings.Contains(stderr.String(), "Error") {
+		t.Fatalf("duckdb %q: %v\n%s%s", sql, err, out, stderr.String())
+	}
+	return strings.TrimSpace(string(out))
 }

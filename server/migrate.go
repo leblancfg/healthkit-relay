@@ -117,6 +117,10 @@ func runMigrate(args []string, out io.Writer) error {
 	if _, err := store.Flush(ctx, true); err != nil {
 		return err
 	}
+	// Every row passed through staging: give the space back (the seen index stays).
+	if _, err := store.db.Exec(`VACUUM`); err != nil {
+		return err
+	}
 	fmt.Fprintf(out, "%d lines: %d stored, %d duplicates (%d of them v1 copies of a v2 sample), %d unreadable, %d invalid\n",
 		m.lines, m.stored, m.dupes, m.v1dupes, m.skipped, m.invalid)
 
@@ -310,7 +314,9 @@ func (s *Store) ParquetCounts() (map[string]int64, error) {
 				if err != nil {
 					return nil, err
 				}
-				out[dataset+"/"+typ] += n
+				if n > 0 { // not a schema file
+					out[dataset+"/"+typ] += n
+				}
 			}
 		}
 	}

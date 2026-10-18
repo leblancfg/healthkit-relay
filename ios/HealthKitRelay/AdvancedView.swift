@@ -49,7 +49,7 @@ struct AdvancedView: View {
                 Section {
                     ForEach(perObjectRows) { row in
                         itemRow(row.name, symbol: Self.symbol(row.identifier), result: row.outcome?.text, id: row.identifier) {
-                            await SyncEngine.shared.requestPerObject(row.identifier)
+                            _ = await SyncEngine.shared.requestPerObject(row.identifier)
                         }
                     }
                     if healthRecordsAvailable {

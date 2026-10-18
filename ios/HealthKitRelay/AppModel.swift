@@ -67,11 +67,38 @@ final class AppModel: ObservableObject {
 
     /// Pairs with `pair` (given the current token when re-pairing with the same server), or
     /// keeps `token` when it returns nil.
+    /// Setup changes (a link, manual entry, the server-token upgrade) one at a time, each
+    /// starting from the token the previous one left. Run together, a link opened at launch
+    /// and the upgrade both paired, and the device the overwritten token belonged to stayed
+    /// on the server with a token nobody had.
+    private var setupChain: Task<Void, Never>?
+
+    private func exclusively(_ body: @escaping @MainActor () async -> Void) async {
+        let previous = setupChain
+        let task = Task { @MainActor in
+            await previous?.value
+            await body()
+        }
+        setupChain = task
+        await task.value
+    }
+
     private func connect(to url: String, host: String, token: String?,
-                         pair: (String?) async throws -> ServerClient.Paired?) async {
+                         pair: @escaping (String?) async throws -> ServerClient.Paired?) async {
         connecting = host
         setupError = nil
         defer { connecting = nil }
+        var connected = false
+        await exclusively { connected = await self.pairAndSave(url: url, host: host, token: token, pair: pair) }
+        guard connected else { return }
+        // Health access comes next (one tap on the main screen, which says what to pick);
+        // with access already granted, syncing starts now.
+        await refreshHealthAccess()
+        if !needsHealthAccess { Task { await self.sync() } }
+    }
+
+    private func pairAndSave(url: String, host: String, token: String?,
+                             pair: (String?) async throws -> ServerClient.Paired?) async -> Bool {
         let sameServer = settings.sameServer(as: url)
         do {
             let paired = try await pair(sameServer ? settings.token : nil)
@@ -94,12 +121,9 @@ final class AppModel: ObservableObject {
         } catch {
             Log.error("setup: \(host): \(error.localizedDescription)")
             setupError = error.localizedDescription
-            return
+            return false
         }
-        // Health access comes next (one tap on the main screen, which says what to pick);
-        // with access already granted, syncing starts now.
-        await refreshHealthAccess()
-        if !needsHealthAccess { Task { await self.sync() } }
+        return true
     }
 
     /// Forgets the server (the token stays valid on the server until revoked there).
@@ -118,6 +142,11 @@ final class AppModel: ObservableObject {
     /// An app set up by hand before pairing existed holds the server token: swap it for a
     /// device token of its own, once, without asking anything.
     private func upgradeServerToken() async {
+        await exclusively { await self.upgradeServerTokenNow() }
+    }
+
+    private func upgradeServerTokenNow() async {
+        // Checked once it is this change's turn: a link handled meanwhile already paired.
         guard isConfigured, device == nil, let base = settings.baseURL,
               !UserDefaults.standard.bool(forKey: "tokenUpgradeTried") else { return }
         do {
@@ -203,6 +232,15 @@ final class AppModel: ObservableObject {
     }
 
     #if DEBUG
+    /// Tests change the stored settings behind the model's back.
+    func reloadForTesting() {
+        settings = ServerSettings.load()
+        device = PairedDevice.load()
+        server = nil
+        connecting = nil
+        setupError = nil
+    }
+
     /// UI tests start from a fresh install: -hkr-reset-state.
     static func resetForTesting() {
         ServerSettings.clear()

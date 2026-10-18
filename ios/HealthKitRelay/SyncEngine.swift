@@ -610,6 +610,7 @@ actor SyncEngine {
         }
         let uploaded = total
         let failure = firstError
+        if failure == nil { Log.info("sync: done, \(uploaded) uploaded") }
         await MainActor.run {
             let status = SyncStatus.shared
             status.running = false

@@ -100,4 +100,36 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(ServerSettings.load().token, pairs.last?.token)
         XCTAssertEqual(model.device?.id, "dev\(pairs.count)")
     }
+
+    /// Any web page can open a setup link: one for a server other than the current one pairs
+    /// (and sends Health data there) only once the user confirms, and never gets the old token.
+    func testLinkToAnotherServerWaitsForConfirmation() async throws {
+        try ServerSettings(url: "https://mine.invalid", token: "device-token-mine").save()
+        PairedDevice.save(PairedDevice(id: "mine", name: "iPhone"))
+        let model = AppModel.shared
+        model.reloadForTesting()
+        let url = URL(string: "healthrelay://pair?server=https%3A%2F%2Fstub.test&code=LINK")!
+
+        await model.open(url)
+        XCTAssertEqual(StubServer.pairs, [])
+        XCTAssertEqual(model.pendingLink?.host, "stub.test")
+        XCTAssertEqual(ServerSettings.load().url, "https://mine.invalid")
+
+        model.pendingLink = nil // Cancel
+        XCTAssertEqual(StubServer.pairs, [])
+        XCTAssertEqual(model.settings.token, "device-token-mine")
+
+        await model.open(url)
+        let link = try XCTUnwrap(model.pendingLink)
+        await model.confirm(link)
+        XCTAssertNil(model.pendingLink)
+        XCTAssertEqual(StubServer.pairs, [StubServer.Pair(code: "LINK", replaces: nil, token: "device-token-1")])
+        XCTAssertEqual(ServerSettings.load().url, "https://stub.test")
+        XCTAssertEqual(model.settings.token, "device-token-1")
+    }
+
+    func testUnencryptedLinkIsFlagged() {
+        XCTAssertTrue(PairingLink(URL(string: "healthrelay://pair?server=http%3A%2F%2F192.168.1.20%3A8080&code=C")!)!.isUnencrypted)
+        XCTAssertFalse(PairingLink(URL(string: "healthrelay://pair?server=https%3A%2F%2Fh.example&code=C")!)!.isUnencrypted)
+    }
 }

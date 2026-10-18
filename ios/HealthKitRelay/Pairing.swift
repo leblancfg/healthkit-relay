@@ -18,6 +18,12 @@ struct PairingLink: Equatable, Sendable {
         self.server = server
         self.code = code
     }
+
+    /// host[:port], for display.
+    var host: String { ServerSettings(url: server.absoluteString, token: "").host }
+
+    /// Plain HTTP: the token and health data cross the network unencrypted.
+    var isUnencrypted: Bool { server.scheme?.lowercased() == "http" }
 }
 
 /// What GET /v1/status says (also part of the pairing answer).

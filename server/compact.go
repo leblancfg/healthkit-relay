@@ -33,7 +33,9 @@ func (s *Store) Compact(ctx context.Context) (int, error) {
 	defer s.maint.Unlock()
 	n, err := s.compact(ctx)
 	if err != nil {
-		s.recordFailure("compaction")
+		if ctx.Err() == nil { // not a shutdown
+			s.recordFailure("compaction")
+		}
 		return n, err
 	}
 	s.recordSuccess("last_compaction", s.now())

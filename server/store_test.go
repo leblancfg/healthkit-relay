@@ -481,3 +481,35 @@ func TestMigrate(t *testing.T) {
 		t.Errorf("v2 after migration: %+v", r)
 	}
 }
+
+func TestNextAt(t *testing.T) {
+	at, _ := time.Parse("15:04", "03:30")
+	loc := time.FixedZone("x", -4*3600)
+	for now, want := range map[time.Time]time.Time{
+		time.Date(2026, 10, 17, 22, 0, 0, 0, loc): time.Date(2026, 10, 18, 3, 30, 0, 0, loc),
+		time.Date(2026, 10, 18, 3, 0, 0, 0, loc):  time.Date(2026, 10, 18, 3, 30, 0, 0, loc),
+		time.Date(2026, 10, 18, 3, 30, 0, 0, loc): time.Date(2026, 10, 19, 3, 30, 0, 0, loc),
+	} {
+		if got := nextAt(now, at); !got.Equal(want) {
+			t.Errorf("nextAt(%v) = %v, want %v", now, got, want)
+		}
+	}
+}
+
+func TestMaintainStops(t *testing.T) {
+	s, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	wait, err := s.Maintain(ctx, time.Minute, "03:30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Maintain(ctx, time.Minute, "3h30"); err == nil {
+		t.Error("bad -compact-at accepted")
+	}
+	cancel()
+	wait()
+}

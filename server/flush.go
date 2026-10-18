@@ -40,7 +40,9 @@ func (s *Store) flushBefore(ctx context.Context, cutoff int64) (int64, error) {
 	defer s.maint.Unlock()
 	n, err := s.flush(ctx, cutoff)
 	if err != nil {
-		s.recordFailure("flush")
+		if ctx.Err() == nil { // not a shutdown
+			s.recordFailure("flush")
+		}
 		return n, err
 	}
 	s.recordSuccess("last_flush", s.now())

@@ -292,12 +292,6 @@ func (s *Store) Len() int {
 	return int(s.count)
 }
 
-// Has reports whether a record with this id (Item.id()) was stored.
-func (s *Store) Has(id string) bool {
-	var one int
-	return s.db.QueryRow(`SELECT 1 FROM seen WHERE id = ?`, seenKey(id)).Scan(&one) == nil
-}
-
 // Staged is the number of rows waiting for the next flush.
 func (s *Store) Staged() int64 {
 	var n int64

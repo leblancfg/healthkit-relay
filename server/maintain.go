@@ -10,13 +10,17 @@ import (
 // Maintain flushes staged rows every flushEvery and compacts the archive every day at
 // compactAt (local time, "HH:MM"), until ctx is done. Failures are logged and counted
 // (healthkit_relay_maintenance_errors_total) and retried at the next tick; the work is
-// re-runnable, so nothing is lost meanwhile.
-func (s *Store) Maintain(ctx context.Context, flushEvery time.Duration, compactAt string) error {
+// re-runnable, so nothing is lost meanwhile. The returned function waits for the work in
+// progress to stop once ctx is done (a flush or compaction cut short is replayed at the next
+// start).
+func (s *Store) Maintain(ctx context.Context, flushEvery time.Duration, compactAt string) (wait func(), err error) {
 	at, err := time.Parse("15:04", compactAt)
 	if err != nil {
-		return fmt.Errorf("-compact-at must be HH:MM: %w", err)
+		return nil, fmt.Errorf("-compact-at must be HH:MM: %w", err)
 	}
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		flush := time.NewTicker(flushEvery)
 		defer flush.Stop()
 		compact := time.NewTimer(time.Until(nextAt(s.now(), at)))
@@ -41,7 +45,7 @@ func (s *Store) Maintain(ctx context.Context, flushEvery time.Duration, compactA
 			}
 		}
 	}()
-	return nil
+	return func() { <-done }, nil
 }
 
 // nextAt is the next time of day at (hour and minute) after now, in now's location.

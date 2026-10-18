@@ -138,9 +138,11 @@ func run(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := archive.Maintain(ctx, *flushEvery, *compactAt); err != nil {
+	waitMaintenance, err := archive.Maintain(ctx, *flushEvery, *compactAt)
+	if err != nil {
 		return err
 	}
+	defer func() { stop(); waitMaintenance() }() // runs before the archive closes (deferred earlier)
 	errc := make(chan error, 1)
 	go func() { errc <- hs.ListenAndServe() }()
 	log.Printf("listening on %s; %d paired devices; setup page /setup (%s)", *listen, devices.Len(), cfg.setupFrom)

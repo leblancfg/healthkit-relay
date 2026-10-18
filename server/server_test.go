@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -40,9 +42,23 @@ func (f *fakeMetrics) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func newTestServer(t *testing.T, dir string) (*httptest.Server, *fakeMetrics) {
+// liveServer is an httptest server and its store; Close closes both (the store locks dir).
+type liveServer struct {
+	*httptest.Server
+	store *Store
+	once  sync.Once
+}
+
+func (ts *liveServer) Close() {
+	ts.once.Do(func() {
+		ts.Server.Close()
+		ts.store.Close()
+	})
+}
+
+func newTestServer(t *testing.T, dir string) (*liveServer, *fakeMetrics) {
 	t.Helper()
-	a, err := OpenArchive(dir)
+	a, err := OpenStore(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +71,7 @@ func newTestServer(t *testing.T, dir string) (*httptest.Server, *fakeMetrics) {
 	}
 	s := &Server{Archive: a, Token: testToken, MaxBodyBytes: 1 << 20, Devices: devices, Codes: NewCodes(),
 		Forwarder: &Forwarder{URL: metrics.URL, Measurement: "healthkit", Client: metrics.Client()}}
-	ts := httptest.NewServer(s.Handler())
+	ts := &liveServer{Server: httptest.NewServer(s.Handler()), store: a}
 	t.Cleanup(ts.Close)
 	return ts, fm
 }
@@ -76,22 +92,65 @@ func post(t *testing.T, url, token, body string) (*http.Response, Response) {
 	return resp, r
 }
 
-func archiveLines(t *testing.T, dir string) []Record {
+// stored is a record as archived, wherever it is (staged, in Parquet, or a tombstone).
+type stored struct {
+	Op, UUID, Type, Uploader string
+	Wire                     int
+	Data                     string
+}
+
+// archived lists what the archive in dir holds, in the order received (staged rows, then
+// tombstones), plus the rows already in Parquet.
+func archived(t *testing.T, dir string) []stored {
 	t.Helper()
-	var out []Record
-	files, _ := filepath.Glob(filepath.Join(dir, "*", "*.jsonl"))
-	for _, f := range files {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "staging.db")+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var out []stored
+	rows, err := db.Query(`SELECT dataset, type, uploader, wire, json FROM staged ORDER BY seq`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var r stored
+		var ds string
+		rows.Scan(&ds, &r.Type, &r.Uploader, &r.Wire, &r.Data)
+		r.Op = map[string]string{"samples": "sample", "records": "record"}[ds]
+		if r.Op == "sample" {
+			var v struct{ UUID string }
+			json.Unmarshal([]byte(r.Data), &v)
+			r.UUID = strings.ToUpper(v.UUID)
 		}
-		for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-			var r Record
-			if err := json.Unmarshal([]byte(l), &r); err != nil {
-				t.Fatalf("bad archive line %q: %v", l, err)
+		out = append(out, r)
+	}
+	rows.Close()
+	for _, ds := range []string{"samples", "records"} {
+		files, _ := filepath.Glob(filepath.Join(dir, "parquet", ds, "*", "*", "*.parquet"))
+		for _, f := range files {
+			if err := readParquet(f, func(r *Row) error {
+				st := stored{Op: map[string]string{"samples": "sample", "records": "record"}[ds], Type: r.Type,
+					Uploader: r.Uploader, Wire: int(r.Wire), Data: r.JSON}
+				if r.UUID != nil && ds == "samples" {
+					st.UUID = *r.UUID
+				}
+				out = append(out, st)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
 			}
-			out = append(out, r)
 		}
+	}
+	rows, err = db.Query(`SELECT uuid, coalesce(type, ''), uploader, coalesce(json, '') FROM deleted WHERE reason = 'deleted' ORDER BY received_at`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		r := stored{Op: "delete"}
+		rows.Scan(&r.UUID, &r.Type, &r.Uploader, &r.Data)
+		out = append(out, r)
 	}
 	return out
 }
@@ -130,14 +189,14 @@ func TestStoreDedupeAndForward(t *testing.T) {
 		t.Fatalf("retry: %+v", r)
 	}
 
-	recs := archiveLines(t, dir)
+	recs := archived(t, dir)
 	if len(recs) != 3 {
 		t.Fatalf("archive has %d records, want 3", len(recs))
 	}
 	if recs[2].Op != "delete" || recs[2].UUID != "3B4E28BA-2FA1-11D2-883F-0016D3CCA427" {
 		t.Errorf("tombstone: %+v", recs[2])
 	}
-	if !strings.Contains(string(recs[0].Data), `"future_field"`) {
+	if !strings.Contains(recs[0].Data, `"future_field"`) {
 		t.Errorf("unknown fields not kept: %s", recs[0].Data)
 	}
 
@@ -156,20 +215,29 @@ func TestDedupeSurvivesRestart(t *testing.T) {
 	post(t, ts.URL, testToken, `{"samples":[`+hrSample+`]}`)
 	ts.Close()
 
-	// Simulate a crash that left a partial line behind.
-	files, _ := filepath.Glob(filepath.Join(dir, "*", "*.jsonl"))
-	f, _ := os.OpenFile(files[0], os.O_APPEND|os.O_WRONLY, 0)
-	f.WriteString(`{"op":"sample","uu`)
-	f.Close()
-
 	ts2, _ := newTestServer(t, dir)
 	if _, r := post(t, ts2.URL, testToken, `{"samples":[`+hrSample+`,`+sleepSample+`]}`); r.Stored != 1 || r.Duplicates != 1 {
 		t.Fatalf("after restart: %+v", r)
 	}
-	b, _ := os.ReadFile(files[0])
-	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-	if len(lines) != 3 || !strings.HasPrefix(lines[2], `{"op":"sample","uuid":"2B4E`) {
-		t.Fatalf("archive after partial line:\n%s", b)
+	// Flushed to Parquet, the samples are still known.
+	if _, err := ts2.store.Flush(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	ts2.Close()
+	ts3, _ := newTestServer(t, dir)
+	if _, r := post(t, ts3.URL, testToken, `{"samples":[`+hrSample+`,`+sleepSample+`]}`); r.Stored != 0 || r.Duplicates != 2 {
+		t.Fatalf("after flush and restart: %+v", r)
+	}
+	if recs := archived(t, dir); len(recs) != 2 {
+		t.Fatalf("archive: %+v", recs)
+	}
+}
+
+func TestOneProcessPerArchive(t *testing.T) {
+	dir := t.TempDir()
+	newTestServer(t, dir)
+	if _, err := OpenStore(dir); err == nil || !strings.Contains(err.Error(), "in use") {
+		t.Fatalf("second open: %v", err)
 	}
 }
 
@@ -180,7 +248,7 @@ func TestRejectsInvalidBatchWhole(t *testing.T) {
 	if resp, _ := post(t, ts.URL, testToken, `{"samples":[`+hrSample+`,`+bad+`]}`); resp.StatusCode != 400 {
 		t.Fatalf("status %d, want 400", resp.StatusCode)
 	}
-	if recs := archiveLines(t, dir); len(recs) != 0 {
+	if recs := archived(t, dir); len(recs) != 0 {
 		t.Fatalf("partial batch stored: %d records", len(recs))
 	}
 	if resp, _ := post(t, ts.URL, testToken, `not json`); resp.StatusCode != 400 {
@@ -265,11 +333,11 @@ func TestV2RecordsStoredByContent(t *testing.T) {
 		t.Fatalf("changed summary: %+v", r)
 	}
 
-	recs := archiveLines(t, dir)
+	recs := archived(t, dir)
 	if len(recs) != 4 {
 		t.Fatalf("archive has %d records, want 4", len(recs))
 	}
-	if recs[0].Op != "sample" || recs[0].V != 2 || recs[1].Op != "record" || recs[1].Type != "series" || recs[1].Digest == "" {
+	if recs[0].Op != "sample" || recs[0].Wire != 2 || recs[1].Op != "record" || recs[1].Type != "series" {
 		t.Errorf("records: %+v / %+v", recs[0], recs[1])
 	}
 
@@ -304,7 +372,7 @@ func TestV2CopyOfV1Sample(t *testing.T) {
 			t.Fatalf("v2 post %d: %+v", i, r)
 		}
 	}
-	if recs := archiveLines(t, dir); len(recs) != 2 || recs[1].V != 2 {
+	if recs := archived(t, dir); len(recs) != 2 || recs[1].Wire != 2 {
 		t.Fatalf("archive: %+v", recs)
 	}
 	if len(fm.lines) != 1 {
@@ -320,7 +388,7 @@ func TestV2RejectsBadRecord(t *testing.T) {
 			t.Errorf("%s: status %d, want 400", rec, resp.StatusCode)
 		}
 	}
-	if recs := archiveLines(t, dir); len(recs) != 0 {
+	if recs := archived(t, dir); len(recs) != 0 {
 		t.Fatalf("partial batch stored: %d records", len(recs))
 	}
 }

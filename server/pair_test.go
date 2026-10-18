@@ -134,6 +134,13 @@ func TestRepairingReplacesTheOldDevice(t *testing.T) {
 	if resp, _ := call(t, "GET", ts.URL+"/v1/status", first.Token, nil); resp.StatusCode != 401 {
 		t.Errorf("replaced token: %d", resp.StatusCode)
 	}
+	// Same device, same ID (an erase finds what it uploaded before), new token.
+	if second.Device.ID != first.Device.ID || second.Token == first.Token {
+		t.Errorf("re-paired: %+v, first %+v", second.Device, first.Device)
+	}
+	if resp, _ := call(t, "GET", ts.URL+"/v1/status", second.Token, nil); resp.StatusCode != 200 {
+		t.Errorf("new token: %d", resp.StatusCode)
+	}
 	// The server token is never revoked that way.
 	pairWith(t, ts.URL, mint(t, ts.URL).Code, testToken)
 	_, b := call(t, "GET", ts.URL+"/v1/devices", testToken, nil)
@@ -187,7 +194,11 @@ func setupRequest(t *testing.T, s *Server, method, target, remote string, header
 
 func testServer(t *testing.T) *Server {
 	dir := t.TempDir()
-	a, _ := OpenArchive(dir)
+	a, err := OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { a.Close() })
 	d, _ := OpenDevices(filepath.Join(dir, "devices.json"))
 	return &Server{Archive: a, Token: testToken, MaxBodyBytes: 1 << 20, Devices: d, Codes: NewCodes()}
 }

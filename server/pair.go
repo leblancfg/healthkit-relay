@@ -100,6 +100,30 @@ func (d *Devices) Add(name, model string) (string, Device, error) {
 	return token, dev.public(), nil
 }
 
+// Rekey gives the device a token belongs to a new token, name and model, keeping its ID (and
+// so the records it uploaded); the old token stops working. ok is false for an unknown token.
+func (d *Devices) Rekey(oldToken, name, model string) (token string, dev Device, ok bool, err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	cur, found := d.byHash[hashToken(oldToken)]
+	if !found {
+		return "", Device{}, false, nil
+	}
+	prev := *cur
+	token = randomString(32)
+	delete(d.byHash, cur.TokenHash)
+	cur.Name, cur.Model, cur.TokenHash = name, model, hashToken(token)
+	cur.LastSeen = d.now().UTC().Truncate(time.Second)
+	d.byHash[cur.TokenHash] = cur
+	if err := d.save(); err != nil {
+		delete(d.byHash, cur.TokenHash)
+		*cur = prev
+		d.byHash[cur.TokenHash] = cur
+		return "", Device{}, true, err
+	}
+	return token, cur.public(), true, nil
+}
+
 func (d *Devices) find(id string) int {
 	for i, dev := range d.list {
 		if dev.ID == id {
@@ -358,8 +382,9 @@ type PairRequest struct {
 	Code  string `json:"code"`
 	Name  string `json:"name"`
 	Model string `json:"model"`
-	// Replaces is the token the app used so far, if it was paired before: that device is
-	// revoked, so re-pairing leaves no stale entry.
+	// Replaces is the token the app used so far, if it was paired before: the device keeps its
+	// ID (and the records it uploaded, which an erase finds by that ID) with a new token, so
+	// re-pairing leaves no stale entry.
 	Replaces string `json:"replaces,omitempty"`
 }
 
@@ -401,8 +426,16 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var token string
+	model := strings.TrimSpace(req.Model)
 	dev, err := s.Codes.Redeem(req.Code, func() (Device, error) {
-		t, d, err := s.Devices.Add(name, strings.TrimSpace(req.Model))
+		if req.Replaces != "" && !s.isAdminToken(req.Replaces) {
+			t, d, ok, err := s.Devices.Rekey(req.Replaces, name, model)
+			if ok {
+				token = t
+				return d, err
+			}
+		}
+		t, d, err := s.Devices.Add(name, model)
 		token = t
 		return d, err
 	})
@@ -413,11 +446,6 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	} else if err != nil {
 		httpError(w, http.StatusInternalServerError, "could not save the device: "+err.Error())
 		return
-	}
-	if req.Replaces != "" && !s.isAdminToken(req.Replaces) {
-		if old, ok := s.Devices.Lookup(req.Replaces); ok {
-			s.Devices.Revoke(old.ID)
-		}
 	}
 	s.count("paired")
 	log.Printf("paired device %s (%s, %s)", dev.ID, dev.Name, dev.Model)

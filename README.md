@@ -9,8 +9,9 @@ small pieces:
 - **`ios/`**: an iPhone app that reads HealthKit (read-only) and uploads new samples, and
   deletions, to your server. It syncs incrementally and in the background, about hourly.
 - **`server/`**: a single static Go binary that receives those uploads, archives every
-  record on disk, and can forward the numbers to a time-series database
-  (VictoriaMetrics, InfluxDB, anything that speaks InfluxDB line protocol) for dashboards.
+  record on disk as Parquet files you can query with DuckDB, and can forward the numbers to a
+  time-series database (VictoriaMetrics, InfluxDB, anything that speaks InfluxDB line
+  protocol) for dashboards.
 
 ## Architecture
 
@@ -18,10 +19,11 @@ small pieces:
  iPhone                                         your server
 ┌──────────────────────────┐   HTTPS + token   ┌───────────────────────────────┐
 │ HealthKit                │  POST /v1/samples │ healthkit-relay               │
-│   │ observer queries     │ ────────────────▶ │  ├─ archive/YYYY/DATE.jsonl   │  source of truth,
-│   ▼ anchored queries     │   JSON batches    │  │   (append-only, deduped)   │  append-only
-│ Health Relay app         │ ◀──────────────── │  └─ line protocol ───────────▶│ VictoriaMetrics /
-│  anchors · retry/backoff │   200 stored/dup  │                               │ InfluxDB (optional)
+│   │ observer queries     │ ────────────────▶ │  ├─ staging.db (SQLite)       │  acked once committed,
+│   ▼ anchored queries     │   JSON batches    │  │   └─ hourly ─▶ parquet/    │  deduped; Parquet by
+│ Health Relay app         │ ◀──────────────── │  └─ line protocol ───────────▶│  type and month
+│  anchors · retry/backoff │   200 stored/dup  │                               │ VictoriaMetrics /
+│                          │                   │                               │ InfluxDB (optional)
 └──────────────────────────┘                   └───────────────────────────────┘
 ```
 
@@ -36,9 +38,10 @@ small pieces:
    retries duplicate nothing.
 4. While the phone is locked HealthKit data is encrypted; the app defers and syncs after
    the next unlock.
-5. The server validates a batch as a whole, appends new records (one JSON line each, with
-   the sample exactly as sent) to a per-day file, fsyncs, and only then answers 200.
-   Deletions are recorded as tombstones; nothing is ever rewritten.
+5. The server validates a batch as a whole, commits the new records (each with the sample
+   exactly as sent) to a SQLite staging database, and only then answers 200. Every hour they
+   move to Parquet files partitioned by data type and month; every night each month's files
+   are merged into one. Deletions are recorded as tombstones and applied at the next merge.
 
 ### What it syncs: everything
 
@@ -79,11 +82,13 @@ kept.
   network such as a VPN or Tailscale); do not expose it publicly without TLS. Setup and
   pairing answer private networks only, by default.
 - `/healthz` and `/metrics` carry no health data (`/metrics` exposes request counts).
-- The archive is plain JSON Lines: readable with `jq`, easy to back up, easy to delete.
+- The archive is plain Parquet files (DuckDB, pandas, Polars, Spark read them), with each
+  record also kept as the JSON the app sent. The app's **Erase Server Data and Start Over**
+  deletes everything that iPhone uploaded, for good, then uploads it again.
 
 ## Quick start
 
-Server (needs Go 1.24+, or `nix build`):
+Server (needs Go 1.26+, or `nix build`):
 
 ```sh
 make server-build
@@ -92,7 +97,9 @@ head -c 32 /dev/urandom | base64 > token     # keep this file private (chmod 600
   -forward-url http://127.0.0.1:8428/influx/write   # optional
 ```
 
-See [server/README.md](server/README.md) for the API, the archive format and all flags.
+See [server/README.md](server/README.md) for the API, the archive format, DuckDB queries
+([`server/sql/views.sql`](server/sql/views.sql)) and all flags. Upgrading from 0.4 or
+earlier: stop the server and run `healthkit-relay migrate -archive-dir ./archive` once.
 
 iPhone app (needs a Mac with Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen) and
 a paid Apple Developer account, which HealthKit requires):
@@ -113,7 +120,7 @@ everything, then confirm) and starts syncing; there is nothing else to set. See
 ## Layout
 
 ```
-server/     Go receiver (stdlib only), tests
+server/     Go receiver and archive (SQLite staging, Parquet), tests; sql/views.sql for DuckDB
 ios/        SwiftUI app; project.yml is the XcodeGen spec
 flake.nix   Nix package for the server
 Makefile    server-test, server-build, ios-build, ios-test

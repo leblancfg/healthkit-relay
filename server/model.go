@@ -71,6 +71,11 @@ type RecordIn struct {
 	// are read as {value, unit} only where they have that shape, never rejected; see quantities.
 	Start  string          `json:"start,omitempty"`
 	Values json.RawMessage `json:"values,omitempty"`
+	// Series and blob chunks: the sample they belong to, and (series) the points.
+	SampleUUID string            `json:"sample_uuid,omitempty"`
+	SampleType string            `json:"sample_type,omitempty"`
+	Series     string            `json:"series,omitempty"`
+	Points     []json.RawMessage `json:"points,omitempty"`
 
 	digest string
 	start  time.Time
@@ -118,6 +123,30 @@ func parseRecord(raw json.RawMessage) (*RecordIn, error) {
 		}
 		r.start = t
 	}
+	// What a chunk says about its sample is used to file it, never a reason to reject it.
+	if u, err := normalizeUUID(r.SampleUUID); err == nil {
+		r.SampleUUID = u
+	} else {
+		r.SampleUUID = ""
+	}
+	if !typeRE.MatchString(r.SampleType) {
+		r.SampleType = ""
+	}
+	if !kindRE.MatchString(r.Series) {
+		r.Series = ""
+	}
+	if r.start.IsZero() && len(r.Points) > 0 {
+		// Route and quantity-series points carry their own time: the first one dates the chunk.
+		var p struct {
+			T     any    `json:"t"`
+			Start string `json:"start"`
+		}
+		json.Unmarshal(r.Points[0], &p)
+		ts, _ := p.T.(string)
+		if t, err := time.Parse(time.RFC3339Nano, cmpOr(ts, p.Start)); err == nil {
+			r.start = t
+		}
+	}
 	// Records are de-duplicated by content: a changed summary is a new record, an unchanged
 	// one is a duplicate. Clients encode deterministically (sorted keys).
 	sum := sha256.Sum256(raw)
@@ -130,6 +159,9 @@ type Deletion struct {
 	UUID string `json:"uuid"`
 	Type string `json:"type,omitempty"`
 }
+
+// typeRE is what a HealthKit type identifier looks like; types name directories in the archive.
+var typeRE = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
 
 var uuidRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
@@ -151,6 +183,9 @@ func parseSample(raw json.RawMessage) (*Sample, error) {
 	}
 	if s.Type == "" {
 		return nil, fmt.Errorf("sample %s: missing type", s.UUID)
+	}
+	if !typeRE.MatchString(s.Type) {
+		return nil, fmt.Errorf("sample %s: invalid type %q", s.UUID, s.Type)
 	}
 	if s.start, err = time.Parse(time.RFC3339Nano, s.Start); err != nil {
 		return nil, fmt.Errorf("sample %s: bad start: %v", s.UUID, err)
@@ -174,4 +209,20 @@ func parseDeletion(raw json.RawMessage) (*Deletion, error) {
 		return nil, err
 	}
 	return &d, nil
+}
+
+// Items: what the archive stores, built the same way from uploads and from the JSON Lines
+// archive of earlier versions (migrate.go).
+
+func sampleItem(s *Sample, raw json.RawMessage, wire int) Item {
+	return Item{Op: "sample", UUID: s.UUID, Wire: wire, Type: s.Type, Kind: s.Kind, Start: s.start, Data: raw}
+}
+
+func recordItem(r *RecordIn, raw json.RawMessage) Item {
+	return Item{Op: "record", UUID: r.SampleUUID, Wire: 2, Type: r.Kind, Key: r.Key, Digest: r.digest,
+		Series: r.Series, SeriesType: r.SampleType, Start: r.start, Data: raw}
+}
+
+func deletionItem(d *Deletion, raw json.RawMessage) Item {
+	return Item{Op: "delete", UUID: d.UUID, Type: d.Type, Data: raw}
 }

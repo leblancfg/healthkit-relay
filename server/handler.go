@@ -13,7 +13,7 @@ import (
 
 // Server serves the HTTP API.
 type Server struct {
-	Archive      *Archive
+	Archive      *Store
 	Forwarder    *Forwarder // nil: no forwarding
 	Token        string     // the server token: admin, and accepted for uploads
 	MaxBodyBytes int64
@@ -52,6 +52,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("POST /v1/samples", s.samples)
 	mux.HandleFunc("GET /v1/status", s.statusHandler)
+	mux.HandleFunc("DELETE /v1/data", s.eraseHandler)
 	mux.HandleFunc("POST /v1/pair", s.pair)
 	mux.HandleFunc("POST /v1/pairing-codes", s.pairingCodes)
 	mux.HandleFunc("GET /v1/devices", s.devicesList)
@@ -72,7 +73,8 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.caller(r); !ok {
+	c, ok := s.caller(r)
+	if !ok {
 		s.unauthorized(w)
 		return
 	}
@@ -98,7 +100,7 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 	// Validate everything first: a batch is stored whole or not at all, so the client can
 	// advance its HealthKit anchor only on success.
 	v := b.version()
-	recs := make([]Record, 0, len(b.Samples)+len(b.Records)+len(b.Deletions))
+	items := make([]Item, 0, len(b.Samples)+len(b.Records)+len(b.Deletions))
 	samples := make([]*Sample, 0, len(b.Samples))
 	for i, raw := range b.Samples {
 		smp, err := parseSample(raw)
@@ -107,11 +109,7 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		samples = append(samples, smp)
-		rec := Record{Op: "sample", UUID: smp.UUID, Type: smp.Type, Data: raw}
-		if v >= 2 {
-			rec.V = v
-		}
-		recs = append(recs, rec)
+		items = append(items, sampleItem(smp, raw, v))
 	}
 	records := make([]*RecordIn, 0, len(b.Records))
 	for i, raw := range b.Records {
@@ -121,7 +119,7 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		records = append(records, r)
-		recs = append(recs, Record{Op: "record", Type: r.Kind, Key: r.Key, Digest: r.digest, Data: raw})
+		items = append(items, recordItem(r, raw))
 	}
 	for i, raw := range b.Deletions {
 		d, err := parseDeletion(raw)
@@ -129,52 +127,40 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 			s.badRequest(w, fmt.Sprintf("deletions[%d]: %v", i, err))
 			return
 		}
-		recs = append(recs, Record{Op: "delete", UUID: d.UUID, Type: d.Type, Data: raw})
+		items = append(items, deletionItem(d, raw))
 	}
 
-	// A v2 copy of a sample app 0.1 already sent is archived, but its value was forwarded then.
-	forwardedBefore := make(map[string]bool)
-	if v >= 2 && s.Forwarder != nil {
-		for _, smp := range samples {
-			if s.Archive.Has("sample:" + smp.UUID) {
-				forwardedBefore[smp.UUID] = true
-			}
-		}
+	uploader := ""
+	if c.Device != nil {
+		uploader = c.Device.ID
 	}
-
-	stored, err := s.Archive.Append(recs)
+	outcomes, err := s.Archive.Ingest(uploader, items)
 	if err != nil {
 		log.Printf("archive: %v", err)
 		s.count("archive_error")
 		httpError(w, http.StatusInternalServerError, "could not store batch")
 		return
 	}
-
-	// Forward only what was new; the archive stays the source of truth if this fails.
-	added := len(stored)
-	if s.Forwarder != nil && added > 0 {
-		isNew := make(map[string]bool, added)
-		for _, rec := range stored {
-			switch rec.Op {
-			case "sample":
-				isNew[rec.UUID] = !forwardedBefore[rec.UUID]
-			case "record":
-				isNew[rec.id()] = true
-			}
+	added := 0
+	for _, o := range outcomes {
+		if o.Stored {
+			added++
 		}
+	}
+
+	// Forward only what was new; the archive stays the source of truth if this fails. A v2
+	// copy of a sample app 0.1 already sent is archived, but its value was forwarded then.
+	if s.Forwarder != nil && added > 0 {
 		var fresh []*Sample
-		for _, smp := range samples {
-			if isNew[smp.UUID] {
+		for i, smp := range samples {
+			if o := outcomes[i]; o.Stored && !o.HadV1 {
 				fresh = append(fresh, smp)
-				delete(isNew, smp.UUID) // a UUID repeated within the batch is sent once
 			}
 		}
 		var freshRecords []*RecordIn
-		for _, rec := range records {
-			id := (&Record{Op: "record", Type: rec.Kind, Key: rec.Key, Digest: rec.digest}).id()
-			if isNew[id] {
+		for i, rec := range records {
+			if outcomes[len(samples)+i].Stored {
 				freshRecords = append(freshRecords, rec)
-				delete(isNew, id)
 			}
 		}
 		lines := append(s.Forwarder.Lines(fresh), s.Forwarder.RecordLines(freshRecords)...)
@@ -186,7 +172,7 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp := Response{Received: len(recs), Stored: added, Duplicates: len(recs) - added, Deletions: len(b.Deletions),
+	resp := Response{Received: len(items), Stored: added, Duplicates: len(items) - added, Deletions: len(b.Deletions),
 		Records: len(b.Records), Version: WireVersion}
 	s.mu.Lock()
 	s.lastUpload = time.Now()
@@ -232,7 +218,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	fmt.Fprintln(w, "# HELP healthkit_relay_requests_total Uploads (POST /v1/samples) and pairings by result.")
 	fmt.Fprintln(w, "# TYPE healthkit_relay_requests_total counter")
-	for _, res := range []string{"ok", "unauthorized", "bad_request", "incomplete", "archive_error", "paired", "pair_rejected"} {
+	for _, res := range []string{"ok", "unauthorized", "bad_request", "incomplete", "archive_error", "paired", "pair_rejected", "erased"} {
 		fmt.Fprintf(w, "healthkit_relay_requests_total{result=%q} %d\n", res, s.stats["requests_"+res])
 	}
 	fmt.Fprintln(w, "# HELP healthkit_relay_records_total Records received, by outcome.")
@@ -242,6 +228,18 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "# HELP healthkit_relay_archive_records Distinct records in the archive.")
 	fmt.Fprintln(w, "# TYPE healthkit_relay_archive_records gauge")
 	fmt.Fprintf(w, "healthkit_relay_archive_records %d\n", s.Archive.Len())
+	fmt.Fprintln(w, "# HELP healthkit_relay_staged_records Records received but not flushed to Parquet yet.")
+	fmt.Fprintln(w, "# TYPE healthkit_relay_staged_records gauge")
+	fmt.Fprintf(w, "healthkit_relay_staged_records %d\n", s.Archive.Staged())
+	st := s.Archive.Stats()
+	fmt.Fprintln(w, "# HELP healthkit_relay_last_success_timestamp_seconds Unix time of the last successful flush (hourly) or compaction (nightly); 0: never.")
+	fmt.Fprintln(w, "# TYPE healthkit_relay_last_success_timestamp_seconds gauge")
+	fmt.Fprintf(w, "healthkit_relay_last_success_timestamp_seconds{job=\"flush\"} %d\n", unixOrZero(st.lastFlush))
+	fmt.Fprintf(w, "healthkit_relay_last_success_timestamp_seconds{job=\"compaction\"} %d\n", unixOrZero(st.lastCompaction))
+	fmt.Fprintln(w, "# HELP healthkit_relay_maintenance_errors_total Failed flushes and compactions since start.")
+	fmt.Fprintln(w, "# TYPE healthkit_relay_maintenance_errors_total counter")
+	fmt.Fprintf(w, "healthkit_relay_maintenance_errors_total{job=\"flush\"} %d\n", st.flushErrors)
+	fmt.Fprintf(w, "healthkit_relay_maintenance_errors_total{job=\"compaction\"} %d\n", st.compactErrs)
 	fmt.Fprintln(w, "# HELP healthkit_relay_devices Paired devices.")
 	fmt.Fprintln(w, "# TYPE healthkit_relay_devices gauge")
 	fmt.Fprintf(w, "healthkit_relay_devices %d\n", s.Devices.Len())
@@ -250,9 +248,12 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "healthkit_relay_forward_errors_total %d\n", s.forwardErrors)
 	fmt.Fprintln(w, "# HELP healthkit_relay_last_upload_timestamp_seconds Unix time of the last accepted batch (0: none since start).")
 	fmt.Fprintln(w, "# TYPE healthkit_relay_last_upload_timestamp_seconds gauge")
-	var last int64
-	if !s.lastUpload.IsZero() {
-		last = s.lastUpload.Unix()
+	fmt.Fprintf(w, "healthkit_relay_last_upload_timestamp_seconds %d\n", unixOrZero(s.lastUpload))
+}
+
+func unixOrZero(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
 	}
-	fmt.Fprintf(w, "healthkit_relay_last_upload_timestamp_seconds %d\n", last)
+	return t.Unix()
 }

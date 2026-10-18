@@ -7,16 +7,18 @@
     let
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAll = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+      version = "0.5.0+${self.shortRev or "dirty"}";
     in
     {
       packages = forAll (pkgs: {
         default = pkgs.buildGoModule {
           pname = "healthkit-relay";
-          version = self.shortRev or "dev";
+          inherit version;
           src = ./server;
-          vendorHash = null; # standard library only
-          env.CGO_ENABLED = 0;
-          ldflags = [ "-s" "-w" "-X main.version=${self.shortRev or "dev"}" ];
+          vendorHash = "sha256-clzZpw5SIupsHOJ4FctXy8GwnLXTs2JzsDguSqTYFu8="; # update when go.sum changes
+          env.CGO_ENABLED = 0; # pure Go SQLite (modernc.org/sqlite): a static binary
+          checkFlags = [ "-short" ]; # skip the memory test, which writes a few hundred MB
+          ldflags = [ "-s" "-w" "-X main.version=${version}" ];
           postInstall = "mv $out/bin/server $out/bin/healthkit-relay";
           meta = {
             description = "Receiver and archive for Apple Health samples";

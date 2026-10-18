@@ -1,8 +1,8 @@
 # healthkit-relay server
 
-A single static binary (Go standard library only) that receives Apple Health samples from
-the Health Relay app, archives them durably and optionally forwards numbers to a metrics
-database.
+A single static binary (pure Go, no cgo) that receives Apple Health samples from the Health
+Relay app, archives them durably in Parquet files and optionally forwards numbers to a
+metrics database.
 
 ```sh
 go test ./...
@@ -26,6 +26,8 @@ with dashes as underscores (`-archive-dir` is `HKR_ARCHIVE_DIR`). Flags win.
 | `-forward-token-file` | | bearer token for `-forward-url` |
 | `-measurement` | `healthkit` | line-protocol measurement name |
 | `-max-body-bytes` | `33554432` | largest accepted request |
+| `-flush-interval` | `1h` | how often staged records are written to Parquet |
+| `-compact-at` | `03:30` | local time of the nightly compaction |
 
 The token is read from a file, never from a flag value, so it stays out of process
 listings. With systemd, `LoadCredential=` and `-token-file ${CREDENTIALS_DIRECTORY}/token`
@@ -190,6 +192,14 @@ one (`204`). The `pair`, `devices` and `revoke` commands use these.
 
 A batch is stored entirely or not at all, so a client can safely retry until it gets 200.
 
+### `DELETE /v1/data`
+
+Erases, permanently, everything the caller uploaded: with a device token, that device's
+records; with the server token, what was uploaded with the server token, or with
+`?device=<id>` what that device uploaded (also after it was revoked). `200`
+`{"erased": 12571973, "device": "3f9a1c2e"}`. The app's **Erase Server Data and Start Over**
+calls it, then uploads its history again from scratch. See [Erasing](#erasing).
+
 ### `GET /healthz`
 
 `200 ok` while the process runs.
@@ -198,40 +208,142 @@ A batch is stored entirely or not at all, so a client can safely retry until it 
 
 Prometheus text format: `healthkit_relay_requests_total{result}` (`ok`, `unauthorized`,
 `bad_request`, `incomplete` for a body cut short by a client going away, `archive_error`,
-`paired`, `pair_rejected`), `healthkit_relay_records_total{outcome}`,
-`healthkit_relay_archive_records`, `healthkit_relay_devices`,
+`paired`, `pair_rejected`, `erased`), `healthkit_relay_records_total{outcome}`,
+`healthkit_relay_archive_records`, `healthkit_relay_staged_records` (not flushed yet),
+`healthkit_relay_last_success_timestamp_seconds{job="flush"|"compaction"}` (alert when it
+gets old: more than two hours for the flush, a day and a half for the compaction),
+`healthkit_relay_maintenance_errors_total{job}`, `healthkit_relay_devices`,
 `healthkit_relay_forward_errors_total`, `healthkit_relay_last_upload_timestamp_seconds`.
 No health data.
 
 ## Archive
 
-`<archive-dir>/YYYY/YYYY-MM-DD.jsonl`, one file per UTC day of receipt, one record per line:
+Everything lives in `-archive-dir`:
 
-```json
-{"op":"sample","uuid":"1B4E28BA-…","type":"HKQuantityTypeIdentifierHeartRate","received_at":"2026-10-17T16:00:00Z","data":{…sample as sent…}}
-{"op":"sample","uuid":"1B4E28BA-…","v":2,"type":"HKQuantityTypeIdentifierHeartRate","received_at":"…","data":{…}}
-{"op":"record","type":"activity_summary","key":"2026-10-17","digest":"9f86d081884c7d65…","received_at":"…","data":{…}}
-{"op":"delete","uuid":"3B4E28BA-…","type":"HKQuantityTypeIdentifierStepCount","received_at":"…","data":{…}}
+```
+staging.db          SQLite: batches not flushed yet, the de-duplication index, tombstones
+devices.json        paired devices (token hashes)
+parquet/
+  samples/type=HKQuantityTypeIdentifierHeartRate/month=2023-03/c1234.parquet
+  samples/type=…/month=…/f5678.parquet        a flush not compacted yet
+  records/type=activity_summary/month=2026-10/…
+  route_points/type=HKWorkoutRouteTypeIdentifier/month=…/…
+  heartbeats/type=HKDataTypeIdentifierHeartbeatSeries/month=…/…
+  ecg_voltages/type=HKDataTypeIdentifierElectrocardiogram/month=…/…
+  quantity_series/type=HKQuantityTypeIdentifierStepCount/month=…/…
+  deleted/deleted.parquet
 ```
 
-- Files are only appended to, and each write is fsynced before the response.
-- Samples are stored once per `(v, uuid)`: a v2 client re-sending history that a v1 client
-  already sent adds the fuller copy once (prefer `v: 2` when both exist). Tombstones are
-  stored once per `uuid`. Records are stored once per `(type, key, digest)`, where `digest`
-  is a SHA-256 of the record as sent: a changed activity summary is a new line, an unchanged
-  one is a duplicate; take the latest `received_at` per key.
-- On start the server reads the archive to rebuild this index (memory grows with record
-  count: roughly 100 bytes per record).
-- A sample is current unless a `delete` record with the same `uuid` exists, in any file.
-  HealthKit never reuses UUIDs; edited samples arrive as a deletion plus a new UUID.
-- A line cut short by a crash is skipped on the next start; the client re-sends it.
+**Write path.** A batch is validated whole, then committed to `staging.db` in one
+transaction (fsynced) before the app gets its `200`. De-duplication is a table of the IDs of
+every record ever stored (16 bytes of SHA-256 each, on disk), so memory stays the same however
+long the history: samples are unique per `(wire format, uuid)`, records per
+`(kind, key, SHA-256 of the record as sent)`, tombstones per `uuid`. A v2 copy of a sample a v1
+client sent supersedes it; a v1 copy of a sample already stored in v2 is a duplicate.
 
-Examples: every heart-rate value received (v2 copies only), and the points of one route:
+**Flush, hourly.** For each `(dataset, type, month)` in staging, the rows are streamed into a
+new Parquet file, `f<seq>.parquet` (a temp file, fsynced, renamed), then deleted from staging.
+The flush is journaled: one cut short by a crash is replayed with the same name on the next
+start, replacing what it wrote, so nothing is lost or duplicated. The tombstones are exported
+to `deleted/deleted.parquet` at each flush.
+
+**Compaction, nightly.** Each partition with more than one file is merged into one,
+`c<seq>.parquet`, streaming a row group at a time (100 000 rows, compressed), and the rows of
+deleted samples are dropped on the way. Months that received nothing are never rewritten.
+Journaled the same way: a merged file renamed into place means its inputs are removed, even
+after a crash. Memory stays at a few tens of MB however large the archive
+([memory_test.go](memory_test.go)).
+
+**Partitions.** The month is that of the sample's start, in UTC. Series chunks go with their
+sample (a chunk may arrive in a batch before its sample's: it waits in staging, at most a day,
+then goes to the month it was received in). Types and kinds name directories: characters other
+than `[A-Za-z0-9._-]` are %-escaped.
+
+**Schema.** `samples` and `records` share one: `uuid`, `type`, `kind`, `key` (records),
+`start`, `end` (timestamps, UTC), `value` (double), `unit`, `source_name`, `source_bundle`,
+`source_version`, `device`, `uploader` (the paired device's ID, `""` for the server token),
+`wire` (1 or 2), `received_at`, and `json`, the record exactly as sent: nothing is lost, and
+fields added by newer apps are kept. In `records`, `type` is the record kind and `uuid` the
+sample a chunk belongs to. The point datasets have one row per point: `sample_uuid`, `chunk`,
+`i`, `time`, then `lat`, `lon`, `alt`, `h_acc`, `v_acc`, `speed`, `speed_acc`, `course`,
+`course_acc`, `ellipsoidal_alt`, `floor` (routes); `t` (seconds since the sample's start) and
+`gap` (heartbeats); `t` and `microvolts` (ECG, lead I); `start`, `end`, `value`, `unit`
+(quantity series). A series chunk is also kept whole in `records` (type `series`).
+
+**Deletions.** HealthKit tombstones go to the `deleted` table (and `deleted.parquet`, with
+`wire` 0); v1 copies superseded by v2 are listed there with `wire` 1. Their rows are dropped
+when their partition is next compacted; until then the views below hide them. HealthKit never
+reuses UUIDs; an edited sample arrives as a deletion plus a new UUID.
+
+### Querying with DuckDB
+
+[`sql/views.sql`](sql/views.sql) defines views that read the Parquet files and hide deleted
+rows: `samples`, `records`, `records_latest`, `route_points`, `heartbeats`, `ecg_voltages`,
+`quantity_series`, `deleted`. Start DuckDB in the archive directory with it:
 
 ```sh
-cat archive/*/*.jsonl | jq -r 'select(.op=="sample" and .v==2 and .type=="HKQuantityTypeIdentifierHeartRate") | [.data.start, .data.value, .data.unit] | @tsv'
-cat archive/*/*.jsonl | jq -c 'select(.op=="record" and .type=="series" and .data.sample_uuid=="<route uuid>") | .data.points[]'
+cd /var/lib/healthkit-relay && duckdb -readonly -init /path/to/server/sql/views.sql
 ```
+
+```sql
+-- How much of what
+SELECT type, count(*) AS n, min(start), max(start) FROM samples GROUP BY type ORDER BY n DESC;
+
+-- Daily resting heart rate, all years (the partition filter reads only those files)
+SELECT date_trunc('day', timezone('America/New_York', start)) AS day, avg(value) AS bpm
+FROM samples WHERE type = 'HKQuantityTypeIdentifierRestingHeartRate' GROUP BY day ORDER BY day;
+
+-- Hours asleep per night, by stage
+SELECT date_trunc('day', timezone('America/New_York', "end")) AS night, json_extract_string(json, '$.value_label') AS stage,
+       round(sum(epoch("end") - epoch(start)) / 3600, 2) AS hours
+FROM samples WHERE type = 'HKCategoryTypeIdentifierSleepAnalysis' GROUP BY ALL ORDER BY night, stage;
+
+-- Fields that have no column: any key of the sample as sent
+SELECT start, value, json_extract(json, '$.metadata.HKMetadataKeyHeartRateMotionContext') AS context
+FROM samples WHERE type = 'HKQuantityTypeIdentifierHeartRate' AND month = '2026-03' LIMIT 10;
+
+-- A workout's route, and its heart rate
+SELECT time, lat, lon, alt, speed FROM route_points WHERE sample_uuid = '<route uuid>' ORDER BY chunk, i;
+
+-- Beat-to-beat intervals of the last heartbeat series
+SELECT time, t - lag(t) OVER (ORDER BY chunk, i) AS rr_s FROM heartbeats
+WHERE sample_uuid = (SELECT uuid FROM samples WHERE type = 'HKDataTypeIdentifierHeartbeatSeries' ORDER BY start DESC LIMIT 1);
+
+-- Activity rings, latest version of each day
+SELECT json_extract_string(json, '$.date') AS day,
+       json_extract(json, '$.values.active_energy_burned.value')::double AS kcal
+FROM records_latest WHERE type = 'activity_summary' ORDER BY day;
+```
+
+Records received in the last hour may still be in `staging.db` only (`healthkit-relay flush`
+writes them out at once, with the server stopped).
+
+### Erasing
+
+`DELETE /v1/data` (see above) erases, with no soft delete and no copy kept: Parquet files
+holding only that uploader's rows are removed, others are rewritten without them (a temp file
+renamed over the original), its staged rows, tombstones and de-duplication entries are
+deleted (SQLite overwrites deleted content, `secure_delete`), and the SQLite log is truncated.
+It is journaled like flush and compaction: an erase a crash interrupts is finished on the next
+start, before uploads are accepted. Uploads wait while it runs. Copies outside the archive
+directory (backups, filesystem snapshots) are yours to handle.
+
+### Commands
+
+With the server stopped (they lock the archive directory, as the server does):
+
+```sh
+healthkit-relay flush   -archive-dir /var/lib/healthkit-relay   # write staged records to Parquet now
+healthkit-relay compact -archive-dir /var/lib/healthkit-relay   # flush, then compact now
+healthkit-relay migrate -archive-dir /var/lib/healthkit-relay   # from the JSON Lines archive of 0.4 and earlier
+```
+
+`migrate` streams the `YYYY/YYYY-MM-DD.jsonl` files of earlier versions through the same path
+as uploads (constant memory), keeps a sample sent in both v1 and v2 once (as v2), checks that
+the rows in Parquet match what it stored for every type, then compacts. Records are attributed
+to `-uploader <device id>`, by default the paired device if there is exactly one (the old
+archive did not record who uploaded what). It leaves the JSON Lines files in place: check the
+counts, then delete them.
 
 ## Metrics forwarding
 

@@ -1,13 +1,16 @@
 // Command healthkit-relay receives Apple Health samples from the companion iPhone app,
-// archives every record durably on disk and optionally forwards numeric samples to a
-// metrics database as InfluxDB line protocol.
+// archives every record durably on disk (a SQLite staging database, flushed hourly to
+// Parquet files) and optionally forwards numeric samples to a metrics database as InfluxDB
+// line protocol.
 //
 // Every flag can also be set with an environment variable: -archive-dir is HKR_ARCHIVE_DIR,
 // and so on (upper case, dashes as underscores, HKR_ prefix). Flags win over the environment.
 //
 // Subcommands talk to the running server with the same configuration: `pair` prints a
 // one-time setup code (QR code and link) for the app, `devices` lists paired devices and
-// `revoke <id>` removes one.
+// `revoke <id>` removes one. Offline commands work on the archive directly, with the server
+// stopped: `migrate` converts the JSON Lines archive of versions before 0.5, `flush` and
+// `compact` run the hourly and nightly maintenance at once.
 package main
 
 import (
@@ -15,6 +18,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -51,6 +55,10 @@ func run(args []string) error {
 		switch args[0] {
 		case "pair", "devices", "revoke":
 			return runCommand(args[0], args[1:], os.Stdout)
+		case "migrate":
+			return runMigrate(args[1:], os.Stdout)
+		case "flush", "compact":
+			return runMaintenance(args[0], args[1:], os.Stdout)
 		}
 	}
 	fs := flag.NewFlagSet("healthkit-relay", flag.ContinueOnError)
@@ -61,6 +69,8 @@ func run(args []string) error {
 	forwardTokenFile := fs.String("forward-token-file", "", "file holding a bearer token for -forward-url (optional)")
 	measurement := fs.String("measurement", "healthkit", "line-protocol measurement name; metrics are named <measurement>_<field>")
 	maxBody := fs.Int64("max-body-bytes", 32<<20, "largest accepted request body")
+	flushEvery := fs.Duration("flush-interval", time.Hour, "how often staged records are written to Parquet")
+	compactAt := fs.String("compact-at", "03:30", "local time of the nightly compaction, HH:MM")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -88,11 +98,18 @@ func run(args []string) error {
 	if len(token) < 16 {
 		return errors.New("token is shorter than 16 characters")
 	}
-	archive, err := OpenArchive(*archiveDir)
+	if *flushEvery < time.Minute {
+		return errors.New("-flush-interval must be at least a minute")
+	}
+	archive, err := OpenStore(*archiveDir)
 	if err != nil {
 		return fmt.Errorf("open archive: %w", err)
 	}
-	log.Printf("healthkit-relay %s: archive %s holds %d records", version, *archiveDir, archive.Len())
+	defer archive.Close()
+	log.Printf("healthkit-relay %s: archive %s holds %d records (%d staged)", version, *archiveDir, archive.Len(), archive.Staged())
+	if legacy := archive.LegacyFiles(); len(legacy) > 0 {
+		log.Printf("archive: %d JSON Lines files from before 0.5 are not read: stop the server and run `healthkit-relay migrate`", len(legacy))
+	}
 
 	devices, err := OpenDevices(filepath.Join(*archiveDir, "devices.json"))
 	if err != nil {
@@ -121,6 +138,9 @@ func run(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if err := archive.Maintain(ctx, *flushEvery, *compactAt); err != nil {
+		return err
+	}
 	errc := make(chan error, 1)
 	go func() { errc <- hs.ListenAndServe() }()
 	log.Printf("listening on %s; %d paired devices; setup page /setup (%s)", *listen, devices.Len(), cfg.setupFrom)
@@ -132,6 +152,42 @@ func run(args []string) error {
 	shutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	return hs.Shutdown(shutdown)
+}
+
+// runMaintenance runs a flush or a compaction on the archive, with the server stopped.
+func runMaintenance(name string, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("healthkit-relay "+name, flag.ContinueOnError)
+	var cfg config
+	cfg.register(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := applyEnv(fs); err != nil {
+		return err
+	}
+	if cfg.archiveDir == "" {
+		return errors.New("-archive-dir is required")
+	}
+	s, err := OpenStore(cfg.archiveDir)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	if name == "flush" {
+		n, err := s.Flush(context.Background(), true)
+		if err == nil {
+			fmt.Fprintf(out, "flushed %d rows\n", n)
+		}
+		return err
+	}
+	if _, err := s.Flush(context.Background(), false); err != nil {
+		return err
+	}
+	n, err := s.Compact(context.Background())
+	if err == nil {
+		fmt.Fprintf(out, "compacted %d partitions\n", n)
+	}
+	return err
 }
 
 // applyEnv sets every flag not given on the command line from HKR_<NAME>, if present.

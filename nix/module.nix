@@ -1,0 +1,162 @@
+# NixOS module for healthkit-relay. From the flake: imports = [ healthkit-relay.nixosModules.default ];
+#
+#   services.healthkit-relay = {
+#     enable = true;
+#     publicUrl = "https://health.example.com";
+#   };
+#
+# Then, as root: healthkit-relay-pair (prints the setup QR code for the app).
+self:
+{ config, lib, pkgs, ... }:
+let
+  cfg = config.services.healthkit-relay;
+  stateDir = "/var/lib/healthkit-relay";
+  # The token the service reads: the configured file, else one generated on first start.
+  tokenPath = if cfg.tokenFile != null then cfg.tokenFile else "${stateDir}/token";
+  env = {
+    HKR_LISTEN = cfg.listen;
+    HKR_SETUP_FROM = cfg.setupFrom;
+  } // lib.optionalAttrs (cfg.publicUrl != null) { HKR_PUBLIC_URL = cfg.publicUrl; }
+    // lib.optionalAttrs (cfg.forwardUrl != null) { HKR_FORWARD_URL = cfg.forwardUrl; };
+  pair = pkgs.writeShellScriptBin "healthkit-relay-pair" ''
+    ${lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") env)}
+    exec ${lib.getExe cfg.package} pair -token-file ${lib.escapeShellArg tokenPath} "$@"
+  '';
+in
+{
+  options.services.healthkit-relay = {
+    enable = lib.mkEnableOption "healthkit-relay, the receiver for the Health Relay iPhone app";
+
+    package = lib.mkOption {
+      type = lib.types.package;
+      default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      defaultText = lib.literalExpression "healthkit-relay.packages.\${system}.default";
+      description = "The healthkit-relay package.";
+    };
+
+    listen = lib.mkOption {
+      type = lib.types.str;
+      default = "127.0.0.1:8080";
+      example = "0.0.0.0:8080";
+      description = "Address to listen on.";
+    };
+
+    publicUrl = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "https://health.example.com";
+      description = "URL phones use to reach the server, put in setup links. Null: the setup page offers the addresses it finds.";
+    };
+
+    tokenFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      example = "/run/secrets/healthkit-relay-token";
+      description = ''
+        File holding the server token (at least 16 characters), the admin credential. Read by
+        systemd as a credential, so it can be owned by root with mode 600. Null: a random
+        token is generated on first start in ${stateDir}/token.
+      '';
+    };
+
+    setupFrom = lib.mkOption {
+      type = lib.types.enum [ "private" "any" "off" ];
+      default = "private";
+      description = "Who may open /setup and pair: private networks (loopback, LAN, Tailscale), any, or off.";
+    };
+
+    forwardUrl = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "http://127.0.0.1:8428/influx/write";
+      description = "InfluxDB line-protocol write URL to forward numeric samples to.";
+    };
+
+    forwardTokenFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = "File holding a bearer token for forwardUrl.";
+    };
+
+    extraFlags = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "-measurement" "health" ];
+      description = "Extra command-line flags for the server.";
+    };
+
+    openFirewall = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Open the listen port in the firewall.";
+    };
+  };
+
+  config = lib.mkIf cfg.enable {
+    environment.systemPackages = [ cfg.package pair ];
+
+    networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [
+      (lib.toInt (lib.last (lib.splitString ":" cfg.listen)))
+    ];
+
+    users.users.healthkit-relay = {
+      isSystemUser = true;
+      group = "healthkit-relay";
+      home = stateDir;
+    };
+    users.groups.healthkit-relay = { };
+
+    systemd.services.healthkit-relay = {
+      description = "healthkit-relay: Apple Health receiver and archive";
+      wantedBy = [ "multi-user.target" ];
+      wants = [ "network-online.target" ];
+      after = [ "network-online.target" ];
+      environment = env;
+      preStart = lib.optionalString (cfg.tokenFile == null) ''
+        if [ ! -s ${stateDir}/token ]; then
+          (umask 077; head -c 32 /dev/urandom | ${pkgs.coreutils}/bin/base64 > ${stateDir}/token.tmp)
+          mv ${stateDir}/token.tmp ${stateDir}/token
+        fi
+      '';
+      script = ''
+        exec ${lib.getExe cfg.package} -archive-dir ${stateDir} \
+          -token-file ${if cfg.tokenFile != null then ''"$CREDENTIALS_DIRECTORY/token"'' else "${stateDir}/token"} \
+          ${lib.optionalString (cfg.forwardTokenFile != null) ''-forward-token-file "$CREDENTIALS_DIRECTORY/forward-token"''} \
+          ${lib.escapeShellArgs cfg.extraFlags}
+      '';
+      serviceConfig = {
+        User = "healthkit-relay";
+        Group = "healthkit-relay";
+        StateDirectory = "healthkit-relay";
+        StateDirectoryMode = "0700";
+        LoadCredential = lib.optional (cfg.tokenFile != null) "token:${cfg.tokenFile}"
+          ++ lib.optional (cfg.forwardTokenFile != null) "forward-token:${cfg.forwardTokenFile}";
+        Restart = "on-failure";
+        RestartSec = "5s";
+        UMask = "0077";
+
+        CapabilityBoundingSet = "";
+        NoNewPrivileges = true;
+        LockPersonality = true;
+        MemoryDenyWriteExecute = true;
+        PrivateDevices = true;
+        PrivateUsers = true;
+        ProtectClock = true;
+        ProtectControlGroups = true;
+        ProtectHome = true;
+        ProtectHostname = true;
+        ProtectKernelLogs = true;
+        ProtectKernelModules = true;
+        ProtectKernelTunables = true;
+        ProtectProc = "invisible";
+        ProtectSystem = "strict";
+        RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" "AF_NETLINK" ];
+        RestrictNamespaces = true;
+        RestrictRealtime = true;
+        RestrictSUIDSGID = true;
+        SystemCallArchitectures = "native";
+        SystemCallFilter = [ "@system-service" "~@privileged @resources" ];
+      };
+    };
+  };
+}

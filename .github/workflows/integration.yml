@@ -1,0 +1,140 @@
+# End-to-end tests of the documented install paths (docs/install.md). Each one installs the
+# server as a user would, then runs scripts/smoke-test.sh: pair like the app, upload a
+# batch, check it is stored and survives a restart.
+name: Integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  docker-compose:
+    name: Docker Compose
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      COMPOSE_PROFILES: metrics   # every compose command below includes VictoriaMetrics, Grafana
+      HKR_URL: http://127.0.0.1:8080
+      HKR_PAIR_CMD: docker compose exec -T relay healthkit-relay pair
+      # Recreate the container, not only restart it: data must live in the volume.
+      HKR_RESTART_CMD: docker compose down && docker compose up -d --wait
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up as docs/install.md says
+        run: |
+          mkdir -p data
+          (umask 077; head -c 32 /dev/urandom | base64 > token)
+          {
+            echo "HKR_USER=$(id -u):$(id -g)"
+            echo "HKR_PUBLIC_URL=http://127.0.0.1:8080"
+            echo "HKR_FORWARD_URL=http://victoriametrics:8428/influx/write"
+          } > .env
+      - name: Build the image
+        run: docker compose build --build-arg VERSION=ci
+      - name: Start (with the metrics profile)
+        run: docker compose up -d --wait
+      - name: The image runs as non-root and reports healthy
+        run: |
+          id=$(docker compose ps -q relay)
+          docker inspect -f '{{.Config.User}} {{.State.Health.Status}}' "$id"
+          [ "$(docker inspect -f '{{.State.Health.Status}}' "$id")" = healthy ]
+          [ "$(docker image inspect -f '{{.Config.User}}' "$(docker inspect -f '{{.Image}}' "$id")")" = 65532:65532 ]
+      - name: Smoke test
+        run: scripts/smoke-test.sh
+      - name: Samples were forwarded to VictoriaMetrics
+        run: |
+          for _ in $(seq 30); do
+            out=$(docker compose exec -T victoriametrics wget -qO- \
+              'http://127.0.0.1:8428/api/v1/export?match[]={__name__=~"healthkit_.*",source="smoke-test"}' || true)
+            [ -n "$out" ] && break
+            sleep 1
+          done
+          echo "$out"
+          grep -q '"__name__":"healthkit_heart_rate"' <<<"$out"
+      - name: Archive is on the host, owned by the user
+        run: |
+          find data -ls | head -20
+          [ "$(stat -c %u data/devices.json)" = "$(id -u)" ]
+      - name: Logs
+        if: always()
+        run: docker compose logs --no-color relay
+
+  systemd:
+    name: Release binary + systemd
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          # Latest Go, for the newest standard library security fixes; go.mod states the minimum.
+          go-version: stable
+          check-latest: true
+          cache-dependency-path: server/go.mod
+      - name: Build the release archives (snapshot)
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean
+      - name: Verify checksums and unpack
+        run: |
+          cd dist
+          sha256sum -c checksums.txt
+          ls ./*.tar.gz
+          mkdir -p ../release && tar -xzf healthkit-relay_*_linux_amd64.tar.gz -C ../release
+          ls -l ../release
+      - name: Install as docs/install.md says
+        working-directory: release
+        run: |
+          sudo install -m 755 healthkit-relay /usr/local/bin/
+          sudo install -m 644 packaging/healthkit-relay.service /etc/systemd/system/
+          sudo install -d -m 700 /etc/healthkit-relay
+          sudo sh -c 'umask 077; head -c 32 /dev/urandom | base64 > /etc/healthkit-relay/token'
+          echo HKR_PUBLIC_URL=http://127.0.0.1:8080 | sudo tee /etc/healthkit-relay/env
+          sudo systemd-analyze verify /etc/systemd/system/healthkit-relay.service
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now healthkit-relay
+          healthkit-relay -version
+      - name: Smoke test
+        env:
+          HKR_PAIR_CMD: sudo healthkit-relay pair -token-file /etc/healthkit-relay/token
+          HKR_RESTART_CMD: sudo systemctl restart healthkit-relay
+        run: scripts/smoke-test.sh
+      - name: Archive is private to the service
+        run: |
+          sudo ls -la /var/lib/private/healthkit-relay
+          [ "$(sudo stat -c %a /var/lib/private/healthkit-relay)" = 700 ]
+          systemd-analyze security healthkit-relay.service --no-pager | tail -1
+      - name: Logs
+        if: always()
+        run: sudo journalctl -u healthkit-relay --no-pager
+
+  nixos:
+    name: NixOS module (VM test)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Let Nix use KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            system-features = nixos-test benchmark big-parallel kvm
+      - name: nix flake check (package, NixOS VM test)
+        run: nix flake check -L

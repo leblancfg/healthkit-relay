@@ -98,8 +98,10 @@ head -c 32 /dev/urandom | base64 > token     # keep this file private (chmod 600
 ```
 
 See [server/README.md](server/README.md) for the API, the archive format, DuckDB queries
-([`server/sql/views.sql`](server/sql/views.sql)) and all flags. Upgrading from 0.4 or
-earlier: stop the server and run `healthkit-relay migrate -archive-dir ./archive` once.
+([`server/sql/views.sql`](server/sql/views.sql)) and all flags, and
+[docs/install.md](docs/install.md) for Docker, release binaries with systemd, and NixOS.
+Upgrading from 0.4 or earlier: stop the server and run
+`healthkit-relay migrate -archive-dir ./archive` once.
 
 iPhone app (needs a Mac with Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen) and
 a paid Apple Developer account, which HealthKit requires):
@@ -122,7 +124,10 @@ everything, then confirm) and starts syncing; there is nothing else to set. See
 ```
 server/     Go receiver and archive (SQLite staging, Parquet), tests; sql/views.sql for DuckDB
 ios/        SwiftUI app; project.yml is the XcodeGen spec
-flake.nix   Nix package for the server
+flake.nix   Nix package and NixOS module (nix/) for the server
+docs/       install guide: Docker, binary + systemd, NixOS
+packaging/  systemd unit shipped in the release archives
+scripts/    smoke-test.sh, the end-to-end check every install path runs in CI
 Makefile    server-test, server-build, ios-build, ios-test
 ```
 

@@ -27,5 +27,13 @@
           };
         };
       });
+
+      nixosModules.default = import ./nix/module.nix self;
+
+      checks = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (system:
+        let pkgs = nixpkgs.legacyPackages.${system}; in {
+          package = self.packages.${system}.default;
+          nixos = import ./nix/test.nix self { inherit pkgs; };
+        });
     };
 }

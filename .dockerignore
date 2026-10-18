@@ -1,0 +1,6 @@
+# Only server/ and docker/ go into the image.
+*
+!server/
+!docker/
+server/healthkit-relay
+**/*_test.go

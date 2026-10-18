@@ -27,6 +27,7 @@ goes from your phone to your server, and nowhere else.
 |---|---|---|
 | Server token | a file on the server (mode 600) | everything: pair, list and revoke devices, upload |
 | Device token | the iPhone's Keychain; the server stores only its SHA-256 | upload and read the server status, for one device; revocable |
+| Read token | wherever the query client keeps it; the server stores only its SHA-256 | read health data through the [query API](query-api.md), nothing else; revocable |
 | Setup code | the QR code or link | pair once, within 15 minutes (up to a day with `-valid`) |
 
 The server token is read from a file, never from a command-line value, so it does not show

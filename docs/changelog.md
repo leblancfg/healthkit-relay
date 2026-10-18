@@ -3,6 +3,19 @@
 Notable changes to the server and the app. Versions follow [Semantic Versioning](https://semver.org);
 server releases and the app are versioned separately.
 
+## Unreleased
+
+### Server
+
+- Query API (off by default, `-query-duckdb`): typed, read-only endpoints for the type
+  catalog, samples and daily or hourly aggregates, with time zones and Apple-style source
+  de-duplication; an OpenAPI 3.1 document at `/openapi.json` and Swagger UI at `/docs`,
+  served from the binary. Queries run in a locked-down `duckdb` process. See
+  [Query API](query-api.md).
+- Token scopes: read tokens (`healthkit-relay token create`, `POST /v1/tokens`, the setup
+  page) may only query; paired devices are upload tokens and may not. Existing
+  `devices.json` files keep working unchanged.
+
 ## 0.6.1 (unreleased)
 
 ### Server

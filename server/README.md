@@ -28,6 +28,7 @@ with dashes as underscores (`-archive-dir` is `HKR_ARCHIVE_DIR`). Flags win.
 | `-max-body-bytes` | `33554432` | largest accepted request |
 | `-flush-interval` | `1h` | how often staged records are written to Parquet |
 | `-compact-at` | `03:30` | local time of the nightly compaction |
+| `-query-duckdb` | (off) | `duckdb` executable for the read-only query API, `/openapi.json` and `/docs`; see [docs/query-api.md](../docs/query-api.md) for it and the other `-query-*` flags |
 | `-group-read` | off | make the archive readable by the service's group (directories 0750, files 0640), for a backup job or a query tool; by default only the service's user can read it (0700, 0600), set at every start |
 
 The Go runtime's soft memory limit defaults to 128 MiB (`GOMEMLIMIT` overrides it): the
@@ -194,7 +195,7 @@ client outside `-setup-from`.
 
 ### `GET /v1/status`
 
-Any valid token. `{"version": "…", "wire_version": 2, "records": 12571973, "device": {…}}`
+The server token or an upload token (a paired device's; read tokens get `403`). `{"version": "…", "wire_version": 2, "records": 12571973, "device": {…}}`
 (`device` only for a device token). The app shows the record count and detects a revoked
 token here.
 
@@ -202,7 +203,22 @@ token here.
 
 Server token only: mint a setup code (`{"code", "expires_at", "link", "setup_url"}`; the body
 may give `{"public_url": "…"}` when `-public-url` is not set), list paired devices, revoke
-one (`204`). The `pair`, `devices` and `revoke` commands use these.
+one (`204`). The `pair`, `devices` and `revoke` commands use these. Each device has a
+`scope`: `upload` (paired apps, and every entry written before scopes existed) or `read`.
+
+### `POST /v1/tokens`
+
+Server token only: `{"name": "grafana", "scope": "read"}` (scope defaults to `read`) answers
+`201` with `{"token", "device"}`, the token shown this once. Read tokens may use the query API
+and nothing else: uploads, status and erase answer `403`. `healthkit-relay token create -name
+grafana` prints one; `devices` and `revoke` list and revoke them.
+
+### Query API
+
+With `-query-duckdb`: `GET /v1/kinds`, `/v1/types`, `/v1/types/{type}`,
+`/v1/types/{type}/samples`, `/v1/types/{type}/aggregates`, for a read token or the server
+token (upload tokens get `403`). Described by `/openapi.json` (OpenAPI 3.1), shown at `/docs`;
+both need no token. See [docs/query-api.md](../docs/query-api.md).
 
 A batch is stored entirely or not at all, so a client can safely retry until it gets 200.
 

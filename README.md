@@ -69,6 +69,10 @@ XML dump.
   moves on once the server confirms, and the server ignores records it already has.
 - **Query it like a data lake.** Parquet partitioned by type and month: open it in DuckDB,
   pandas, Polars or Spark.
+- **Query API with OpenAPI docs.** Optional read-only HTTP API: daily and hourly aggregates
+  (steps without Watch/iPhone double counting, sleep stages per night), samples and the type
+  catalog, described at `/openapi.json` and browsable at `/docs`, with read-only tokens for
+  dashboards, scripts and LLM agents.
 - **Dashboards.** Numeric samples go to VictoriaMetrics, InfluxDB or anything that accepts
   line protocol; build Grafana dashboards for resting heart rate, HRV, sleep, VO2 max or
   steps.
@@ -145,7 +149,7 @@ the easiest).
 - The app asks for **read** access only and never writes to Apple Health.
 - Each iPhone has its own token, stored in the Keychain; the server keeps only a hash and
   can revoke it. Pairing and the setup page answer private networks only, by default.
-- `/healthz` and `/metrics` expose no health data.
+- `/healthz`, `/metrics`, `/openapi.json` and `/docs` expose no health data. The optional query API reads it only with a read token or the server token.
 - Your data is plain files on your disk: easy to back up, easy to delete.
 
 More in [Security & privacy](https://leblancfg.com/healthkit-relay/security/).
@@ -229,7 +233,8 @@ scripts/    smoke-test.sh, the end-to-end check every install path runs in CI
 Makefile    server-test, server-build, ios-build, ios-test
 ```
 
-API, flags and archive details: [server/README.md](server/README.md); DuckDB views in
+API, flags and archive details: [server/README.md](server/README.md); query API:
+[docs/query-api.md](docs/query-api.md); DuckDB views in
 [`server/sql/views.sql`](server/sql/views.sql). App internals: [ios/README.md](ios/README.md).
 Upgrading from 0.4 or earlier: stop the server and run
 `healthkit-relay migrate -archive-dir <archive>` once.

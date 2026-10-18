@@ -79,6 +79,7 @@ nav:
   - Networking & HTTPS: networking.md
   - Pairing a phone: pairing.md
   - Data model & querying: data.md
+  - Query API: query-api.md
   - Grafana: grafana.md
   - Backups: backups.md
   - Security & privacy: security.md

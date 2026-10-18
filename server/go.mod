@@ -3,7 +3,7 @@ module github.com/leblancfg/healthkit-relay/server
 go 1.26.0
 
 require (
-	github.com/klauspost/compress v1.17.9
+	github.com/klauspost/compress v1.20.3
 	github.com/parquet-go/parquet-go v0.32.0
 	modernc.org/sqlite v1.60.1
 )

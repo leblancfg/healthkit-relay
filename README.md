@@ -5,7 +5,7 @@
 <h1 align="center">Health Relay</h1>
 
 <p align="center">
-  <b>Self-hosted Apple Health export: sync your iPhone and Apple Watch health data to a server you own, continuously, with no cloud in between.</b>
+  <b>Your Apple Health data, on a server you own. Free, open source, no strings attached.</b>
 </p>
 
 <p align="center">
@@ -16,16 +16,26 @@
   <a href="https://leblancfg.github.io/healthkit-relay/"><img src="https://img.shields.io/badge/docs-mkdocs-ff2d55" alt="Documentation"></a>
 </p>
 
-Health Relay is an open-source **HealthKit sync and backup** tool. A small iPhone app reads
-everything in Apple Health (heart rate, HRV, sleep stages, steps, workouts with GPS routes,
-ECG recordings, blood pressure, cycle tracking, medications, Health Records and the rest)
-and uploads it in the background to **your own server**: a single Go binary or Docker
-container on a NAS, a Raspberry Pi, a home server or a VPS. The server keeps a lossless
-archive in **Parquet** files you can query with **DuckDB**, and forwards the numbers as
-InfluxDB line protocol to **Prometheus-compatible stores** such as **VictoriaMetrics** or
-**InfluxDB**, so your Apple Watch data shows up in **Grafana**. No account, no analytics, no
-vendor cloud: a private, free alternative to paid Apple Health exporter apps and to the
-manual `export.zip` XML dump.
+Your iPhone and Apple Watch know a lot about you: every heartbeat, every night of sleep, every
+run. That history lives inside the Health app, and the apps that get it out want a
+subscription. Health Relay gets it out for good, onto a **self-hosted server** that you run.
+
+Install the free iPhone app, pair it with your server, and forget about it. From then on your
+health history keeps itself up to date in the background, years of it, in plain files that
+are yours to keep, chart, query or delete.
+
+- **Own your data.** It goes from your phone to your server and nowhere else. No account, no
+  cloud, no analytics, nobody in the middle.
+- **Free, forever.** The app and the server are free and open source. No premium tier, no
+  subscription, no features held back. Ever.
+- **Set it and forget it.** After the first sync, new data arrives on its own. Nothing to
+  export, nothing to remember.
+- **All of it, exactly as recorded.** Every kind of data Apple Health keeps, nothing trimmed,
+  so you never lose something you only later decide matters.
+- **Yours to use.** Chart it in Grafana, dig into it from a notebook, or simply keep a backup
+  that doesn't depend on anyone else.
+- **Runs on what you already have.** A NAS, a Raspberry Pi, a home server or a small VPS: one
+  small program, no database to look after.
 
 **[Documentation](https://leblancfg.github.io/healthkit-relay/)** ·
 [Quick start](#quick-start) ·
@@ -33,6 +43,16 @@ manual `export.zip` XML dump.
 [FAQ](#faq)
 
 ## Features
+
+Health Relay is an open-source **HealthKit sync and backup** tool. The iPhone app reads
+everything in Apple Health (heart rate, HRV, sleep stages, steps, workouts with GPS routes,
+ECG recordings, blood pressure, cycle tracking, medications, Health Records and the rest)
+and uploads it in the background to a single Go binary or Docker container. The server keeps
+a lossless archive in **Parquet** files you can query with **DuckDB**, and forwards the
+numbers as InfluxDB line protocol to **Prometheus-compatible stores** such as
+**VictoriaMetrics** or **InfluxDB**, so your Apple Watch data shows up in **Grafana**: a
+private, free alternative to paid Apple Health exporter apps and to the manual `export.zip`
+XML dump.
 
 - **Everything HealthKit has.** The list of data types is generated from the iOS SDK at
   build time: all quantity and category types, workouts (activities, events, statistics,

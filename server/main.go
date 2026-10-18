@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -32,6 +33,11 @@ import (
 var version = "dev"
 
 func main() {
+	// Memory use is bounded by design (a batch, a row group); a soft limit keeps the garbage
+	// collector from letting the heap grow to twice that. GOMEMLIMIT overrides it.
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(128 << 20)
+	}
 	if err := run(os.Args[1:]); err != nil {
 		log.Fatal(err)
 	}

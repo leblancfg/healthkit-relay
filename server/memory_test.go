@@ -215,3 +215,47 @@ func TestMemoryBoundedLargeRows(t *testing.T) {
 		t.Errorf("peak heap: %d MB for 100 rows, %d MB for 400: not bounded", small>>20, big>>20)
 	}
 }
+
+// Migration reads lines of any size (a route chunk is about 0.5 MB) in batches bounded by
+// size: memory is the same for 4x the lines.
+func TestMigrateMemoryBounded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("writes a few hundred MB")
+	}
+	peak := func(chunks int) uint64 {
+		dir := t.TempDir()
+		os.MkdirAll(filepath.Join(dir, "2026"), 0o750)
+		f, err := os.Create(filepath.Join(dir, "2026", "2026-10-17.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := rand.New(rand.NewPCG(7, 8))
+		for c := 0; c < chunks; c++ {
+			uuid := fmt.Sprintf("%08X-0000-4000-8000-000000000000", c)
+			var b strings.Builder
+			fmt.Fprintf(&b, `{"kind":"series","key":"%s/workout_route/0","series":"workout_route","sample_uuid":"%s","sample_type":"HKWorkoutRouteTypeIdentifier","index":0,"final":true,"points":[`, uuid, uuid)
+			for p := 0; p < 4000; p++ {
+				if p > 0 {
+					b.WriteByte(',')
+				}
+				fmt.Fprintf(&b, `{"t":"2026-01-01T10:00:00.000Z","lat":%.7f,"lon":%.7f,"alt":%.2f,"speed":%.3f}`, r.Float64()*90, r.Float64()*180, r.Float64()*300, r.Float64()*5)
+			}
+			b.WriteString(`]}`)
+			fmt.Fprintf(f, `{"op":"record","type":"series","key":"%s/workout_route/0","digest":"d%d","received_at":"2026-10-17T12:00:00Z","data":%s}`+"\n", uuid, c, b.String())
+		}
+		f.Close()
+		var out strings.Builder
+		var p uint64
+		p = peakHeap(func() {
+			if err := runMigrate([]string{"-archive-dir", dir, "-uploader", "abcd1234"}, &out); err != nil {
+				t.Errorf("migrate: %v\n%s", err, out.String())
+			}
+		})
+		t.Logf("migration of %d lines of ~0.5 MB: peak heap %d MB", chunks, p>>20)
+		return p
+	}
+	small, big := peak(100), peak(400)
+	if big > 96<<20 || big > small*3/2+8<<20 {
+		t.Errorf("peak heap: %d MB for 100 lines, %d MB for 400: not bounded", small>>20, big>>20)
+	}
+}

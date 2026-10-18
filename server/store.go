@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS deleted (
 	uploader TEXT NOT NULL,
 	received_at INTEGER NOT NULL,
 	json TEXT,
+	applied INTEGER NOT NULL DEFAULT 0, -- 1: its rows were removed from every Parquet file
 	PRIMARY KEY (uuid, wire)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS parents (
@@ -193,6 +194,16 @@ func OpenStore(dir string) (*Store, error) {
 func (s *Store) init() error {
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("staging.db: %w", err)
+	}
+	// Databases from 0.5.0: deleted.applied.
+	var applied int
+	if err := s.db.QueryRow(`SELECT count(*) FROM pragma_table_info('deleted') WHERE name = 'applied'`).Scan(&applied); err != nil {
+		return err
+	}
+	if applied == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE deleted ADD COLUMN applied INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
 	}
 	// Distinct records are counted as they are stored, so opening never scans the archive.
 	var n sql.NullInt64

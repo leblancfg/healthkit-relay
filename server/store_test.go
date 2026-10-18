@@ -516,3 +516,60 @@ func TestMaintainStops(t *testing.T) {
 	cancel()
 	wait()
 }
+
+// A sample deleted in a month that receives nothing else (one file: not merged) is still
+// removed from it at the next compaction, with its series points; then never looked at again.
+func TestCompactionAppliesDeletions(t *testing.T) {
+	dir := t.TempDir()
+	ts, _ := newTestServer(t, dir)
+	ctx := context.Background()
+	mustPost(t, ts.URL, testToken, `{"version":2,"samples":[`+hrSample+`,`+hbSample+`,`+sleepSample+`],"records":[`+hbChunk+`]}`)
+	ts.store.Flush(ctx, false)
+	mustPost(t, ts.URL, testToken, `{"version":2,"samples":[],"records":[],"deletions":[{"uuid":"`+hbUUID+`"},`+
+		`{"uuid":"2b4e28ba-2fa1-11d2-883f-0016d3cca427","type":"HKCategoryTypeIdentifierSleepAnalysis"}]}`)
+	ts.store.Flush(ctx, false)
+	hr, _ := filepath.Glob(filepath.Join(dir, "parquet", "samples", "type=HKQuantityTypeIdentifierHeartRate", "*", "*.parquet"))
+	before, _ := os.Stat(hr[0])
+
+	if _, err := ts.store.Compact(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got := rowCount(t, dir)
+	if got["samples/HKDataTypeIdentifierHeartbeatSeries"] != 0 || got["heartbeats/HKDataTypeIdentifierHeartbeatSeries"] != 0 ||
+		got["records/series"] != 0 || got["samples/HKCategoryTypeIdentifierSleepAnalysis"] != 0 || got["samples/HKQuantityTypeIdentifierHeartRate"] != 1 {
+		t.Fatalf("after compaction: %v", got)
+	}
+	// Files without a deleted sample are not rewritten.
+	if after, _ := os.Stat(hr[0]); !os.SameFile(before, after) {
+		t.Error("heart rate file rewritten")
+	}
+	var pending int
+	ts.store.db.QueryRow(`SELECT count(*) FROM deleted WHERE applied = 0`).Scan(&pending)
+	if pending != 0 {
+		t.Errorf("%d tombstones still pending", pending)
+	}
+	// The tombstones stay (deleted.parquet, de-duplication of a re-sent deletion).
+	if n := len(readAll[DeletedRow](t, dir, "deleted/deleted.parquet")); n != 2 {
+		t.Errorf("deleted.parquet: %d rows", n)
+	}
+}
+
+func TestSchemaUpgradeFrom050(t *testing.T) {
+	dir := t.TempDir()
+	s, err := OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`ALTER TABLE deleted DROP COLUMN applied`); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	s, err = OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := s.db.Exec(`UPDATE deleted SET applied = 1`); err != nil {
+		t.Fatalf("applied column: %v", err)
+	}
+}

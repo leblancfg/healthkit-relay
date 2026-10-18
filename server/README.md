@@ -29,6 +29,9 @@ with dashes as underscores (`-archive-dir` is `HKR_ARCHIVE_DIR`). Flags win.
 | `-flush-interval` | `1h` | how often staged records are written to Parquet |
 | `-compact-at` | `03:30` | local time of the nightly compaction |
 
+The Go runtime's soft memory limit defaults to 128 MiB (`GOMEMLIMIT` overrides it): the
+server holds a batch and a Parquet row group at a time, whatever the archive's size.
+
 The token is read from a file, never from a flag value, so it stays out of process
 listings. With systemd, `LoadCredential=` and `-token-file ${CREDENTIALS_DIRECTORY}/token`
 work well.
@@ -272,9 +275,12 @@ sample a chunk belongs to. The point datasets have one row per point: `sample_uu
 (quantity series). A series chunk is also kept whole in `records` (type `series`).
 
 **Deletions.** HealthKit tombstones go to the `deleted` table (and `deleted.parquet`, with
-`wire` 0); v1 copies superseded by v2 are listed there with `wire` 1. Their rows are dropped
-when their partition is next compacted; until then the views below hide them. HealthKit never
-reuses UUIDs; an edited sample arrives as a deletion plus a new UUID.
+`wire` 0); v1 copies superseded by v2 are listed there with `wire` 1. The next nightly
+compaction removes their rows from the Parquet files, with their series points: merged
+partitions drop them on the way, and in the others only the UUID column of the files that
+can hold them (their type's months) is read, and a file is rewritten only if it does. Until
+then the views below hide them. HealthKit never reuses UUIDs; an edited sample arrives as a
+deletion plus a new UUID.
 
 ### Querying with DuckDB
 

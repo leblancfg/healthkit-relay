@@ -52,7 +52,7 @@ type migration struct {
 
 	lines, skipped, invalid, stored, dupes, v1dupes int64
 	expected                                        map[string]int64 // dataset/type -> rows
-	sinceFlush                                      int64
+	sinceFlush, batchBytes                          int64
 	batch                                           []Item
 	points                                          []string // per batch item: the point partition, if any
 	npoints                                         []int64
@@ -249,7 +249,9 @@ func (m *migration) line(ctx context.Context, line []byte, pass int) error {
 	m.batch = append(m.batch, it)
 	m.points = append(m.points, pointPart)
 	m.npoints = append(m.npoints, npoints)
-	if len(m.batch) >= 5000 {
+	m.batchBytes += int64(len(line))
+	// By count and by size: a line holding a route chunk is about 0.5 MB.
+	if len(m.batch) >= 5000 || m.batchBytes >= 16<<20 {
 		return m.ingest(ctx)
 	}
 	return nil
@@ -287,7 +289,7 @@ func (m *migration) ingest(ctx context.Context) error {
 		}
 	}
 	clear(m.batch)
-	m.batch, m.points, m.npoints = m.batch[:0], m.points[:0], m.npoints[:0]
+	m.batch, m.points, m.npoints, m.batchBytes = m.batch[:0], m.points[:0], m.npoints[:0], 0
 	if m.sinceFlush >= m.every {
 		// Chunks whose sample comes later in the files wait in staging (no fallback month).
 		if _, err := m.store.flushBefore(ctx, math.MinInt64); err != nil {

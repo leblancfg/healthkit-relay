@@ -69,7 +69,161 @@ func (s *Store) compact(ctx context.Context) (int, error) {
 	if merged > 0 {
 		log.Printf("archive: compacted %d partitions", merged)
 	}
-	return merged, nil
+	return merged, s.applyDeletions(ctx)
+}
+
+// applyDeletions removes the rows of samples deleted since the last compaction from the files
+// that were not merged (months that received nothing else): it reads only the UUID column of
+// the files that can hold them (their type's months, or every month for a tombstone without
+// a type) and rewrites the files that do. Each tombstone is then marked applied, so later
+// nights skip it. Rewrites are atomic renames; a crash before the mark only means re-checking.
+func (s *Store) applyDeletions(ctx context.Context) error {
+	rows, err := s.db.Query(`SELECT uuid, wire, coalesce(type, '') FROM deleted WHERE applied = 0`)
+	if err != nil {
+		return err
+	}
+	type tomb struct {
+		uuid, typ string
+		wire      int
+	}
+	var pending []tomb
+	uuids := map[string]bool{}
+	types := map[string]bool{} // "" means some tombstone has no type: every partition
+	for rows.Next() {
+		var t tomb
+		if err := rows.Scan(&t.uuid, &t.wire, &t.typ); err != nil {
+			rows.Close()
+			return err
+		}
+		pending = append(pending, t)
+		uuids[t.uuid] = true
+		types[t.typ] = true
+	}
+	rows.Close()
+	if len(pending) == 0 {
+		return nil
+	}
+	rewritten := 0
+	for _, dataset := range datasets {
+		parts, err := s.partitionFiles(dataset)
+		if err != nil {
+			return err
+		}
+		column := "sample_uuid"
+		if dataset == "samples" || dataset == "records" {
+			column = "uuid"
+		}
+		for dir, files := range parts {
+			typ := unescapePart(strings.TrimPrefix(filepath.Base(filepath.Dir(dir)), "type="))
+			// A chunk's records partition is its kind, not its sample's type.
+			if dataset != "records" && !types[""] && !types[typ] {
+				continue
+			}
+			for _, path := range files {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				hit, err := columnHas(path, column, uuids)
+				if err != nil {
+					return err
+				}
+				if !hit {
+					continue
+				}
+				drop, err := s.dropSet(dataset, typ)
+				if err != nil {
+					return err
+				}
+				switch dataset {
+				case "samples", "records":
+					err = rewriteWithout(s, path, func(r *Row) bool { return r.UUID != nil && drop.has(*r.UUID, int(r.Wire)) })
+				case "route_points":
+					err = rewriteWithout(s, path, func(r *RoutePoint) bool { return drop.has(r.SampleUUID, 2) })
+				case "heartbeats":
+					err = rewriteWithout(s, path, func(r *Heartbeat) bool { return drop.has(r.SampleUUID, 2) })
+				case "ecg_voltages":
+					err = rewriteWithout(s, path, func(r *Voltage) bool { return drop.has(r.SampleUUID, 2) })
+				case "quantity_series":
+					err = rewriteWithout(s, path, func(r *QuantityPoint) bool { return drop.has(r.SampleUUID, 2) })
+				}
+				if err != nil {
+					return fmt.Errorf("apply deletions to %s: %w", s.relPath(path), err)
+				}
+				rewritten++
+			}
+		}
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, t := range pending {
+		if _, err := tx.Exec(`UPDATE deleted SET applied = 1 WHERE uuid = ? AND wire = ?`, t.uuid, t.wire); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	log.Printf("archive: applied %d deletions (%d files rewritten)", len(pending), rewritten)
+	return nil
+}
+
+// columnHas reports whether a string column of a file holds one of the values, reading
+// that column only, a page at a time.
+func columnHas(path, column string, values map[string]bool) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	pf, err := parquet.OpenFile(f, st.Size(), parquet.SkipBloomFilters(true), parquet.SkipPageIndex(true))
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", path, err)
+	}
+	leaf, ok := pf.Schema().Lookup(column)
+	if !ok {
+		return false, nil
+	}
+	buf := make([]parquet.Value, 1024)
+	for _, rg := range pf.RowGroups() {
+		pages := rg.ColumnChunks()[leaf.ColumnIndex].Pages()
+		for {
+			p, err := pages.ReadPage()
+			if errors.Is(err, io.EOF) {
+				break
+			} else if err != nil {
+				pages.Close()
+				return false, fmt.Errorf("%s: %w", path, err)
+			}
+			vr := p.Values()
+			for {
+				n, err := vr.ReadValues(buf)
+				for _, v := range buf[:n] {
+					if !v.IsNull() && values[string(v.ByteArray())] {
+						parquet.Release(p)
+						pages.Close()
+						return true, nil
+					}
+				}
+				if errors.Is(err, io.EOF) {
+					break
+				} else if err != nil {
+					parquet.Release(p)
+					pages.Close()
+					return false, fmt.Errorf("%s: %w", path, err)
+				}
+			}
+			parquet.Release(p)
+		}
+		pages.Close()
+	}
+	return false, nil
 }
 
 // fileSeq is the flush sequence number in a file name: f123.parquet, c123.parquet, c123-2.parquet.

@@ -160,8 +160,9 @@ type Deletion struct {
 	Type string `json:"type,omitempty"`
 }
 
-// typeRE is what a HealthKit type identifier looks like; types name directories in the archive.
-var typeRE = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
+// typeRE is what a HealthKit type identifier looks like; sample types name directories in
+// the archive, so nothing else is accepted.
+var typeRE = regexp.MustCompile(`^HK[A-Za-z0-9]{1,120}$`)
 
 var uuidRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
@@ -207,6 +208,9 @@ func parseDeletion(raw json.RawMessage) (*Deletion, error) {
 	var err error
 	if d.UUID, err = normalizeUUID(d.UUID); err != nil {
 		return nil, err
+	}
+	if !typeRE.MatchString(d.Type) {
+		d.Type = "" // optional, and only a hint of where the sample is: not a reason to reject
 	}
 	return &d, nil
 }

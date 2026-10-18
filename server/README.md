@@ -28,6 +28,7 @@ with dashes as underscores (`-archive-dir` is `HKR_ARCHIVE_DIR`). Flags win.
 | `-max-body-bytes` | `33554432` | largest accepted request |
 | `-flush-interval` | `1h` | how often staged records are written to Parquet |
 | `-compact-at` | `03:30` | local time of the nightly compaction |
+| `-group-read` | off | make the archive readable by the service's group (directories 0750, files 0640), for a backup job or a query tool; by default only the service's user can read it (0700, 0600), set at every start |
 
 The Go runtime's soft memory limit defaults to 128 MiB (`GOMEMLIMIT` overrides it): the
 server holds a batch and a Parquet row group at a time, whatever the archive's size.
@@ -117,8 +118,10 @@ Header `Authorization: Bearer <token>`. Body:
 }
 ```
 
-Required per sample: `uuid`, `type`, `start`, `end` (RFC 3339). Everything else is
-optional, and unknown fields are archived as sent, so newer clients need no server change.
+Required per sample: `uuid`, `type` (a HealthKit identifier, `HK[A-Za-z0-9]{1,120}`: it names
+a directory of the archive), `start`, `end` (RFC 3339). Everything else is optional, and
+unknown fields are archived as sent, so newer clients need no server change. A batch may
+touch at most 2000 (type, month) partitions.
 
 That is wire format 1, which app 0.1 sends. **Version 2** (app 0.2) adds `"version": 2` and
 a `records` array, and sends every HealthKit kind:
@@ -201,7 +204,8 @@ Erases, permanently, everything the caller uploaded: with a device token, that d
 records; with the server token, what was uploaded with the server token, or with
 `?device=<id>` what that device uploaded (also after it was revoked). `200`
 `{"erased": 12571973, "device": "3f9a1c2e"}`. The app's **Erase Server Data and Start Over**
-calls it, then uploads its history again from scratch. See [Erasing](#erasing).
+calls it, then uploads its history again from scratch. Numbers already forwarded to the
+metrics database are not erased. See [Erasing](#erasing).
 
 ### `GET /healthz`
 
@@ -275,7 +279,9 @@ sample a chunk belongs to. The point datasets have one row per point: `sample_uu
 (quantity series). A series chunk is also kept whole in `records` (type `series`).
 
 **Deletions.** HealthKit tombstones go to the `deleted` table (and `deleted.parquet`, with
-`wire` 0); v1 copies superseded by v2 are listed there with `wire` 1. The next nightly
+`wire` 0); a device's tombstones apply to what that device uploaded (each phone of an
+iCloud-synced household sends its own). v1 copies superseded by v2 are listed there with
+`wire` 1. The next nightly
 compaction removes their rows from the Parquet files, with their series points: merged
 partitions drop them on the way, and in the others only the UUID column of the files that
 can hold them (their type's months) is read, and a file is rewritten only if it does. Until
@@ -332,8 +338,10 @@ holding only that uploader's rows are removed, others are rewritten without them
 renamed over the original), its staged rows, tombstones and de-duplication entries are
 deleted (SQLite overwrites deleted content, `secure_delete`), and the SQLite log is truncated.
 It is journaled like flush and compaction: an erase a crash interrupts is finished on the next
-start, before uploads are accepted. Uploads wait while it runs. Copies outside the archive
-directory (backups, filesystem snapshots) are yours to handle.
+start, before uploads are accepted. Uploads wait while it runs. Not erased: numbers already
+forwarded to the metrics database (`-forward-url`; they age out with its retention), and
+copies outside the archive directory (backups, filesystem snapshots). The token keeps working,
+so the app can upload its history again at once; revoke the device to stop it.
 
 ### Commands
 

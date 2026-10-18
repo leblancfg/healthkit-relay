@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -249,12 +250,16 @@ func writeParquetKeep[T any](s *Store, path string, next func() (T, error)) (int
 // writeParquetHook is writeParquet with options: keepEmpty writes a file even without rows;
 // beforeRename, if set, runs once the temp file is complete and fsynced.
 func writeParquetHook[T any](s *Store, path string, keepEmpty bool, beforeRename func() error, next func() (T, error)) (int64, error) {
-	if err := mkdirAllSync(filepath.Dir(path)); err != nil {
+	if err := mkdirAllSync(filepath.Dir(path), s.dirMode); err != nil {
 		return 0, err
 	}
 	tmp := path + tmpSuffix
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o640)
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, s.fileMode)
 	if err != nil {
+		return 0, err
+	}
+	if err := f.Chmod(s.fileMode); err != nil { // whatever the umask
+		f.Close()
 		return 0, err
 	}
 	defer os.Remove(tmp) // a no-op once renamed
@@ -435,17 +440,20 @@ func removeTemps(root string) error {
 
 // mkdirAllSync creates dir and its parents, fsyncing each new directory's parent so the
 // entry survives a crash.
-func mkdirAllSync(dir string) error {
+func mkdirAllSync(dir string, mode os.FileMode) error {
 	if _, err := os.Stat(dir); err == nil {
 		return nil
 	}
 	parent := filepath.Dir(dir)
 	if parent != dir {
-		if err := mkdirAllSync(parent); err != nil {
+		if err := mkdirAllSync(parent, mode); err != nil {
 			return err
 		}
 	}
-	if err := os.Mkdir(dir, 0o750); err != nil && !errors.Is(err, fs.ErrExist) {
+	if err := os.Mkdir(dir, mode); err != nil && !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	if err := os.Chmod(dir, mode); err != nil { // whatever the umask
 		return err
 	}
 	return syncDir(parent)
@@ -574,7 +582,7 @@ func str(m map[string]json.RawMessage, k string) string {
 
 // pointTime is the absolute time of a point: start (ns) plus t seconds, if both are known.
 func pointTime(parentStart *int64, t float64) *int64 {
-	if parentStart == nil {
+	if parentStart == nil || math.IsNaN(t) || math.Abs(t) > 1e8 { // a series lasts minutes
 		return nil
 	}
 	return ptr((*parentStart + int64(t*1e9)) / 1000)

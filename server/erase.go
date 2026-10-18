@@ -93,7 +93,11 @@ func (s *Store) erase(ctx context.Context, uploader string) (int64, error) {
 	if err := s.exportDeleted(); err != nil {
 		return erased, err
 	}
-	// Deleted pages are zeroed in the database file; the log may still hold copies.
+	// Deleted pages are zeroed (secure_delete); VACUUM gives the space back, and the log,
+	// which may still hold copies, is checkpointed and truncated.
+	if _, err := s.db.Exec(`VACUUM`); err != nil {
+		return erased, err
+	}
 	if _, err := s.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
 		return erased, err
 	}

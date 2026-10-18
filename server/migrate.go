@@ -93,7 +93,7 @@ func runMigrate(args []string, out io.Writer) error {
 			*uploader = list[0].ID
 		}
 	}
-	store, err := OpenStore(cfg.archiveDir)
+	store, err := OpenStoreWith(cfg.archiveDir, cfg.storeOptions())
 	if err != nil {
 		return err
 	}

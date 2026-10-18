@@ -560,8 +560,13 @@ func TestSchemaUpgradeFrom050(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`ALTER TABLE deleted DROP COLUMN applied`); err != nil {
-		t.Fatal(err)
+	// The 0.5.0 table: no applied column, tombstones keyed by (uuid, wire).
+	for _, q := range []string{`DROP TABLE deleted`, `CREATE TABLE deleted (uuid TEXT NOT NULL, wire INTEGER NOT NULL, type TEXT,
+		reason TEXT NOT NULL, uploader TEXT NOT NULL, received_at INTEGER NOT NULL, json TEXT, PRIMARY KEY (uuid, wire)) WITHOUT ROWID`,
+		`INSERT INTO deleted VALUES ('U', 0, NULL, 'deleted', 'dev', 1, '{}')`} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
 	}
 	s.Close()
 	s, err = OpenStore(dir)
@@ -569,7 +574,85 @@ func TestSchemaUpgradeFrom050(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if _, err := s.db.Exec(`UPDATE deleted SET applied = 1`); err != nil {
-		t.Fatalf("applied column: %v", err)
+	// Same tombstone from another device: a row of its own now.
+	if _, err := s.db.Exec(`INSERT INTO deleted (uuid, wire, reason, uploader, received_at) VALUES ('U', 0, 'deleted', 'other', 2)`); err != nil {
+		t.Fatalf("upgraded key: %v", err)
+	}
+	var n, applied int
+	s.db.QueryRow(`SELECT count(*), sum(applied) FROM deleted`).Scan(&n, &applied)
+	if n != 2 || applied != 0 {
+		t.Fatalf("after upgrade: %d rows, %d applied", n, applied)
+	}
+}
+
+// A device's tombstones remove what that device uploaded, not another device's samples.
+func TestTombstonesApplyToTheirUploader(t *testing.T) {
+	dir := t.TempDir()
+	ts, _ := newTestServer(t, dir)
+	ctx := context.Background()
+	a, b := pairDevice(t, ts.URL), pairDevice(t, ts.URL)
+	mustPost(t, ts.URL, a.Token, `{"version":2,"samples":[`+hrSample+`],"records":[]}`)
+	tomb := `{"version":2,"samples":[],"records":[],"deletions":[{"uuid":"1b4e28ba-2fa1-11d2-883f-0016d3cca427"}]}`
+	mustPost(t, ts.URL, b.Token, tomb)
+	ts.store.Flush(ctx, false)
+	ts.store.Compact(ctx)
+	if got := rowCount(t, dir)["samples/HKQuantityTypeIdentifierHeartRate"]; got != 1 {
+		t.Fatalf("another device's tombstone removed the sample: %d rows", got)
+	}
+	mustPost(t, ts.URL, a.Token, tomb)
+	ts.store.Flush(ctx, false)
+	ts.store.Compact(ctx)
+	if got := rowCount(t, dir)["samples/HKQuantityTypeIdentifierHeartRate"]; got != 0 {
+		t.Fatalf("its own device's tombstone kept the sample: %d rows", got)
+	}
+}
+
+func TestArchiveModes(t *testing.T) {
+	dir := t.TempDir()
+	check := func(dirMode, fileMode os.FileMode) {
+		t.Helper()
+		filepath.Walk(dir, func(p string, fi os.FileInfo, err error) error {
+			if err != nil || p == dir || filepath.Base(p) == "devices.json" {
+				return err
+			}
+			want := fileMode
+			if fi.IsDir() {
+				want = dirMode
+			}
+			if fi.Mode().Perm() != want {
+				t.Errorf("%s: %v, want %v", p, fi.Mode().Perm(), want)
+			}
+			return nil
+		})
+	}
+	ts, _ := newTestServer(t, dir)
+	mustPost(t, ts.URL, testToken, `{"version":2,"samples":[`+hrSample+`],"records":[]}`)
+	ts.store.Flush(context.Background(), false)
+	check(0o700, 0o600)
+	ts.Close()
+	s, err := OpenStoreWith(dir, StoreOptions{GroupRead: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(0o750, 0o640)
+	s.Close()
+}
+
+func TestBatchPartitionCap(t *testing.T) {
+	ts, _ := newTestServer(t, t.TempDir())
+	// One sample a month for 2001 months.
+	var b strings.Builder
+	b.WriteString(`{"version":2,"records":[],"samples":[`)
+	start := time.Date(1850, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i <= MaxBatchPartitions; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		at := start.AddDate(0, i, 0).Format(time.RFC3339)
+		b.WriteString(`{"uuid":"` + uuidN(start, i) + `","type":"HKQuantityTypeIdentifierStepCount","kind":"quantity","start":"` + at + `","end":"` + at + `","value":1}`)
+	}
+	b.WriteString(`]}`)
+	if resp, _ := post(t, ts.URL, testToken, b.String()); resp.StatusCode != 400 {
+		t.Fatalf("status %d, want 400", resp.StatusCode)
 	}
 }

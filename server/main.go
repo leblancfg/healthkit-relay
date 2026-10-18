@@ -46,7 +46,10 @@ func main() {
 // config holds the flags the server and its subcommands share.
 type config struct {
 	listen, archiveDir, tokenFile, publicURL, setupFrom string
+	groupRead                                           bool
 }
+
+func (c *config) storeOptions() StoreOptions { return StoreOptions{GroupRead: c.groupRead} }
 
 func (c *config) register(fs *flag.FlagSet) {
 	fs.StringVar(&c.listen, "listen", "127.0.0.1:8080", "address to listen on")
@@ -54,6 +57,7 @@ func (c *config) register(fs *flag.FlagSet) {
 	fs.StringVar(&c.tokenFile, "token-file", "", "file holding the server token: admin credential, also accepted for uploads (required)")
 	fs.StringVar(&c.publicURL, "public-url", "", "URL phones use to reach this server, put in setup links, e.g. https://health.example.com (default: the setup page offers the addresses it finds)")
 	fs.StringVar(&c.setupFrom, "setup-from", "private", "who may open /setup and pair: private (loopback, LAN, Tailscale), any, or off")
+	fs.BoolVar(&c.groupRead, "group-read", false, "make the archive readable by the service's group (directories 0750, files 0640) for backups or queries; default: owner only (0700, 0600)")
 }
 
 func run(args []string) error {
@@ -107,7 +111,7 @@ func run(args []string) error {
 	if *flushEvery < time.Minute {
 		return errors.New("-flush-interval must be at least a minute")
 	}
-	archive, err := OpenStore(*archiveDir)
+	archive, err := OpenStoreWith(*archiveDir, cfg.storeOptions())
 	if err != nil {
 		return fmt.Errorf("open archive: %w", err)
 	}
@@ -176,7 +180,7 @@ func runMaintenance(name string, args []string, out io.Writer) error {
 	if cfg.archiveDir == "" {
 		return errors.New("-archive-dir is required")
 	}
-	s, err := OpenStore(cfg.archiveDir)
+	s, err := OpenStoreWith(cfg.archiveDir, cfg.storeOptions())
 	if err != nil {
 		return err
 	}

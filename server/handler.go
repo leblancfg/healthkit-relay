@@ -33,6 +33,9 @@ type Server struct {
 	forwardErrors int64
 }
 
+// MaxBatchPartitions bounds the archive partitions one batch may touch.
+const MaxBatchPartitions = 2000
+
 // Response is the body of a successful POST /v1/samples.
 type Response struct {
 	Received   int `json:"received"`
@@ -128,6 +131,18 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		items = append(items, deletionItem(d, raw))
+	}
+
+	// Types and months name directories: a batch spanning more than this is not a phone's.
+	parts := map[string]bool{}
+	for i := range items {
+		if it := &items[i]; it.Op != "delete" {
+			parts[it.Op+"/"+it.Type+"/"+month(it.Start)] = true
+		}
+	}
+	if len(parts) > MaxBatchPartitions {
+		s.badRequest(w, fmt.Sprintf("batch spans %d (type, month) pairs, more than %d", len(parts), MaxBatchPartitions))
+		return
 	}
 
 	uploader := ""

@@ -3,6 +3,7 @@ module github.com/leblancfg/healthkit-relay/server
 go 1.26.0
 
 require (
+	github.com/klauspost/compress v1.17.9
 	github.com/parquet-go/parquet-go v0.32.0
 	modernc.org/sqlite v1.60.1
 )
@@ -11,7 +12,6 @@ require (
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/parquet-go/bitpack v1.0.0 // indirect

@@ -78,20 +78,20 @@ func (s *Store) compact(ctx context.Context) (int, error) {
 // a type) and rewrites the files that do. Each tombstone is then marked applied, so later
 // nights skip it. Rewrites are atomic renames; a crash before the mark only means re-checking.
 func (s *Store) applyDeletions(ctx context.Context) error {
-	rows, err := s.db.Query(`SELECT uuid, wire, coalesce(type, '') FROM deleted WHERE applied = 0`)
+	rows, err := s.db.Query(`SELECT uuid, wire, uploader, coalesce(type, '') FROM deleted WHERE applied = 0`)
 	if err != nil {
 		return err
 	}
 	type tomb struct {
-		uuid, typ string
-		wire      int
+		uuid, uploader, typ string
+		wire                int
 	}
 	var pending []tomb
 	uuids := map[string]bool{}
 	types := map[string]bool{} // "" means some tombstone has no type: every partition
 	for rows.Next() {
 		var t tomb
-		if err := rows.Scan(&t.uuid, &t.wire, &t.typ); err != nil {
+		if err := rows.Scan(&t.uuid, &t.wire, &t.uploader, &t.typ); err != nil {
 			rows.Close()
 			return err
 		}
@@ -136,15 +136,15 @@ func (s *Store) applyDeletions(ctx context.Context) error {
 				}
 				switch dataset {
 				case "samples", "records":
-					err = rewriteWithout(s, path, func(r *Row) bool { return r.UUID != nil && drop.has(*r.UUID, int(r.Wire)) })
+					err = rewriteWithout(s, path, func(r *Row) bool { return r.UUID != nil && drop.has(*r.UUID, r.Uploader, int(r.Wire)) })
 				case "route_points":
-					err = rewriteWithout(s, path, func(r *RoutePoint) bool { return drop.has(r.SampleUUID, 2) })
+					err = rewriteWithout(s, path, func(r *RoutePoint) bool { return drop.has(r.SampleUUID, r.Uploader, 2) })
 				case "heartbeats":
-					err = rewriteWithout(s, path, func(r *Heartbeat) bool { return drop.has(r.SampleUUID, 2) })
+					err = rewriteWithout(s, path, func(r *Heartbeat) bool { return drop.has(r.SampleUUID, r.Uploader, 2) })
 				case "ecg_voltages":
-					err = rewriteWithout(s, path, func(r *Voltage) bool { return drop.has(r.SampleUUID, 2) })
+					err = rewriteWithout(s, path, func(r *Voltage) bool { return drop.has(r.SampleUUID, r.Uploader, 2) })
 				case "quantity_series":
-					err = rewriteWithout(s, path, func(r *QuantityPoint) bool { return drop.has(r.SampleUUID, 2) })
+					err = rewriteWithout(s, path, func(r *QuantityPoint) bool { return drop.has(r.SampleUUID, r.Uploader, 2) })
 				}
 				if err != nil {
 					return fmt.Errorf("apply deletions to %s: %w", s.relPath(path), err)
@@ -159,7 +159,7 @@ func (s *Store) applyDeletions(ctx context.Context) error {
 	}
 	defer tx.Rollback()
 	for _, t := range pending {
-		if _, err := tx.Exec(`UPDATE deleted SET applied = 1 WHERE uuid = ? AND wire = ?`, t.uuid, t.wire); err != nil {
+		if _, err := tx.Exec(`UPDATE deleted SET applied = 1 WHERE uuid = ? AND wire = ? AND uploader = ?`, t.uuid, t.wire, t.uploader); err != nil {
 			return err
 		}
 	}
@@ -268,16 +268,16 @@ func (s *Store) compactPartition(dataset, dir string, inputs []string) error {
 	switch dataset {
 	case "samples", "records":
 		err = mergeFiles(s, output, inputs, journal, func(r *Row) bool {
-			return r.UUID != nil && drop.has(*r.UUID, int(r.Wire))
+			return r.UUID != nil && drop.has(*r.UUID, r.Uploader, int(r.Wire))
 		})
 	case "route_points":
-		err = mergeFiles(s, output, inputs, journal, func(r *RoutePoint) bool { return drop.has(r.SampleUUID, 2) })
+		err = mergeFiles(s, output, inputs, journal, func(r *RoutePoint) bool { return drop.has(r.SampleUUID, r.Uploader, 2) })
 	case "heartbeats":
-		err = mergeFiles(s, output, inputs, journal, func(r *Heartbeat) bool { return drop.has(r.SampleUUID, 2) })
+		err = mergeFiles(s, output, inputs, journal, func(r *Heartbeat) bool { return drop.has(r.SampleUUID, r.Uploader, 2) })
 	case "ecg_voltages":
-		err = mergeFiles(s, output, inputs, journal, func(r *Voltage) bool { return drop.has(r.SampleUUID, 2) })
+		err = mergeFiles(s, output, inputs, journal, func(r *Voltage) bool { return drop.has(r.SampleUUID, r.Uploader, 2) })
 	case "quantity_series":
-		err = mergeFiles(s, output, inputs, journal, func(r *QuantityPoint) bool { return drop.has(r.SampleUUID, 2) })
+		err = mergeFiles(s, output, inputs, journal, func(r *QuantityPoint) bool { return drop.has(r.SampleUUID, r.Uploader, 2) })
 	default:
 		return fmt.Errorf("unknown dataset %q", dataset)
 	}
@@ -365,13 +365,13 @@ func (s *Store) recoverCompactions() error {
 	return nil
 }
 
-// dropSet holds the deleted UUIDs that apply to one partition: bit 0 set means every copy,
-// bit 1 the v1 copy only.
+// dropSet holds the tombstones that apply to one partition: a HealthKit deletion removes the
+// sample the same uploader sent (keyed uuid and uploader); a v2 copy supersedes the v1 copy
+// whoever sent it (keyed uuid).
 type dropSet map[string]uint8
 
-func (d dropSet) has(uuid string, wire int) bool {
-	m := d[uuid]
-	return m&1 != 0 || (wire == 1 && m&2 != 0)
+func (d dropSet) has(uuid, uploader string, wire int) bool {
+	return d[uuid+"\x00"+uploader]&1 != 0 || (wire == 1 && d[uuid]&2 != 0)
 }
 
 // dropSet loads the tombstones that can apply to a partition: those of its type (or of no
@@ -379,14 +379,13 @@ func (d dropSet) has(uuid string, wire int) bool {
 // is its record kind, not its sample's type). Its size is that of the tombstones, not of the
 // archive.
 func (s *Store) dropSet(dataset, typ string) (dropSet, error) {
-	q, args := `SELECT uuid, wire FROM deleted WHERE type = ? OR type IS NULL`, []any{unescapePart(typ)}
+	q, args := `SELECT uuid, wire, uploader FROM deleted WHERE type = ? OR type IS NULL`, []any{unescapePart(typ)}
 	switch dataset {
 	case "records":
-		q, args = `SELECT uuid, wire FROM deleted WHERE wire = 0`, nil
+		q, args = `SELECT uuid, wire, uploader FROM deleted WHERE wire = 0`, nil
 	case "route_points", "heartbeats", "ecg_voltages", "quantity_series":
-		// A point's partition type is its sample's; tombstones of any type may name it when
-		// the app sent no type, so be inclusive.
-		q, args = `SELECT uuid, wire FROM deleted WHERE wire = 0 AND (type = ? OR type IS NULL)`, []any{unescapePart(typ)}
+		// A point's partition type is its sample's.
+		q, args = `SELECT uuid, wire, uploader FROM deleted WHERE wire = 0 AND (type = ? OR type IS NULL)`, []any{unescapePart(typ)}
 	}
 	rows, err := s.db.Query(q, args...)
 	if err != nil {
@@ -395,13 +394,13 @@ func (s *Store) dropSet(dataset, typ string) (dropSet, error) {
 	defer rows.Close()
 	d := dropSet{}
 	for rows.Next() {
-		var uuid string
+		var uuid, uploader string
 		var wire int
-		if err := rows.Scan(&uuid, &wire); err != nil {
+		if err := rows.Scan(&uuid, &wire, &uploader); err != nil {
 			return nil, err
 		}
 		if wire == 0 {
-			d[uuid] |= 1
+			d[uuid+"\x00"+uploader] |= 1
 		} else {
 			d[uuid] |= 2
 		}

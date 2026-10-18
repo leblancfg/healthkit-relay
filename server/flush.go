@@ -296,7 +296,7 @@ func quantityPoints(c chunk, uploader string, recv int64, _ *int64, out []Quanti
 // DuckDB alone can hide what was deleted but not compacted away yet. The file always exists,
 // empty if need be, so queries never fail on a missing file.
 func (s *Store) exportDeleted() error {
-	rows, err := s.db.Query(`SELECT uuid, wire, type, reason, uploader, received_at, json FROM deleted ORDER BY uuid, wire`)
+	rows, err := s.db.Query(`SELECT uuid, wire, type, reason, uploader, received_at, json FROM deleted ORDER BY uuid, wire, uploader`)
 	if err != nil {
 		return err
 	}

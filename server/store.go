@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,7 +95,17 @@ type Store struct {
 	count int64 // distinct records, see Len
 	stats maintStats
 
+	dirMode, fileMode os.FileMode // 0700 and 0600, or 0750 and 0640 with GroupRead
+
 	hook func(stage string) error // tests: fail (as a crash would stop) at a stage
+}
+
+// StoreOptions configure OpenStoreWith.
+type StoreOptions struct {
+	// GroupRead makes the archive readable by the service's group (directories 0750, files
+	// 0640), for a backup job or a query tool running as another user in that group. By
+	// default only the service's user can read it (0700, 0600).
+	GroupRead bool
 }
 
 // at lets tests stop maintenance at a given stage, as a crash would.
@@ -136,7 +148,8 @@ CREATE TABLE IF NOT EXISTS deleted (
 	received_at INTEGER NOT NULL,
 	json TEXT,
 	applied INTEGER NOT NULL DEFAULT 0, -- 1: its rows were removed from every Parquet file
-	PRIMARY KEY (uuid, wire)
+	-- A device's tombstones apply to what that device uploaded (superseded v1 copies: to all).
+	PRIMARY KEY (uuid, wire, uploader)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS parents (
 	uuid TEXT PRIMARY KEY,
@@ -153,11 +166,18 @@ CREATE TABLE IF NOT EXISTS pending_erase (uploader TEXT PRIMARY KEY) WITHOUT ROW
 
 // OpenStore opens (creating if needed) the archive in dir, finishes maintenance a crash
 // interrupted, and locks dir against a second process.
-func OpenStore(dir string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Join(dir, "parquet"), 0o750); err != nil {
+func OpenStore(dir string) (*Store, error) { return OpenStoreWith(dir, StoreOptions{}) }
+
+// OpenStoreWith is OpenStore with options.
+func OpenStoreWith(dir string, opt StoreOptions) (*Store, error) {
+	dirMode, fileMode := os.FileMode(0o700), os.FileMode(0o600)
+	if opt.GroupRead {
+		dirMode, fileMode = 0o750, 0o640
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "parquet"), dirMode); err != nil {
 		return nil, err
 	}
-	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, 0o640)
+	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, fileMode)
 	if err != nil {
 		return nil, err
 	}
@@ -165,10 +185,9 @@ func OpenStore(dir string) (*Store, error) {
 		lock.Close()
 		return nil, fmt.Errorf("%s is in use by another healthkit-relay process (stop the server first): %w", dir, err)
 	}
-	// SQLite gives its log files the database's mode: health data stays private to the
-	// service (and its group, for backups).
+	// SQLite gives its log files the database's mode.
 	dbPath := filepath.Join(dir, "staging.db")
-	if f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0o640); err == nil {
+	if f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, fileMode); err == nil {
 		f.Close()
 	}
 	// FULL: a commit is on disk before the batch is acknowledged. secure_delete: erased
@@ -183,7 +202,8 @@ func OpenStore(dir string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(4)
-	s := &Store{dir: dir, parquet: filepath.Join(dir, "parquet"), db: db, lock: lock, now: time.Now, RowGroupRows: 100_000}
+	s := &Store{dir: dir, parquet: filepath.Join(dir, "parquet"), db: db, lock: lock, now: time.Now, RowGroupRows: 100_000,
+		dirMode: dirMode, fileMode: fileMode}
 	if err := s.init(); err != nil {
 		s.Close()
 		return nil, err
@@ -205,6 +225,16 @@ func (s *Store) init() error {
 			return err
 		}
 	}
+	// Databases from 0.5.0 and 0.5.1: tombstones keyed by (uuid, wire) only.
+	var scoped int
+	if err := s.db.QueryRow(`SELECT pk FROM pragma_table_info('deleted') WHERE name = 'uploader'`).Scan(&scoped); err != nil {
+		return err
+	}
+	if scoped == 0 {
+		if err := s.rekeyDeleted(); err != nil {
+			return fmt.Errorf("staging.db: upgrade deleted: %w", err)
+		}
+	}
 	// Distinct records are counted as they are stored, so opening never scans the archive.
 	var n sql.NullInt64
 	if err := s.db.QueryRow(`SELECT value FROM meta WHERE key = 'records'`).Scan(&n); errors.Is(err, sql.ErrNoRows) {
@@ -220,7 +250,31 @@ func (s *Store) init() error {
 	if err := s.recover(); err != nil {
 		return fmt.Errorf("recover: %w", err)
 	}
-	return s.ensureSchemas()
+	if err := s.ensureSchemas(); err != nil {
+		return err
+	}
+	return s.chmodAll()
+}
+
+// chmodAll sets the modes of what is already in the archive directory (written by an
+// earlier version, or with another -group-read).
+func (s *Store) chmodAll() error {
+	return filepath.WalkDir(s.dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		mode := s.fileMode
+		if d.IsDir() {
+			mode = s.dirMode
+		} else if !d.Type().IsRegular() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil || info.Mode().Perm() == mode {
+			return err
+		}
+		return os.Chmod(path, mode)
+	})
 }
 
 // ensureSchemas gives every dataset a file with its schema and no rows
@@ -254,6 +308,27 @@ func (s *Store) ensureSchemas() error {
 		return s.exportDeleted()
 	}
 	return nil
+}
+
+func (s *Store) rekeyDeleted() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, q := range []string{
+		`CREATE TABLE deleted_new (uuid TEXT NOT NULL, wire INTEGER NOT NULL, type TEXT, reason TEXT NOT NULL,
+			uploader TEXT NOT NULL, received_at INTEGER NOT NULL, json TEXT, applied INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (uuid, wire, uploader)) WITHOUT ROWID`,
+		`INSERT INTO deleted_new SELECT uuid, wire, type, reason, uploader, received_at, json, applied FROM deleted`,
+		`DROP TABLE deleted`,
+		`ALTER TABLE deleted_new RENAME TO deleted`,
+	} {
+		if _, err := tx.Exec(q); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // LegacyFiles are the JSON Lines files of versions before 0.5 in the archive directory.
@@ -346,6 +421,20 @@ func (s *Store) Staged() int64 {
 
 func month(t time.Time) string { return t.UTC().Format("2006-01") }
 
+// unixNano is t in Unix nanoseconds, clamped to the years int64 nanoseconds can hold
+// (1678-2262): HealthKit dates can be anything a writing app chose.
+func unixNano(t time.Time) int64 {
+	switch {
+	case t.Before(minNanoTime):
+		return minNanoTime.UnixNano()
+	case t.After(maxNanoTime):
+		return maxNanoTime.UnixNano()
+	}
+	return t.UnixNano()
+}
+
+var minNanoTime, maxNanoTime = time.Unix(0, math.MinInt64+1), time.Unix(0, math.MaxInt64-1)
+
 // Ingest durably stores the items that are new, in one transaction, and tells what it did
 // with each. uploader is the paired device that sent them ("" for the server token).
 func (s *Store) Ingest(uploader string, items []Item) ([]Outcome, error) {
@@ -434,7 +523,7 @@ func (s *Store) Ingest(uploader string, items []Item) ([]Outcome, error) {
 			if it.Kind != "quantity" && it.Kind != "category" {
 				// Few samples have series (workouts, routes, heartbeats, ECGs...): remember when
 				// they start, for the chunks that arrive before or after them.
-				if _, err := insParent.Exec(it.UUID, it.Start.UnixNano(), it.Type, uploader); err != nil {
+				if _, err := insParent.Exec(it.UUID, unixNano(it.Start), it.Type, uploader); err != nil {
 					return nil, err
 				}
 			}

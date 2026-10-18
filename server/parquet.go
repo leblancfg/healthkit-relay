@@ -161,6 +161,31 @@ func escapePart(v string) string {
 
 const tmpSuffix = ".tmp"
 
+// Memory bounds of reading and writing Parquet, besides RowGroupRows: rows in flight in a
+// batch, and the size of a row group (as received; it is held compressed until written).
+const (
+	maxBatchBytes    = 4 << 20
+	maxRowGroupBytes = 16 << 20
+)
+
+// rowBytes estimates the memory a row takes.
+func rowBytes(row any) int64 {
+	if r, ok := row.(*Row); ok {
+		return int64(len(r.JSON)) + 256
+	}
+	return 128
+}
+
+// batchRows is how many rows to read or write at once: few for rows with a json column
+// (a series chunk can be a few MB), more for the small rows of the point datasets.
+func batchRows[T any]() int {
+	var zero T
+	if _, ok := any(&zero).(*Row); ok {
+		return 16
+	}
+	return 512
+}
+
 // pageZstd is the ZSTD codec with a window the size of a page. Each page is compressed on its
 // own, so a larger window (the library's default is 8 MB, with history buffers twice that per
 // encoder) only costs memory.
@@ -235,8 +260,24 @@ func writeParquetHook[T any](s *Store, path string, keepEmpty bool, beforeRename
 	defer os.Remove(tmp) // a no-op once renamed
 	defer f.Close()
 	w := parquet.NewGenericWriter[T](f, s.writerOptions()...)
-	buf := make([]T, 0, 256)
-	var n int64
+	// Rows are written in batches, and row groups closed, by count and by size: a series
+	// chunk carries up to a few MB of JSON, a heart-rate sample a few hundred bytes.
+	buf := make([]T, 0, batchRows[T]())
+	var n, bufBytes, groupBytes int64
+	write := func() error {
+		if _, err := w.Write(buf); err != nil {
+			return err
+		}
+		n += int64(len(buf))
+		groupBytes += bufBytes
+		clear(buf)
+		buf, bufBytes = buf[:0], 0
+		if groupBytes >= maxRowGroupBytes {
+			groupBytes = 0
+			return w.Flush()
+		}
+		return nil
+	}
 	for {
 		row, err := next()
 		if errors.Is(err, io.EOF) {
@@ -245,20 +286,17 @@ func writeParquetHook[T any](s *Store, path string, keepEmpty bool, beforeRename
 			return 0, err
 		}
 		buf = append(buf, row)
-		if len(buf) == cap(buf) {
-			if _, err := w.Write(buf); err != nil {
+		bufBytes += rowBytes(&row)
+		if len(buf) == cap(buf) || bufBytes >= maxBatchBytes {
+			if err := write(); err != nil {
 				return 0, err
 			}
-			n += int64(len(buf))
-			clear(buf)
-			buf = buf[:0]
 		}
 	}
 	if len(buf) > 0 {
-		if _, err := w.Write(buf); err != nil {
+		if err := write(); err != nil {
 			return 0, err
 		}
-		n += int64(len(buf))
 	}
 	if err := w.Close(); err != nil {
 		return 0, err
@@ -304,7 +342,7 @@ func readParquet[T any](path string, fn func(*T) error) error {
 	}
 	r := parquet.NewGenericReader[T](pf)
 	defer r.Close()
-	buf := make([]T, 256)
+	buf := make([]T, batchRows[T]())
 	for {
 		n, err := r.Read(buf)
 		for i := range buf[:n] {

@@ -344,7 +344,7 @@ func (it *rowIter[T]) open(path string) error {
 	}
 	it.f, it.r = f, parquet.NewGenericReader[T](pf)
 	if it.buf == nil {
-		it.buf = make([]T, 256)
+		it.buf = make([]T, batchRows[T]())
 	}
 	return nil
 }

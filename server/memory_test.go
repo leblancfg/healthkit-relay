@@ -9,15 +9,19 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-// peakHeap runs fn and returns the largest heap in use while it ran (sampled every 2 ms).
+// peakHeap runs fn and returns the largest heap in use while it ran (sampled every 2 ms),
+// with the garbage collector set to keep the heap close to what is live (GOGC=25).
 func peakHeap(fn func()) uint64 {
+	defer debug.SetGCPercent(debug.SetGCPercent(25))
 	runtime.GC()
 	var peak atomic.Uint64
 	stop := make(chan struct{})
@@ -162,5 +166,52 @@ func TestMemoryBounded(t *testing.T) {
 	small, big = flushPeak(large/8), flushPeak(large/2)
 	if big > limit || big > small*3/2+8<<20 {
 		t.Errorf("flush peak heap: %d MB for %d rows, %d MB for %d: not bounded", small>>20, large/8, big>>20, large/2)
+	}
+}
+
+// Series chunks are rows of up to a few MB (the JSON of a route or ECG chunk): batches and
+// row groups are bounded by size too, so a month of them merges in the same memory.
+func TestMemoryBoundedLargeRows(t *testing.T) {
+	if testing.Short() {
+		t.Skip("writes a few hundred MB")
+	}
+	peak := func(rows int) uint64 {
+		s, err := OpenStore(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+		r := rand.New(rand.NewPCG(5, 6))
+		dir := s.partitionDir("records", "series", "2026-01")
+		for f := 0; f < 4; f++ {
+			i := 0
+			if _, err := writeParquet(s, filepath.Join(dir, fmt.Sprintf("f%d.parquet", f+1)), func() (Row, error) {
+				if i == rows/4 {
+					return Row{}, io.EOF
+				}
+				i++
+				// ~1 MB: points of a route chunk, with random digits.
+				var b strings.Builder
+				b.WriteString(`{"kind":"series","points":[`)
+				for p := 0; p < 7000; p++ {
+					fmt.Fprintf(&b, `{"lat":%.7f,"lon":%.7f,"alt":%.2f,"speed":%.3f},`, r.Float64()*90, r.Float64()*180, r.Float64()*300, r.Float64()*5)
+				}
+				b.WriteString(`{}]}`)
+				return Row{Type: "series", Kind: "record", Uploader: "abcd1234", Wire: 2, JSON: b.String()}, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		p := peakHeap(func() {
+			if _, err := s.Compact(context.Background()); err != nil {
+				t.Error(err)
+			}
+		})
+		t.Logf("compaction of %d rows of ~1 MB (%d MB of Parquet): peak heap %d MB", rows, dirSize(s.parquet)>>20, p>>20)
+		return p
+	}
+	small, big := peak(100), peak(400)
+	if big > 96<<20 || big > small*3/2+8<<20 {
+		t.Errorf("peak heap: %d MB for 100 rows, %d MB for 400: not bounded", small>>20, big>>20)
 	}
 }

@@ -143,7 +143,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(eraseRequests.count, 1)
         let request = try XCTUnwrap(eraseRequests.first)
         XCTAssertEqual(request.httpMethod, "DELETE")
-        XCTAssertEqual(request.url?.absoluteString, "https://stub.test/v1/data")
+        XCTAssertEqual(request.url?.absoluteString, "https://stub.test/v1/data?confirm=erase")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer device-token-erase")
         XCTAssertEqual(request.timeoutInterval, 600)
         XCTAssertFalse(positionsKept, "sync positions not reset")

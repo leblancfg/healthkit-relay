@@ -78,9 +78,11 @@ struct ServerClient: Sendable {
     let base: URL
     var session: URLSession = .shared
 
-    private func request(_ method: String, _ path: String, token: String? = nil, body: [String: String]? = nil,
-                         timeout: TimeInterval = 20) async throws -> Data {
-        var req = URLRequest(url: base.appending(path: path), timeoutInterval: timeout)
+    private func request(_ method: String, _ path: String, query: [URLQueryItem] = [], token: String? = nil,
+                         body: [String: String]? = nil, timeout: TimeInterval = 20) async throws -> Data {
+        var url = base.appending(path: path)
+        if !query.isEmpty { url.append(queryItems: query) }
+        var req = URLRequest(url: url, timeoutInterval: timeout)
         req.httpMethod = method
         if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body {
@@ -150,7 +152,8 @@ struct ServerClient: Sendable {
     func erase(token: String) async throws -> Erased {
         let data: Data
         do {
-            data = try await request("DELETE", "v1/data", token: token, timeout: Self.eraseTimeout)
+            data = try await request("DELETE", "v1/data", query: [URLQueryItem(name: "confirm", value: "erase")],
+                                 token: token, timeout: Self.eraseTimeout)
         } catch ServerError.tooOld {
             throw ServerError.eraseUnsupported
         }

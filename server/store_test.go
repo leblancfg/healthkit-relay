@@ -395,8 +395,11 @@ func TestErase(t *testing.T) {
 	if resp, body := call(t, "DELETE", ts.URL+"/v1/data", testToken, nil); resp.StatusCode != 200 || !strings.Contains(string(body), `"erased":5`) {
 		t.Fatalf("admin erase: %d %s", resp.StatusCode, body)
 	}
-	if resp, body := call(t, "DELETE", ts.URL+"/v1/data?device="+b.Device.ID, testToken, nil); resp.StatusCode != 200 || !strings.Contains(string(body), `"erased":10`) {
+	if resp, body := call(t, "DELETE", ts.URL+"/v1/data?confirm=erase&device="+b.Device.ID, testToken, nil); resp.StatusCode != 200 || !strings.Contains(string(body), `"erased":10`) {
 		t.Fatalf("admin erase of a device: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := call(t, "DELETE", ts.URL+"/v1/data?confirm=yes", testToken, nil); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("erase with a wrong confirmation: %d %s", resp.StatusCode, body)
 	}
 	if resp, _ := call(t, "DELETE", ts.URL+"/v1/data", "", nil); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("erase without token: %d", resp.StatusCode)
@@ -654,5 +657,68 @@ func TestBatchPartitionCap(t *testing.T) {
 	b.WriteString(`]}`)
 	if resp, _ := post(t, ts.URL, testToken, b.String()); resp.StatusCode != 400 {
 		t.Fatalf("status %d, want 400", resp.StatusCode)
+	}
+}
+
+// The archive directory, and parquet/ in it, may be symlinks: systemd's DynamicUser makes
+// /var/lib/<name> a link to /var/lib/private/<name>, and parquet/ may live on another disk.
+func TestSymlinkedArchive(t *testing.T) {
+	for _, link := range []string{"archive", "parquet"} {
+		t.Run(link, func(t *testing.T) {
+			base := t.TempDir()
+			dir := filepath.Join(base, "archive")
+			switch link {
+			case "archive":
+				if err := os.Mkdir(filepath.Join(base, "private"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join("private"), dir); err != nil {
+					t.Fatal(err)
+				}
+			case "parquet":
+				if err := os.Mkdir(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(filepath.Join(base, "disk"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(base, "disk"), filepath.Join(dir, "parquet")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ctx := context.Background()
+			jan := time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC)
+			ts, _ := newTestServer(t, dir)
+			mustPost(t, ts.URL, testToken, batchOf(3, jan, "HKQuantityTypeIdentifierHeartRate"))
+			if _, err := ts.store.Flush(ctx, false); err != nil {
+				t.Fatal(err)
+			}
+			mustPost(t, ts.URL, testToken, batchOf(3, jan.Add(48*time.Hour), "HKQuantityTypeIdentifierHeartRate"))
+			if _, err := ts.store.Flush(ctx, false); err != nil {
+				t.Fatal(err)
+			}
+			if n, err := ts.store.Compact(ctx); err != nil || n != 1 {
+				t.Fatalf("compact: %d %v", n, err)
+			}
+			ts.Close()
+			ts.store.Close()
+
+			s, err := OpenStoreWith(dir, StoreOptions{GroupRead: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			counts, err := s.ParquetCounts()
+			if err != nil || counts["samples/HKQuantityTypeIdentifierHeartRate"] != 6 || s.Len() != 6 {
+				t.Fatalf("after reopen: %v %v, %d records", counts, err, s.Len())
+			}
+			hr, _ := filepath.Glob(filepath.Join(dir, "parquet", "samples", "type=HKQuantityTypeIdentifierHeartRate", "month=2026-01", "*.parquet"))
+			if len(hr) != 1 {
+				t.Fatalf("heart rate files: %v", hr)
+			}
+			if fi, err := os.Stat(hr[0]); err != nil || fi.Mode().Perm() != 0o640 {
+				t.Errorf("mode through the link: %v %v", fi.Mode(), err)
+			}
+		})
 	}
 }

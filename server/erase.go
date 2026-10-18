@@ -166,6 +166,16 @@ func (s *Server) eraseHandler(w http.ResponseWriter, r *http.Request) {
 		s.unauthorized(w)
 		return
 	}
+	// confirm=erase guards against an erase by mistake (a bare curl -X DELETE). Apps before
+	// 0.6 do not send it, so for now it is checked only when present.
+	switch r.URL.Query().Get("confirm") {
+	case "erase":
+	case "":
+		log.Printf("erase: request without confirm=erase (app before 0.6); a later version will require it")
+	default:
+		httpError(w, http.StatusBadRequest, "confirm must be \"erase\"; nothing was erased")
+		return
+	}
 	uploader := ""
 	switch {
 	case c.Device != nil:

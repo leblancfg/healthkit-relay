@@ -177,6 +177,17 @@ func OpenStoreWith(dir string, opt StoreOptions) (*Store, error) {
 	if err := os.MkdirAll(filepath.Join(dir, "parquet"), dirMode); err != nil {
 		return nil, err
 	}
+	// The archive directory, or parquet/ in it, may be a symlink (systemd's DynamicUser makes
+	// /var/lib/<name> one; parquet/ may live on another disk). Directory walks do not follow
+	// a symlinked root, so both are resolved once here.
+	dir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return nil, err
+	}
+	parquetDir, err := filepath.EvalSymlinks(filepath.Join(dir, "parquet"))
+	if err != nil {
+		return nil, err
+	}
 	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, fileMode)
 	if err != nil {
 		return nil, err
@@ -202,7 +213,7 @@ func OpenStoreWith(dir string, opt StoreOptions) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(4)
-	s := &Store{dir: dir, parquet: filepath.Join(dir, "parquet"), db: db, lock: lock, now: time.Now, RowGroupRows: 100_000,
+	s := &Store{dir: dir, parquet: parquetDir, db: db, lock: lock, now: time.Now, RowGroupRows: 100_000,
 		dirMode: dirMode, fileMode: fileMode}
 	if err := s.init(); err != nil {
 		s.Close()
@@ -259,7 +270,20 @@ func (s *Store) init() error {
 // chmodAll sets the modes of what is already in the archive directory (written by an
 // earlier version, or with another -group-read).
 func (s *Store) chmodAll() error {
-	return filepath.WalkDir(s.dir, func(path string, d fs.DirEntry, err error) error {
+	roots := []string{s.dir}
+	if r, err := filepath.Rel(s.dir, s.parquet); err != nil || strings.HasPrefix(r, "..") {
+		roots = append(roots, s.parquet) // parquet/ is a symlink out of the archive directory
+	}
+	for _, root := range roots {
+		if err := s.chmodTree(root); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) chmodTree(root string) error {
+	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

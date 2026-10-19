@@ -228,7 +228,7 @@ func TestSetupPageNeedsTokenOrCode(t *testing.T) {
 	w = setupRequest(t, s, "GET", "/setup", lan, h, nil)
 	body := w.Body.String()
 	if w.Code != 200 || !strings.Contains(body, "<svg") || !strings.Contains(body, `href="healthrelay://pair?code=`) ||
-		!strings.Contains(body, "Paired iPhones") || !strings.Contains(w.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+		!strings.Contains(body, "Paired devices") || !strings.Contains(w.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
 		t.Fatalf("signed in: %d\n%s", w.Code, body)
 	}
 	// The link points where the browser reached the server.
@@ -239,7 +239,7 @@ func TestSetupPageNeedsTokenOrCode(t *testing.T) {
 	// A code from `healthkit-relay pair` opens the page without the token, and only for it.
 	c, _ := s.mintCode("https://health.example.com")
 	w = setupRequest(t, s, "GET", "/setup?code="+c.Code, lan, nil, nil)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "code="+c.Code) || strings.Contains(w.Body.String(), "Paired iPhones") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "code="+c.Code) || strings.Contains(w.Body.String(), "Paired devices") {
 		t.Fatalf("code page: %d", w.Code)
 	}
 	if w := setupRequest(t, s, "GET", "/setup/status?code="+c.Code, lan, nil, nil); !strings.Contains(w.Body.String(), `"pending"`) {
@@ -249,7 +249,7 @@ func TestSetupPageNeedsTokenOrCode(t *testing.T) {
 	if w := setupRequest(t, s, "GET", "/setup/status?code="+c.Code, lan, nil, nil); !strings.Contains(w.Body.String(), `"paired"`) {
 		t.Fatalf("status after pairing: %s", w.Body)
 	}
-	if w := setupRequest(t, s, "GET", "/setup?code="+c.Code, lan, nil, nil); !strings.Contains(w.Body.String(), "Already connected") ||
+	if w := setupRequest(t, s, "GET", "/setup?code="+c.Code, lan, nil, nil); !strings.Contains(w.Body.String(), "Already paired") ||
 		strings.Contains(w.Body.String(), "healthrelay://") {
 		t.Fatalf("used code page: %s", w.Body)
 	}
@@ -381,7 +381,7 @@ func TestSetupPageAddressChoice(t *testing.T) {
 		return setupRequest(t, s, "GET", "http://127.0.0.1:8080/setup?code="+c.Code+query, "127.0.0.1:5", nil, nil).Body.String()
 	}
 	body := page("")
-	if !strings.Contains(body, "server=http%3a%2f%2f192.168.1.20%3a8080") || !strings.Contains(body, "Address in the code") ||
+	if !strings.Contains(body, "server=http%3a%2f%2f192.168.1.20%3a8080") || !strings.Contains(body, "Server address in the code") ||
 		strings.Contains(body, "127.0.0.1") {
 		t.Fatalf("default choice:\n%s", body)
 	}
@@ -396,12 +396,12 @@ func TestSetupPageAddressChoice(t *testing.T) {
 	// Nothing reachable: no code at all, and what to do.
 	fakeNet(s, "127.0.0.1:8080", []string{"192.168.1.20"}, "")
 	body = page("")
-	if strings.Contains(body, "healthrelay://") || !strings.Contains(body, "No address for your iPhone") {
+	if strings.Contains(body, "healthrelay://") || !strings.Contains(body, "Set the server address") {
 		t.Errorf("loopback only:\n%s", body)
 	}
 	// With -public-url, no choice is offered.
 	s.PublicURL = "https://health.example.com"
-	if body := page(""); strings.Contains(body, "Address in the code") || !strings.Contains(body, "health.example.com") {
+	if body := page(""); strings.Contains(body, "Server address in the code") || !strings.Contains(body, "health.example.com") {
 		t.Errorf("configured:\n%s", body)
 	}
 }
@@ -457,7 +457,7 @@ func TestSetupSessionCookieWorksThroughBrowser(t *testing.T) {
 	b, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	// Signed in: the page for the admin (here without a link: the test server is on loopback).
-	if resp.StatusCode != 200 || strings.Contains(string(b), `name="token"`) || !strings.Contains(string(b), "No address for your iPhone") {
+	if resp.StatusCode != 200 || strings.Contains(string(b), `name="token"`) || !strings.Contains(string(b), "Set the server address") {
 		t.Fatalf("after sign-in redirect: %d", resp.StatusCode)
 	}
 }

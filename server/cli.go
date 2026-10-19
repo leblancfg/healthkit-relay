@@ -20,9 +20,9 @@ func runCommand(name string, args []string, out, errOut io.Writer) error {
 	fs := flag.NewFlagSet("healthkit-relay "+name, flag.ContinueOnError)
 	var cfg config
 	cfg.register(fs)
-	valid := fs.Duration("valid", CodeTTL, "pair: how long the code works, at most 24h (e.g. 2h to send the link to a phone)")
+	valid := fs.Duration("valid", CodeTTL, "pair: how long the setup code works, at most 24h, e.g. 2h to send its link to a phone")
 	tokenName := fs.String("name", "", "token create: what the token is for, e.g. grafana (required)")
-	tokenScope := fs.String("scope", ScopeRead, "token create: read (the query API only) or upload (what a paired app may do)")
+	tokenScope := fs.String("scope", ScopeRead, "token create: read (reads through the query API) or upload (uploads, like a paired device's token)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -31,7 +31,7 @@ func runCommand(name string, args []string, out, errOut io.Writer) error {
 	}
 	dir := cfg.archiveDir
 	if dir == "" {
-		return errors.New("-archive-dir is required: the server's archive directory (HKR_ARCHIVE_DIR)")
+		return errors.New("-archive-dir is required: the folder where the server keeps your data, the same as the server's (or set HKR_ARCHIVE_DIR)")
 	}
 	if err := checkStateOwner(dir); err != nil {
 		return err
@@ -51,8 +51,8 @@ func runCommand(name string, args []string, out, errOut io.Writer) error {
 		s.Codes = codes
 		found := s.addresses(nil)
 		if len(found) == 0 {
-			return errors.New("the server knows no address a phone could reach (it listens on loopback only and " +
-				"found no Tailscale serve name): set -public-url (HKR_PUBLIC_URL) to the address your iPhone uses")
+			return errors.New("found no server address an iPhone can reach: set -public-url (HKR_PUBLIC_URL) to the address " +
+				"your iPhone uses, e.g. http://192.168.1.10:8080, or have the server listen on the network with -listen 0.0.0.0:8080")
 		}
 		c, err := s.mintCodeFor(found[0].URL, *valid)
 		if err != nil {
@@ -69,27 +69,27 @@ func runCommand(name string, args []string, out, errOut io.Writer) error {
 		if time.Until(c.ExpiresAt) > 20*time.Hour {
 			until = c.ExpiresAt.Local().Format("Jan 2 15:04")
 		}
-		fmt.Fprintf(out, "Scan with the iPhone's Camera to set up Health Relay (works once, until %s):\n\n", until)
+		fmt.Fprintf(out, "Scan with the iPhone's Camera, then tap Open in Health Relay. This setup code works once, until %s:\n\n", until)
 		fmt.Fprint(out, q.Terminal())
-		fmt.Fprintf(out, "\nOr open this page on the iPhone or a computer:\n  %s\n", c.SetupURL)
+		fmt.Fprintf(out, "\nOr open this link on the iPhone (on a computer, it shows this QR code):\n  %s\n", c.SetupURL)
 		if len(c.Addresses) > 0 {
-			fmt.Fprintf(out, "\nThe code points to %s (%s), the first address found. Others:\n", c.Addresses[0].URL, c.Addresses[0].Source)
-			for _, a := range c.Addresses[1:] {
-				fmt.Fprintf(out, "  %s (%s)\n", a.URL, a.Source)
+			fmt.Fprintf(out, "\nThe setup code holds the server address %s (%s), the first one found.\n", c.Addresses[0].URL, c.Addresses[0].Source)
+			if len(c.Addresses) > 1 {
+				fmt.Fprintln(out, "Other addresses found:")
+				for _, a := range c.Addresses[1:] {
+					fmt.Fprintf(out, "  %s (%s)\n", a.URL, a.Source)
+				}
 			}
-			if len(c.Addresses) == 1 {
-				fmt.Fprintln(out, "  none")
-			}
-			fmt.Fprintln(out, "Set -public-url (HKR_PUBLIC_URL) to choose.")
+			fmt.Fprintln(out, "To choose the address, set -public-url (HKR_PUBLIC_URL).")
 		}
 	case "devices":
 		list := devices.List()
 		if len(list) == 0 {
-			fmt.Fprintln(out, "No paired devices. Pair one with: healthkit-relay pair")
+			fmt.Fprintln(out, "No paired devices or read tokens yet. To pair an iPhone, run: healthkit-relay pair")
 			return nil
 		}
 		tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "ID\tNAME\tMODEL\tSCOPE\tPAIRED\tLAST SEEN")
+		fmt.Fprintln(tw, "ID\tNAME\tMODEL\tSCOPE\tCREATED\tLAST SEEN")
 		for _, d := range list {
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", d.ID, d.Name, d.Model, d.scope(), d.CreatedAt.Local().Format("2006-01-02 15:04"), ago(d.LastSeen))
 		}
@@ -104,17 +104,17 @@ func runCommand(name string, args []string, out, errOut io.Writer) error {
 		}
 		// The token alone on stdout, so that it can go straight to a file.
 		fmt.Fprintln(out, t.Token)
-		fmt.Fprintf(errOut, "Created %s token %s (%s). It is shown only this once; revoke it with: healthkit-relay revoke %s\n",
-			t.Device.Scope, t.Device.ID, t.Device.Name, t.Device.ID)
+		fmt.Fprintf(errOut, "Created %s token %s (%s). It is shown only this once: save it in a password manager. "+
+			"To revoke it: healthkit-relay revoke %s\n", t.Device.Scope, t.Device.ID, t.Device.Name, t.Device.ID)
 	case "revoke":
 		if fs.NArg() != 1 {
-			return errors.New("usage: healthkit-relay revoke <device id> (see healthkit-relay devices)")
+			return errors.New("usage: healthkit-relay revoke <id>, with an ID from healthkit-relay devices")
 		}
 		ok, err := devices.Revoke(fs.Arg(0))
 		if err != nil {
 			return err
 		} else if !ok {
-			return fmt.Errorf("no device or token %s (see healthkit-relay devices)", fs.Arg(0))
+			return fmt.Errorf("no paired device or read token has the ID %s: healthkit-relay devices lists them", fs.Arg(0))
 		}
 		fmt.Fprintf(out, "Revoked %s: its token no longer works.\n", fs.Arg(0))
 	case "admin reset":
@@ -125,9 +125,9 @@ func runCommand(name string, args []string, out, errOut io.Writer) error {
 		if err != nil {
 			return err
 		}
-		printAdminToken(out, token, setupURL(cfg.publicURL, cfg.listen), "New admin token: the previous one no longer works.")
+		printAdminToken(out, token, setupURL(cfg.publicURL, cfg.listen), "Made a new admin token: the previous one no longer works.")
 		if cfg.tokenFile != "" {
-			fmt.Fprintf(errOut, "-token-file %s is now ignored: delete it and remove -token-file (HKR_TOKEN_FILE).\n", cfg.tokenFile)
+			fmt.Fprintf(errOut, "The server now ignores -token-file %s: delete that file and remove -token-file (HKR_TOKEN_FILE).\n", cfg.tokenFile)
 		}
 	}
 	return nil

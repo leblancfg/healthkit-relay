@@ -85,7 +85,7 @@ func (s *Server) queryError(w http.ResponseWriter, err error) {
 	case errors.Is(err, errQueryBusy):
 		s.count("query_busy")
 		w.Header().Set("Retry-After", "5")
-		httpError(w, http.StatusServiceUnavailable, "too many queries at once: retry shortly")
+		httpError(w, http.StatusServiceUnavailable, "too many queries at once: retry in a few seconds")
 	case errors.Is(err, errQueryTooBig):
 		httpError(w, http.StatusUnprocessableEntity, "the result is too large: lower limit, ask for a shorter range, or leave out raw")
 	case errors.Is(err, context.Canceled):
@@ -93,7 +93,7 @@ func (s *Server) queryError(w http.ResponseWriter, err error) {
 	default:
 		s.count("query_error")
 		log.Printf("query: %v", err)
-		httpError(w, http.StatusInternalServerError, "the query failed")
+		httpError(w, http.StatusInternalServerError, "the query failed: the server's log says why")
 	}
 }
 

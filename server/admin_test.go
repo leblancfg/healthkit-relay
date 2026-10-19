@@ -69,7 +69,7 @@ func TestFirstStartGeneratesAdminToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := printedToken.FindStringSubmatch(logs.String())
-	if m == nil || len(m[1]) != 43 || !strings.Contains(logs.String(), "Sign in at:  https://health.example.com/setup") ||
+	if m == nil || len(m[1]) != 43 || !strings.Contains(logs.String(), "Setup page:  https://health.example.com/setup") ||
 		!strings.Contains(logs.String(), "shown only this once") {
 		t.Fatalf("first start printed:\n%s", logs.String())
 	}
@@ -103,7 +103,7 @@ func TestAdminResetSignsOutTheOldToken(t *testing.T) {
 	const lan = "192.168.1.20:5000"
 	w := setupRequest(t, s, "POST", "/setup", lan, nil, url.Values{"token": {testToken}})
 	cookie := http.Header{"Cookie": {w.Result().Cookies()[0].String()}}
-	if body := setupRequest(t, s, "GET", "/setup", lan, cookie, nil).Body.String(); !strings.Contains(body, "Paired iPhones") {
+	if body := setupRequest(t, s, "GET", "/setup", lan, cookie, nil).Body.String(); !strings.Contains(body, "Paired devices") {
 		t.Fatal("not signed in")
 	}
 

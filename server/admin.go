@@ -127,7 +127,7 @@ func newAdminToken(dir string) (string, error) {
 }
 
 // openAdmin loads the admin key at server start. Without admin.json it imports -token-file
-// (the server token of earlier versions) or generates a token and prints it, with the setup link, to log.
+// (the server token of earlier versions) or generates a token and prints it, with the setup page's address, to log.
 func openAdmin(dir, tokenFile, setupURL string, log *log.Logger) (*AdminKey, error) {
 	k, ok, err := LoadAdminKey(dir)
 	if err != nil {
@@ -161,9 +161,9 @@ func openAdmin(dir, tokenFile, setupURL string, log *log.Logger) (*AdminKey, err
 			}
 			log.Printf("admin token: imported the hash of -token-file %s into %s", tokenFile, filepath.Join(dir, adminFile))
 		}
-		log.Printf("WARNING: -token-file (HKR_TOKEN_FILE) is deprecated: %s holds the admin token's hash. "+
-			"Save the token in a password manager, then delete %s and remove -token-file. "+
-			"New admin token: healthkit-relay admin reset", adminFile, tokenFile)
+		log.Printf("WARNING: -token-file (HKR_TOKEN_FILE) is deprecated: the token in %s is now the admin token, "+
+			"and %s keeps its hash. Save the token in a password manager, then delete %s and remove -token-file. "+
+			"To make a new admin token instead, run: healthkit-relay admin reset", tokenFile, adminFile, tokenFile)
 		k, _, err = LoadAdminKey(dir)
 		return k, err
 	}
@@ -174,7 +174,7 @@ func openAdmin(dir, tokenFile, setupURL string, log *log.Logger) (*AdminKey, err
 	if err != nil {
 		return nil, err
 	}
-	printAdminToken(log.Writer(), token, setupURL, "This server's admin token was generated.")
+	printAdminToken(log.Writer(), token, setupURL, "First start: the server made its admin token.")
 	return requireAdminKey(dir)
 }
 
@@ -187,12 +187,15 @@ func requireAdminKey(dir string) (*AdminKey, error) {
 	return k, err
 }
 
+// printAdminToken prints the admin token and the setup page's address. Scripts and tests
+// match the line "    Admin token: <token>": keep that prefix, on that line only.
 func printAdminToken(w io.Writer, token, setupURL, first string) {
-	fmt.Fprintf(w, "\n%s It is shown only this once; the server keeps only its hash.\n\n", first)
+	fmt.Fprintf(w, "\n%s The admin token is the password of this server. It is shown only this once.\n\n", first)
 	fmt.Fprintf(w, "    Admin token: %s\n", token)
 	if setupURL != "" {
-		fmt.Fprintf(w, "    Sign in at:  %s\n", setupURL)
+		fmt.Fprintf(w, "    Setup page:  %s\n", setupURL)
 	}
-	fmt.Fprintf(w, "\nSave it in a password manager. It signs in to the setup page, where you pair iPhones and create read tokens.\n")
-	fmt.Fprintf(w, "Lost it? Run healthkit-relay admin reset for a new one.\n\n")
+	fmt.Fprintf(w, "\nSave the admin token in a password manager now. Then open the setup page in a browser and sign in\n")
+	fmt.Fprintf(w, "with it to pair your iPhone and create read tokens.\n")
+	fmt.Fprintf(w, "Lost it? Run healthkit-relay admin reset on the server for a new one.\n\n")
 }

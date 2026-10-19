@@ -72,7 +72,7 @@ func runMigrate(args []string, out io.Writer) error {
 		return err
 	}
 	if cfg.archiveDir == "" {
-		return errors.New("-archive-dir is required")
+		return errors.New("-archive-dir is required: the folder where the server keeps your data (or set HKR_ARCHIVE_DIR)")
 	}
 	files, err := filepath.Glob(filepath.Join(cfg.archiveDir, "[0-9]*", "*.jsonl"))
 	if err != nil {

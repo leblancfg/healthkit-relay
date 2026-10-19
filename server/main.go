@@ -6,8 +6,8 @@
 // Every flag can also be set with an environment variable: -archive-dir is HKR_ARCHIVE_DIR,
 // and so on (upper case, dashes as underscores, HKR_ prefix). Flags win over the environment.
 //
-// On first start the server generates the admin token, prints it once with the setup link,
-// and keeps only its hash in <archive-dir>/admin.json (admin.go).
+// On first start the server generates the admin token, prints it once with the setup page's
+// address, and keeps only its hash in <archive-dir>/admin.json (admin.go).
 //
 // Subcommands change the archive directory's state files with the same configuration, as the
 // server's user or root, while the server runs: `pair` prints a one-time setup code (QR code
@@ -58,11 +58,11 @@ type config struct {
 func (c *config) storeOptions() StoreOptions { return StoreOptions{GroupRead: c.groupRead} }
 
 func (c *config) register(fs *flag.FlagSet) {
-	fs.StringVar(&c.listen, "listen", "127.0.0.1:8080", "address to listen on")
-	fs.StringVar(&c.archiveDir, "archive-dir", "", "archive directory (staging.db, parquet/) and devices.json (required)")
-	fs.StringVar(&c.tokenFile, "token-file", "", "deprecated: file holding the server token of earlier versions, imported into admin.json at start; delete it once imported")
-	fs.StringVar(&c.publicURL, "public-url", "", "URL phones use to reach this server, put in setup links, e.g. https://health.example.com (default: the setup page offers the addresses it finds)")
-	fs.StringVar(&c.setupFrom, "setup-from", "private", "who may open /setup and pair: private (loopback, LAN, Tailscale), any, or off")
+	fs.StringVar(&c.listen, "listen", "127.0.0.1:8080", "address and port to listen on; 0.0.0.0:8080 also answers other computers and phones")
+	fs.StringVar(&c.archiveDir, "archive-dir", "", "the archive: the folder where the server keeps your data (Parquet files, staging.db) and its tokens (admin.json, devices.json), e.g. /var/lib/healthkit-relay (required)")
+	fs.StringVar(&c.tokenFile, "token-file", "", "deprecated: file holding the token of earlier versions (formerly the server token), imported as the admin token at start; delete it once imported")
+	fs.StringVar(&c.publicURL, "public-url", "", "server address: the address iPhones use to reach this server, put in setup codes, e.g. http://192.168.1.10:8080 or https://health.example.com (default: the setup page offers the addresses it finds)")
+	fs.StringVar(&c.setupFrom, "setup-from", "private", "who may open the setup page (/setup) and pair: private (this computer, the local network, Tailscale), any, or off (also turns pairing off)")
 	fs.BoolVar(&c.groupRead, "group-read", false, "make the archive readable by the service's group (directories 0750, files 0640) for backups or queries; default: owner only (0700, 0600)")
 }
 
@@ -78,7 +78,8 @@ func run(args []string) error {
 			return runCommand("admin reset", args[2:], os.Stdout, os.Stderr)
 		case "token":
 			if len(args) < 2 || args[1] != "create" {
-				return errors.New("usage: healthkit-relay token create -name <what it is for> [-scope read|upload]; list and revoke tokens with devices and revoke")
+				return errors.New("usage: healthkit-relay token create -name <what it is for> [-scope read|upload]; " +
+					"healthkit-relay devices lists tokens, healthkit-relay revoke <id> revokes one")
 			}
 			return runCommand("token create", args[2:], os.Stdout, os.Stderr)
 		case "migrate":
@@ -97,7 +98,7 @@ func run(args []string) error {
 	maxBody := fs.Int64("max-body-bytes", 32<<20, "largest accepted request body")
 	flushEvery := fs.Duration("flush-interval", time.Hour, "how often staged records are written to Parquet")
 	compactAt := fs.String("compact-at", "03:30", "local time of the nightly compaction, HH:MM")
-	queryDuckDB := fs.String("query-duckdb", "", "duckdb executable for the read-only query API (/v1/types..., /openapi.json, /docs); empty: the query API is off")
+	queryDuckDB := fs.String("query-duckdb", "", "duckdb executable for the read-only query API (/v1/types..., /openapi.json, /docs); unset: the query API is off")
 	queryDir := fs.String("query-archive-dir", "", "archive the query API reads (its parquet/), e.g. a replica; default: -archive-dir")
 	queryTimeout := fs.Duration("query-timeout", 30*time.Second, "longest a query may run, waiting for a free slot included")
 	queryMaxRows := fs.Int("query-max-rows", 50000, "most rows one query may return")
@@ -116,7 +117,7 @@ func run(args []string) error {
 		return nil
 	}
 	if *archiveDir == "" {
-		return errors.New("-archive-dir is required")
+		return errors.New("-archive-dir is required: the folder where the server keeps your data (or set HKR_ARCHIVE_DIR)")
 	}
 	switch cfg.setupFrom {
 	case "private", "any", "off":
@@ -192,7 +193,8 @@ func run(args []string) error {
 	defer func() { stop(); waitMaintenance() }() // runs before the archive closes (deferred earlier)
 	errc := make(chan error, 1)
 	go func() { errc <- hs.ListenAndServe() }()
-	log.Printf("listening on %s; %d paired devices; setup page /setup (%s)", *listen, devices.Len(), cfg.setupFrom)
+	log.Printf("listening on %s; %d paired devices and read tokens; setup page %s (-setup-from %s)",
+		*listen, devices.Len(), setupURL(cfg.publicURL, *listen), cfg.setupFrom)
 	select {
 	case err := <-errc:
 		return err
@@ -215,7 +217,7 @@ func runMaintenance(name string, args []string, out io.Writer) error {
 		return err
 	}
 	if cfg.archiveDir == "" {
-		return errors.New("-archive-dir is required")
+		return errors.New("-archive-dir is required: the folder where the server keeps your data (or set HKR_ARCHIVE_DIR)")
 	}
 	s, err := OpenStoreWith(cfg.archiveDir, cfg.storeOptions())
 	if err != nil {

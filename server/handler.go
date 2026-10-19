@@ -118,7 +118,7 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 	if err := dec.Decode(&b); err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
-			httpError(w, http.StatusRequestEntityTooLarge, "body too large")
+			httpError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body too large: this server accepts at most %d bytes (-max-body-bytes)", s.MaxBodyBytes))
 			return
 		}
 		if errors.Is(err, io.ErrUnexpectedEOF) {
@@ -184,7 +184,7 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("archive: %v", err)
 		s.count("archive_error")
-		httpError(w, http.StatusInternalServerError, "could not store batch")
+		httpError(w, http.StatusInternalServerError, "the server could not store the batch: its log says why")
 		return
 	}
 	added := 0

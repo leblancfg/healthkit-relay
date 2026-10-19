@@ -156,7 +156,12 @@ func (s *Server) render(w http.ResponseWriter, code int, v setupView) {
 }
 
 func (s *Server) setupForbidden(w http.ResponseWriter) {
-	http.Error(w, "The setup page only answers on private networks (see -setup-from).", http.StatusForbidden)
+	msg := "The setup page opens only from a private network: this computer, your local network or Tailscale. " +
+		"Open it from a device on the same network as the server."
+	if s.SetupFrom == "off" {
+		msg = "The setup page and pairing are turned off on this server (-setup-from off)."
+	}
+	http.Error(w, msg, http.StatusForbidden)
 }
 
 // setupForm checks a form post to the setup page and reads it. Browsers say where a request
@@ -167,12 +172,12 @@ func setupForm(w http.ResponseWriter, r *http.Request) bool {
 	switch r.Header.Get("Sec-Fetch-Site") {
 	case "", "same-origin", "none":
 	default:
-		http.Error(w, "Cross-origin request refused.", http.StatusForbidden)
+		http.Error(w, "This form was sent from another site. Open the setup page and try again from there.", http.StatusForbidden)
 		return false
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Bad form.", http.StatusBadRequest)
+		http.Error(w, "The server could not read this form. Reload the setup page and try again.", http.StatusBadRequest)
 		return false
 	}
 	return true
@@ -206,7 +211,7 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 		case "invalid":
 			if !v.Admin {
 				v.Mode = "login"
-				v.Message = "This setup link has expired or was already used. Sign in with the admin token, or run healthkit-relay pair again."
+				v.Message = "This setup code expired or was already used. For a new one, sign in with the admin token, or run healthkit-relay pair on the server."
 				s.render(w, http.StatusGone, v)
 				return
 			}
@@ -233,7 +238,7 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 		c, err := s.mintCode(public)
 		if err != nil {
 			log.Printf("setup page: %v", err)
-			http.Error(w, "Could not save the setup code.", http.StatusInternalServerError)
+			http.Error(w, "The server could not save the setup code. Its log says why.", http.StatusInternalServerError)
 			return
 		}
 		code, exp = c.Code, c.ExpiresAt
@@ -245,7 +250,7 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 	}
 	q, err := EncodeQR([]byte(PairLink(public, code)))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Could not draw the QR code: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	v.Mode, v.Code, v.Link, v.QR = "pair", code, template.URL(PairLink(public, code)), template.HTML(q.SVG())
@@ -302,7 +307,7 @@ func (s *Server) setupLogin(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(500 * time.Millisecond) // slows down guessing; tokens are long anyway
 		s.count("unauthorized")
 		s.render(w, http.StatusUnauthorized, setupView{Mode: "login", LoginErr: true,
-			Message: "That is not this server's token."})
+			Message: "That is not this server's admin token."})
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -325,7 +330,7 @@ func (s *Server) setupRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ok, err := s.Devices.Revoke(r.PostFormValue("id")); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Could not revoke: "+err.Error(), http.StatusInternalServerError)
 		return
 	} else if ok {
 		log.Printf("revoked device %s from the setup page", r.PostFormValue("id"))
@@ -416,8 +421,8 @@ button.copy { flex: none; display: inline-flex; align-items: center; justify-con
 button.copy:active { opacity: .7; }
 button.copy svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .copied { color: var(--ok); font-size: 13px; min-height: 1.4em; margin: 4px 0 8px; }
-ul.steps { text-align: left; color: var(--muted); font-size: 14px; margin: 4px 0 20px; padding-left: 20px; }
-ul.steps li { margin: 0 0 4px; }
+ol.steps { text-align: left; color: var(--muted); font-size: 14px; margin: 4px 0 20px; padding-left: 20px; }
+ol.steps li { margin: 0 0 4px; }
 input[type=password]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .error { color: var(--accent); font-size: 15px; margin: 0 0 14px; }
 code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); padding: 2px 6px; border-radius: 6px; white-space: nowrap; }
@@ -450,16 +455,16 @@ footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8
 </header>
 {{if eq .Mode "login"}}
 <section class="card">
-  <h2>Set up your iPhone</h2>
-  <p class="sub">Sign in with this server's admin token to pair an iPhone or create a read token.</p>
+  <h2>Sign in</h2>
+  <p class="sub">Enter this server's admin token. Then you can pair an iPhone and create read tokens.</p>
   {{if .Message}}<p class="error">{{.Message}}</p>{{end}}
   <form class="login" method="post" action="/setup">
     <label for="token">Admin token</label>
     <input id="token" name="token" type="password" autocomplete="current-password" required autofocus>
-    <button class="button" type="submit">Continue</button>
+    <button class="button" type="submit">Sign in</button>
   </form>
-  <p class="hint">The server printed the admin token in its log when it first started, e.g. in <code>docker compose logs relay</code> or <code>journalctl -u healthkit-relay</code>. Lost it? <code>healthkit-relay admin reset</code> on the server prints a new one.</p>
-  <p class="hint">Or run <code>healthkit-relay pair</code> on the server: it shows a code to scan right in the terminal.</p>
+  <p class="hint">The server printed the admin token once, in its log, when it first started. To see it, run <code>docker compose logs relay</code> (Docker) or <code>journalctl -u healthkit-relay</code> (Linux service). Lost it? Run <code>healthkit-relay admin reset</code> on the server for a new one.</p>
+  <p class="hint">To pair an iPhone without signing in, run <code>healthkit-relay pair</code> on the server: it shows the QR code in the terminal.</p>
 </section>
 <script nonce="{{.Nonce}}">
 // Keeps #read-tokens (from /docs) across signing in.
@@ -467,35 +472,35 @@ if (location.hash) document.querySelector("form.login").action = "/setup" + loca
 </script>
 {{else if eq .Mode "noaddress"}}
 <section class="card">
-  <h2>No address for your iPhone</h2>
-  <p class="sub">This page was opened at {{.Server}}, which an iPhone cannot reach, and the server found no other address it answers on.</p>
-  <p class="hint">Start the server with <code>-public-url</code> set to the address your iPhone uses (for example <code>https://health.example.com</code> behind a reverse proxy), or with <code>-listen 0.0.0.0:8080</code> so this page can offer the machine's network addresses.</p>
+  <h2>Set the server address</h2>
+  <p class="sub">You opened this page at {{.Server}}. An iPhone cannot reach that address, and the server found none other it answers on.</p>
+  <p class="hint">Start the server with <code>-public-url</code> (or <code>HKR_PUBLIC_URL</code>) set to the address your iPhone uses, for example <code>http://192.168.1.10:8080</code>. Or start it with <code>-listen 0.0.0.0:8080</code>: this page then offers this computer's network addresses.</p>
 </section>
 {{else if eq .Mode "token"}}
 <section class="card">
   <h2>Read token for {{.NewName}}</h2>
-  <p class="sub">It reads health data through the query API (<code>/docs</code>), and nothing else.</p>
+  <p class="sub">A dashboard, script or AI agent uses it to read your health data through the query API (<code>/docs</code>), and nothing else.</p>
   <div class="secret"><code class="token" id="new-token">{{.NewToken}}</code>{{template "copy" "new-token"}}</div>
   <p class="copied" role="status"></p>
-  <ul class="steps">
+  <ol class="steps">
     <li>Copy it now: it is shown only this once.</li>
     <li>Save it in a password manager.</li>
-    <li>Paste it into the client (Grafana, a script, an agent) as a Bearer token: <code>Authorization: Bearer &lt;token&gt;</code></li>
-    <li>Lost it? Revoke it on the setup page and create a new one.</li>
-  </ul>
+    <li>Give it to the dashboard, script or agent. Over HTTP, it goes in this header: <code>Authorization: Bearer &lt;token&gt;</code></li>
+  </ol>
   <a class="button" href="/setup#read-tokens">Done</a>
+  <p class="hint">Lost it? Revoke it on the setup page and create a new one.</p>
 </section>
 {{else if eq .Mode "used"}}
 <section class="card">
   <svg class="check" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30" fill="#34c759"/><path d="M19 33l9 9 17-19" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-  <h2>Already connected</h2>
-  <p class="sub">This code set up {{.Paired.Name}}{{if .Paired.Model}} ({{.Paired.Model}}){{end}}. Codes work once; get a new one to set up another iPhone.</p>
+  <h2>Already paired</h2>
+  <p class="sub">This setup code paired {{.Paired.Name}}{{if .Paired.Model}} ({{.Paired.Model}}){{end}}. A setup code works once: to pair another iPhone, sign in to the setup page for a new one.</p>
 </section>
 {{else}}
 <section class="card" id="pair">
-  <h2>Set up your iPhone</h2>
+  <h2>Pair your iPhone</h2>
   <div class="desktop">
-    <p class="sub">Point the iPhone's Camera at this code, then tap <b>Open in Health Relay</b>.</p>
+    <p class="sub">On the iPhone, with Health Relay installed, point the Camera at this QR code. Then tap <b>Open in Health Relay</b>.</p>
     <div class="qr">{{.QR}}</div>
     {{if .SetupLink}}
     <p class="hint">Or send this link to the iPhone and open it there:</p>
@@ -504,45 +509,46 @@ if (location.hash) document.querySelector("form.login").action = "/setup" + loca
     {{end}}
   </div>
   <div class="phone">
-    <p class="sub">Connects Health Relay on this iPhone to {{.Server}}.</p>
+    <p class="sub">Pairs Health Relay on this iPhone with the server at {{.Server}}.</p>
     <a class="button" href="{{.Link}}">Open in Health Relay</a>
   </div>
   {{if .Addresses}}
   <div class="addresses">
-    <h3>Address in the code</h3>
+    <h3>Server address in the code</h3>
     {{range .Addresses}}<a class="chip{{if eq .URL $.Chosen}} on{{end}}" href="/setup?code={{$.Code}}&amp;server={{.URL}}">{{.URL}}<span>{{.Source}}</span></a>{{end}}
-    <p class="hint">Found on this server; pick the one your iPhone reaches. To fix it for good, start the server with <code>-public-url</code>.</p>
+    <p class="hint">The server found these addresses. Pick the one your iPhone can reach. To set it for good, start the server with <code>-public-url</code>.</p>
   </div>
   {{end}}
-  <p class="status" id="status"><span class="dot"></span><span id="status-text"><span class="desktop">Waiting for your iPhone · </span>Works once, until {{.Expires}}</span></p>
+  <p class="status" id="status"><span class="dot"></span><span id="status-text"><span class="desktop">Waiting for your iPhone · </span>This setup code works once, until {{.Expires}}</span></p>
 </section>
 <section class="card" id="done" hidden>
   <svg class="check" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30" fill="#34c759"/><path d="M19 33l9 9 17-19" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-  <h2>iPhone connected</h2>
-  <p class="sub" id="done-text">Health Relay asks for access to Health once, then syncs on its own. You can close this page.</p>
+  <h2>iPhone paired</h2>
+  <p class="sub" id="done-text">On the iPhone, Health now asks what Health Relay may read: allow all of it. Health Relay then syncs on its own. You can close this page.</p>
 </section>
 {{if .Admin}}
 <section class="card list">
-  <h3>Paired iPhones</h3>
+  <h3>Paired devices</h3>
   {{range .Devices}}
   <div class="row">
-    <div class="what"><div class="name">{{.Name}}</div><div class="meta">{{if .Model}}{{.Model}} · {{end}}paired {{date .CreatedAt}} · seen {{ago .LastSeen}}</div></div>
+    <div class="what"><div class="name">{{.Name}}</div><div class="meta">{{if .Model}}{{.Model}} · {{end}}paired {{date .CreatedAt}} · last seen {{ago .LastSeen}}</div></div>
     <form method="post" action="/setup/revoke"><input type="hidden" name="id" value="{{.ID}}"><button class="link" type="submit">Revoke</button></form>
   </div>
   {{else}}
-  <p class="empty">None yet.</p>
+  <p class="empty">None yet: scan the QR code above with your iPhone.</p>
   {{end}}
 </section>
 <section class="card list" id="read-tokens">
   <h3>Read tokens</h3>
+  <p class="empty">A read token lets a dashboard, script or AI agent read your data through the query API.</p>
   {{range .Tokens}}
   <div class="row">
-    <div class="what"><div class="name">{{.Name}}</div><div class="meta">query API · created {{date .CreatedAt}} · used {{ago .LastSeen}}</div></div>
+    <div class="what"><div class="name">{{.Name}}</div><div class="meta">created {{date .CreatedAt}} · last used {{ago .LastSeen}}</div></div>
     <form method="post" action="/setup/revoke"><input type="hidden" name="id" value="{{.ID}}"><button class="link" type="submit">Revoke</button></form>
   </div>
   {{end}}
   <form class="row" method="post" action="/setup/tokens">
-    <input class="what" name="name" type="text" maxlength="100" placeholder="New token, e.g. grafana" required>
+    <input class="what" name="name" type="text" maxlength="100" placeholder="Name, e.g. grafana" required>
     <button class="link" type="submit">Create</button>
   </form>
 </section>
@@ -558,11 +564,11 @@ if (location.hash) document.querySelector("form.login").action = "/setup" + loca
         var done = document.getElementById("done");
         done.hidden = false;
         if (s.device) document.getElementById("done-text").textContent = s.device + (s.model ? " (" + s.model + ")" : "") +
-          " is connected. Health Relay asks for access to Health once, then syncs on its own. You can close this page.";
+          " is paired. On the iPhone, Health now asks what Health Relay may read: allow all of it. Health Relay then syncs on its own. You can close this page.";
         if (admin) setTimeout(function () { location.replace("/setup"); }, 8000);
       } else if (s.state === "invalid") {
         clearInterval(timer);
-        document.getElementById("status-text").textContent = "This code expired.";
+        document.getElementById("status-text").textContent = "This setup code expired. For a new one, sign in to the setup page or run healthkit-relay pair on the server.";
         if (admin) location.replace("/setup");
       }
     }).catch(function () {});

@@ -468,7 +468,11 @@ func (c *Codes) Redeem(code string, pair func() (Device, error)) (Device, error)
 	return dev, err
 }
 
-var errBadCode = errors.New("this setup code is not valid: it may have expired or been used already. Get a new one from the setup page")
+var errBadCode = errors.New("setup code unknown, expired or already used")
+
+// badCodeMessage answers POST /v1/pair with an unknown, expired or used code; the app shows it.
+const badCodeMessage = "This setup code expired or was already used. Get a new one from the server's setup page, " +
+	"or run healthkit-relay pair on the server."
 
 // State is "pending", "paired" (with the device) or "invalid".
 func (c *Codes) State(code string) (string, *Device, time.Time) {
@@ -531,7 +535,7 @@ func (s *Server) adminUpload(c Caller, r *http.Request) {
 	if now := time.Now(); now.Sub(s.adminUploadsLog) >= time.Hour {
 		s.adminUploadsLog = now
 		log.Printf("WARNING: %s %s used the admin token (%d such requests since start). Uploads with the admin token are deprecated "+
-			"and will stop working in a future release: pair the app from the setup page (/setup) to give it a token of its own.",
+			"and will stop working in a future release: pair the iPhone again from the setup page (/setup), and it gets a token of its own.",
 			r.Method, r.URL.Path, s.stats["admin_token_uploads"])
 	}
 }
@@ -563,9 +567,10 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string)
 	}
 	if !c.Allows(scope) {
 		s.count("forbidden")
-		msg := "this token is for uploads from the app; the query API needs a read token (healthkit-relay token create -scope read)"
+		msg := "this is a paired device's token, which only uploads: the query API needs a read token " +
+			"(create one on the setup page, or with healthkit-relay token create -name grafana)"
 		if scope == ScopeUpload {
-			msg = "this token is a read token: it may only use the query API"
+			msg = "this is a read token, which only reads through the query API: uploads need a paired device's token"
 		}
 		httpError(w, http.StatusForbidden, msg)
 		return Caller{}, false
@@ -618,7 +623,13 @@ func (s *Server) status(dev *Device) Status {
 
 func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	if !s.setupAllowed(r) {
-		httpError(w, http.StatusForbidden, "pairing is only open to private networks on this server")
+		// The app tells this answer apart by "private networks".
+		msg := "This server pairs iPhones only on private networks: its local network or Tailscale. " +
+			"Connect the iPhone to the same network as the server, then try again."
+		if s.SetupFrom == "off" {
+			msg = "Pairing is turned off on this server (-setup-from off)."
+		}
+		httpError(w, http.StatusForbidden, msg)
 		return
 	}
 	var req PairRequest
@@ -631,13 +642,13 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 		name = "iPhone"
 	}
 	if len(name) > 100 || len(req.Model) > 100 {
-		httpError(w, http.StatusBadRequest, "name or model too long")
+		httpError(w, http.StatusBadRequest, "name and model must be at most 100 characters each")
 		return
 	}
 	// Names end up in logs, the setup page and `healthkit-relay devices` in a terminal: no
 	// escape sequences or line breaks from whoever holds a code.
 	if !printable(name) || !printable(req.Model) {
-		httpError(w, http.StatusBadRequest, "name or model has control characters")
+		httpError(w, http.StatusBadRequest, "name and model must be printable: line breaks, tabs and other control characters are refused")
 		return
 	}
 	var token string
@@ -656,11 +667,11 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	})
 	if errors.Is(err, errBadCode) {
 		s.count("pair_rejected")
-		httpError(w, http.StatusForbidden, err.Error())
+		httpError(w, http.StatusForbidden, badCodeMessage)
 		return
 	} else if err != nil {
 		log.Printf("pair: %v", err) // names server paths: not for an unauthenticated caller
-		httpError(w, http.StatusInternalServerError, "could not save the device")
+		httpError(w, http.StatusInternalServerError, "the server could not save the paired device: its log says why")
 		return
 	}
 	s.count("paired")
@@ -737,7 +748,7 @@ func (s *Server) pairingCodes(w http.ResponseWriter, r *http.Request) {
 	c, err := s.mintCodeFor(public, ttl)
 	if err != nil {
 		log.Printf("pairing codes: %v", err)
-		httpError(w, http.StatusInternalServerError, "could not save the setup code")
+		httpError(w, http.StatusInternalServerError, "the server could not save the setup code: its log says why")
 		return
 	}
 	c.Addresses = found
@@ -773,14 +784,14 @@ func (s *Server) createToken(name, scope string) (TokenResponse, int, error) {
 	case scope != ScopeRead && scope != ScopeUpload:
 		return TokenResponse{}, http.StatusBadRequest, fmt.Errorf("scope must be %q or %q", ScopeRead, ScopeUpload)
 	case name == "":
-		return TokenResponse{}, http.StatusBadRequest, errors.New("name is required: what the token is for, e.g. grafana")
+		return TokenResponse{}, http.StatusBadRequest, errors.New("a name is required: what the token is for, e.g. grafana")
 	case len(name) > 100 || !printable(name):
-		return TokenResponse{}, http.StatusBadRequest, errors.New("name must be at most 100 printable characters")
+		return TokenResponse{}, http.StatusBadRequest, errors.New("the name must be at most 100 characters, without line breaks or tabs")
 	}
 	token, dev, err := s.Devices.AddScoped(name, "", scope)
 	if err != nil {
 		log.Printf("tokens: %v", err)
-		return TokenResponse{}, http.StatusInternalServerError, errors.New("could not save the token")
+		return TokenResponse{}, http.StatusInternalServerError, errors.New("the server could not save the token: its log says why")
 	}
 	log.Printf("created %s token %s (%s)", scope, dev.ID, dev.Name)
 	return TokenResponse{Token: token, Device: dev}, http.StatusCreated, nil
@@ -814,7 +825,7 @@ func (s *Server) deviceRevoke(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		httpError(w, http.StatusInternalServerError, err.Error())
 	case !ok:
-		httpError(w, http.StatusNotFound, "no such device")
+		httpError(w, http.StatusNotFound, "no paired device or read token has this ID: GET /v1/devices lists them")
 	default:
 		log.Printf("revoked device %s", r.PathValue("id"))
 		w.WriteHeader(http.StatusNoContent)

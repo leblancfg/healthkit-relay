@@ -23,11 +23,11 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_unit("healthkit-relay.service")
     machine.wait_for_open_port(8080)
 
-    # First start: the admin token is printed once, with the setup link.
+    # First start: the admin token is printed once, with the setup page address.
     out = machine.succeed("journalctl -u healthkit-relay -o cat --no-pager")
     tokens = re.findall(r"Admin token: (\S+)", out)
     assert len(tokens) == 1, out
-    assert "Sign in at:  http://machine:8080/setup" in out, out
+    assert "Setup page:  http://machine:8080/setup" in out, out
     admin = tokens[0]
 
     def sign_in(token):

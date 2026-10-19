@@ -183,7 +183,7 @@ func TestSetupPageReadTokens(t *testing.T) {
 		t.Fatalf("the shown token %q is not the read token", token)
 	}
 	page := setupRequest(t, s, "GET", "/setup", lan, h, nil).Body.String()
-	apps, tokens := strings.Index(page, "Paired iPhones"), strings.Index(page, "Read tokens")
+	apps, tokens := strings.Index(page, "Paired devices"), strings.Index(page, "Read tokens")
 	if apps < 0 || tokens < apps || !strings.Contains(page[apps:tokens], "Phone of mine") || !strings.Contains(page[tokens:], "grafana") ||
 		strings.Contains(page[apps:tokens], "grafana") || strings.Contains(page, token) {
 		t.Errorf("setup page lists:\n%s", page)

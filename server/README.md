@@ -326,8 +326,8 @@ gets old: more than two hours for the flush, a day and a half for the compaction
 `healthkit_relay_maintenance_errors_total{job}`, `healthkit_relay_devices`,
 `healthkit_relay_forward_errors_total`, `healthkit_relay_last_upload_timestamp_seconds`,
 `healthkit_relay_batches_total{trigger}` (accepted batches by what started the app's sync,
-see `trigger` above; `unknown` for apps before 0.6.1). It holds counts only, never health
-values.
+see `trigger` above; `unknown` for apps before 0.6.1). `/metrics` holds counts and
+timestamps only.
 
 ## Archive
 

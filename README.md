@@ -147,13 +147,14 @@ without Docker, and NixOS, macOS, NAS and Raspberry Pi. The
 
 4. **Pair the iPhone.** On a computer on the same network, open the **setup page**,
    `http://192.168.1.10:8080/setup`, and sign in with the admin token. The page shows a
-   **setup code** as a QR code. Scan it with the iPhone's Camera and tap the banner to open
-   Health Relay. (Or run `docker compose exec relay healthkit-relay pair` to show the QR code
-   in the terminal.)
+   **setup code** as a QR code. Point the iPhone's Camera at it, tap **Open in Health
+   Relay**, then **Connect**. The setup page shows **iPhone paired**. (To show the QR code
+   in the terminal instead, run `docker compose exec relay healthkit-relay pair`.)
 
-5. **Allow Health access.** The app asks which data it may read. Tap **Turn On All**, then
-   **Allow**. The first sync starts. The setup page lists your iPhone under paired devices,
-   and the app shows how many records it has sent.
+5. **Allow Health access.** In the app, tap **Continue** under **Allow Health access**. Health
+   asks what Health Relay may read: turn on every category, then tap **Allow**. The first sync
+   starts. The setup page lists your iPhone under **Paired devices**, and the app shows
+   **Up to date** with the number of **Records on server**.
 
 To sync away from home too, [put the server behind HTTPS](https://leblancfg.com/healthkit-relay/networking/).
 Tailscale is the easiest way.

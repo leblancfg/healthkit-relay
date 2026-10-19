@@ -1,12 +1,27 @@
 # Query API
 
 A read-only HTTP API over the Parquet archive: which HealthKit types have data, their samples,
-and daily or hourly aggregates (steps per day, average heart rate per hour, hours of deep
+and daily or hourly aggregates (steps per day, average heart rate per hour, minutes of deep
 sleep per night). It is described by an OpenAPI 3.1 document at `/openapi.json`, browsable at
 `/docs`, so dashboards, scripts and LLM agents can discover it on their own.
 
-It is **off by default**. There is no SQL endpoint: every query is built by the server from
-typed, validated parameters.
+It is **off by default**; `-query-duckdb` turns it on.
+
+## Types and kinds
+
+A **type** is one specific HealthKit measurement, named by HealthKit's identifier:
+`HKQuantityTypeIdentifierStepCount`, `HKQuantityTypeIdentifierHeartRate`,
+`HKCategoryTypeIdentifierSleepAnalysis`. A **kind** is the shape of a type's data. Each type
+has one kind: `HKQuantityTypeIdentifierStepCount` is a type of kind `quantity`.
+
+| Kind | Shape | Example |
+|---|---|---|
+| `quantity` | a number with a unit | steps: 12027 `count` on 2026-10-15; heart rate: 67 `count/min` at 09:04 |
+| `category` | a labelled interval | sleep: `asleepDeep` from 01:10 to 01:40; stand hours: `stood` from 14:00 to 15:00 |
+| `workout`, `heartbeat_series`, `electrocardiogram`, `audiogram`, `correlation`, ... | a record with fields of its own | a run with its duration, energy and distance; an ECG with its classification |
+
+Quantity and category types have aggregates; for the other kinds, read the samples with
+`raw=true`. `GET /v1/kinds` lists the kinds, `GET /v1/types` the types.
 
 ## Turning it on
 
@@ -36,7 +51,11 @@ hourly) and are not visible to the API until then.
 
 ## Tokens
 
-The query API takes a **read token**, a token of its own for each client:
+The query API takes a **read token**, a token of its own for each client. The quickest way
+to get one: open **`/setup#read-tokens`** (the `/docs` page links to it), sign in with the
+server token, type a name under **Read tokens** and click **Create**. The token is shown once.
+
+On the server:
 
 ```sh
 healthkit-relay token create -name grafana > grafana.token   # prints the token once
@@ -44,8 +63,7 @@ healthkit-relay devices                                       # lists it, with S
 healthkit-relay revoke <id>                                    # revokes it
 ```
 
-or **Read tokens** on the setup page (signed in with the server token), or
-`POST /v1/tokens` with the server token. The server keeps only the token's SHA-256, in
+or `POST /v1/tokens` with the server token. The server keeps only the token's SHA-256, in
 `devices.json`, next to the paired iPhones.
 
 | Token | Scope | Query API | Upload, status, erase | Tokens, devices, pairing |
@@ -55,8 +73,7 @@ or **Read tokens** on the setup page (signed in with the server token), or
 | Paired iPhone | `upload` | no (`403`) | yes, its own data | no (`401`) |
 
 Devices paired before scopes existed have no `scope` in `devices.json`: they are upload
-tokens, and the file keeps working unchanged. `/openapi.json` and `/docs` need no token: they
-hold no health data.
+tokens, and the file keeps working unchanged. `/openapi.json` and `/docs` are public.
 
 ## Endpoints
 
@@ -74,18 +91,97 @@ All `GET`, with `Authorization: Bearer <token>`.
 generated from the iOS SDK the app is built with, and the document publishes it as an enum.
 Times are RFC 3339; `start` and `end` also take a date, meaning midnight in `tz`.
 
+## Examples
+
 ```sh
 T=$(cat grafana.token)
-# Steps per day, last week, days in Toronto time
-curl -H "Authorization: Bearer $T" \
-  'http://127.0.0.1:8080/v1/types/HKQuantityTypeIdentifierStepCount/aggregates?tz=America/Toronto&start=2026-10-11&end=2026-10-18'
-# Sleep stages per day
-curl -H "Authorization: Bearer $T" \
-  'http://127.0.0.1:8080/v1/types/HKCategoryTypeIdentifierSleepAnalysis/aggregates?tz=America/Toronto'
-# The last 10 heart rate readings
-curl -H "Authorization: Bearer $T" \
-  'http://127.0.0.1:8080/v1/types/HKQuantityTypeIdentifierHeartRate/samples?order=desc&limit=10'
+H="Authorization: Bearer $T"
 ```
+
+Which types have data, of one kind:
+
+```sh
+curl -H "$H" 'http://127.0.0.1:8080/v1/types?present=true&kind=category'
+```
+
+```json
+{"types": [
+  {"identifier": "HKCategoryTypeIdentifierAppleStandHour", "kind": "category",
+   "display_name": "Apple Stand Hour", "value_enum": "HKCategoryValueAppleStandHour",
+   "values": [{"value": 0, "label": "stood"}, {"value": 1, "label": "idle"}], "aggregates": true,
+   "data": {"samples": 41632, "first_start": "2021-06-30T00:00:00Z", "last_start": "2026-10-18T19:00:00Z"}},
+  ...
+]}
+```
+
+Steps per day, days in Toronto time:
+
+```sh
+curl -H "$H" 'http://127.0.0.1:8080/v1/types/HKQuantityTypeIdentifierStepCount/aggregates?tz=America/Toronto&start=2026-10-15&end=2026-10-17'
+```
+
+```json
+{"type": "HKQuantityTypeIdentifierStepCount", "kind": "quantity", "aggregation": "cumulative",
+ "interval": "day", "tz": "America/Toronto", "dedup": "priority",
+ "start": "2026-10-15T00:00:00-04:00", "end": "2026-10-17T00:00:00-04:00",
+ "buckets": [
+  {"start": "2026-10-15T00:00:00-04:00", "end": "2026-10-16T00:00:00-04:00", "date": "2026-10-15",
+   "unit": "count", "sum": 12027, "samples": 1009, "sources": ["Apple Watch", "iPhone"]},
+  {"start": "2026-10-16T00:00:00-04:00", "end": "2026-10-17T00:00:00-04:00", "date": "2026-10-16",
+   "unit": "count", "sum": 4895, "samples": 88, "sources": ["Apple Watch", "iPhone"]}
+ ]}
+```
+
+Average heart rate per hour:
+
+```sh
+curl -H "$H" 'http://127.0.0.1:8080/v1/types/HKQuantityTypeIdentifierHeartRate/aggregates?interval=hour&tz=America/Toronto&start=2026-10-17T09:00:00-04:00&end=2026-10-17T10:00:00-04:00'
+```
+
+```json
+{"type": "HKQuantityTypeIdentifierHeartRate", "kind": "quantity", "aggregation": "discreteTemporallyWeighted",
+ "interval": "hour", "tz": "America/Toronto", ...,
+ "buckets": [
+  {"start": "2026-10-17T09:00:00-04:00", "end": "2026-10-17T10:00:00-04:00", "unit": "count/min",
+   "avg": 123.98, "min": 67, "max": 170, "samples": 452, "sources": ["Apple Watch"]}
+ ]}
+```
+
+Sleep stages per day (seconds per label):
+
+```sh
+curl -H "$H" 'http://127.0.0.1:8080/v1/types/HKCategoryTypeIdentifierSleepAnalysis/aggregates?tz=America/Toronto&start=2026-10-18&end=2026-10-19'
+```
+
+```json
+{"type": "HKCategoryTypeIdentifierSleepAnalysis", "kind": "category", "interval": "day", ...,
+ "buckets": [
+  {"date": "2026-10-18", ..., "values": [
+    {"value": 3, "label": "asleepCore", "samples": 14, "seconds": 13500, "sources": ["Apple Watch"]},
+    {"value": 4, "label": "asleepDeep", "samples": 5, "seconds": 3300, "sources": ["Apple Watch"]},
+    {"value": 5, "label": "asleepREM", "samples": 6, "seconds": 4920, "sources": ["Apple Watch"]}
+   ], "samples": 25, "sources": ["Apple Watch"]}
+ ]}
+```
+
+Individual heart rate readings, two per page:
+
+```sh
+curl -H "$H" 'http://127.0.0.1:8080/v1/types/HKQuantityTypeIdentifierHeartRate/samples?tz=America/Toronto&start=2026-10-17T09:00:00-04:00&limit=2'
+```
+
+```json
+{"type": "HKQuantityTypeIdentifierHeartRate", "start": "2026-10-17T09:00:00-04:00", ..., "count": 2,
+ "samples": [
+  {"uuid": "85DB0380-1610-44BD-A87C-C39D3BF81A65", "start": "2026-10-17T09:04:13.345-04:00",
+   "end": "2026-10-17T09:04:13.345-04:00", "value": 67, "unit": "count/min",
+   "source": {"name": "Apple Watch", "device": "Apple Watch", "product_type": "Watch6,14", ...}},
+  ...
+ ],
+ "next_cursor": "MTphOjE3OTIyNDI0ODEzNDUwMDA6OTlGQUE4MjItOTdFOC00RjNELUExMUItM0M3NjY1MjBDNUNG"}
+```
+
+Pass `next_cursor` as `&cursor=...`, with the same other parameters, for the next page.
 
 ## Aggregates
 

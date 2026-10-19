@@ -133,11 +133,21 @@ func openAdmin(dir, tokenFile, setupURL string, log *log.Logger) (*AdminKey, err
 	if err != nil {
 		return nil, err
 	}
+	var token string
 	if tokenFile != "" {
-		token, err := readSecret(tokenFile)
-		if err != nil {
+		token, err = readSecret(tokenFile)
+		if errors.Is(err, os.ErrNotExist) {
+			// The Docker image names /run/secrets/hkr_token, mounted only by installs from
+			// earlier versions.
+			if !ok {
+				log.Printf("-token-file %s does not exist: generating an admin token", tokenFile)
+			}
+			tokenFile = ""
+		} else if err != nil {
 			return nil, err
 		}
+	}
+	if tokenFile != "" {
 		switch {
 		case ok && k.Check(token):
 		case ok:
@@ -160,7 +170,7 @@ func openAdmin(dir, tokenFile, setupURL string, log *log.Logger) (*AdminKey, err
 	if ok {
 		return k, nil
 	}
-	token, err := newAdminToken(dir)
+	token, err = newAdminToken(dir)
 	if err != nil {
 		return nil, err
 	}

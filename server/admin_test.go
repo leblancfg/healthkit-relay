@@ -162,6 +162,13 @@ func TestTokenFileMigration(t *testing.T) {
 		t.Fatalf("after reset: %v %v\n%s", err, k.Check(testToken), logs.String())
 	}
 
+	// A missing token file (the Docker image's default path) is skipped.
+	logs.Reset()
+	fresh := t.TempDir()
+	if _, err = openAdmin(fresh, filepath.Join(fresh, "nope"), "", log.New(&logs, "", 0)); err != nil || printedToken.FindString(logs.String()) == "" {
+		t.Fatalf("missing token file: %v\n%s", err, logs.String())
+	}
+
 	// A token file too short to be a credential is refused.
 	os.WriteFile(tokenFile, []byte("short\n"), 0o600)
 	if _, err := openAdmin(t.TempDir(), tokenFile, "", log.New(io.Discard, "", 0)); err == nil {

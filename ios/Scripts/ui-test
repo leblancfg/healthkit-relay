@@ -20,7 +20,7 @@ head -c 32 /dev/urandom | base64 > "$work/token"
   -public-url http://127.0.0.1:$port > "$work/server.log" 2>&1 &
 server_pid=$!
 for _ in $(seq 50); do curl -fs http://127.0.0.1:$port/healthz >/dev/null && break; sleep 0.1; done
-setup=$("$bin" pair -listen 127.0.0.1:$port -token-file "$work/token" -public-url http://127.0.0.1:$port \
+setup=$("$bin" pair -archive-dir "$work/archive" -listen 127.0.0.1:$port -public-url http://127.0.0.1:$port \
   | sed -n 's|^ *\(http://[^ ]*/setup?code=[A-Z0-9]*\)$|\1|p')
 echo "setup page: $setup"
 

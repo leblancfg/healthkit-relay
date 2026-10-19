@@ -178,4 +178,12 @@ func TestSetupPageReadTokens(t *testing.T) {
 		strings.Contains(page[apps:tokens], "grafana") || strings.Contains(page, token) {
 		t.Errorf("setup page lists:\n%s", page)
 	}
+	// /docs and the spec link to the read tokens section.
+	if !strings.Contains(page, `id="read-tokens"`) {
+		t.Error("no #read-tokens anchor on the setup page")
+	}
+	docs, _ := swaggerUI.ReadFile("swaggerui/index.html")
+	if !strings.Contains(string(docs), `href="setup#read-tokens"`) || !strings.Contains(string(openAPITemplate), "(/setup#read-tokens)") {
+		t.Error("/docs or the spec does not link to /setup#read-tokens")
+	}
 }

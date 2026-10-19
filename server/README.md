@@ -218,7 +218,7 @@ grafana` prints one; `devices` and `revoke` list and revoke them.
 With `-query-duckdb`: `GET /v1/kinds`, `/v1/types`, `/v1/types/{type}`,
 `/v1/types/{type}/samples`, `/v1/types/{type}/aggregates`, for a read token or the server
 token (upload tokens get `403`). Described by `/openapi.json` (OpenAPI 3.1), shown at `/docs`;
-both need no token. See [docs/query-api.md](../docs/query-api.md).
+both are public. Read tokens are also created on `/setup#read-tokens`. See [docs/query-api.md](../docs/query-api.md).
 
 A batch is stored entirely or not at all, so a client can safely retry until it gets 200.
 

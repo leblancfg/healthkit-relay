@@ -429,7 +429,7 @@ footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8
 {{if eq .Mode "login"}}
 <section class="card">
   <h2>Set up your iPhone</h2>
-  <p class="sub">Enter this server's token to get a setup code.</p>
+  <p class="sub">Enter this server's token to get a setup code or a read token.</p>
   {{if .Message}}<p class="error">{{.Message}}</p>{{end}}
   <form class="login" method="post" action="/setup">
     <label for="token">Server token</label>
@@ -438,6 +438,10 @@ footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8
   </form>
   <p class="hint">Or run <code>healthkit-relay pair</code> on the server: it shows a code to scan right in the terminal.</p>
 </section>
+<script nonce="{{.Nonce}}">
+// Keeps #read-tokens (from /docs) across signing in.
+if (location.hash) document.querySelector("form.login").action = "/setup" + location.hash;
+</script>
 {{else if eq .Mode "noaddress"}}
 <section class="card">
   <h2>No address for your iPhone</h2>
@@ -449,7 +453,7 @@ footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8
   <h2>Read token for {{.NewName}}</h2>
   <p class="sub">Copy it now: it is shown only this once. It reads health data through the query API (<code>/docs</code>), and nothing else.</p>
   <p><code class="token">{{.NewToken}}</code></p>
-  <a class="button" href="/setup">Done</a>
+  <a class="button" href="/setup#read-tokens">Done</a>
 </section>
 {{else if eq .Mode "used"}}
 <section class="card">
@@ -494,7 +498,7 @@ footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8
   <p class="empty">None yet.</p>
   {{end}}
 </section>
-<section class="card list">
+<section class="card list" id="read-tokens">
   <h3>Read tokens</h3>
   {{range .Tokens}}
   <div class="row">

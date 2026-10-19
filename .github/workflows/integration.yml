@@ -41,6 +41,11 @@ jobs:
         run: docker compose build --build-arg VERSION=ci
       - name: Start (with the metrics profile)
         run: docker compose up -d --wait
+      - name: The first start printed the admin token once
+        # Now: the smoke test's restart (docker compose down) discards this container's log.
+        run: |
+          docker compose logs relay > first-start.log
+          [ "$(grep -c 'Admin token: ' first-start.log)" = 1 ]
       - name: The image runs as non-root and reports healthy
         run: |
           id=$(docker compose ps -q relay)
@@ -59,12 +64,12 @@ jobs:
           done
           echo "$out"
           grep -q '"__name__":"healthkit_heart_rate"' <<<"$out"
-      - name: Archive is on the host, owned by the user; the admin token was printed once, its hash stored
+      - name: Archive is on the host, owned by the user; the admin token's hash is stored, the token not printed again
         run: |
           find data -ls | head -20
           [ "$(stat -c %u data/devices.json)" = "$(id -u)" ]
           [ "$(stat -c %a data/admin.json)" = 600 ]
-          [ "$(docker compose logs relay | grep -c 'Admin token: ')" = 1 ]
+          [ "$(docker compose logs relay | grep -c 'Admin token: ')" = 0 ]
       - name: Logs
         if: always()
         run: docker compose logs --no-color relay

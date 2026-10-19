@@ -21,7 +21,6 @@ and import the module:
             enable = true;
             publicUrl = "https://health.example.com";
             # listen = "0.0.0.0:8080"; openFirewall = true;   # phones on the LAN, no proxy
-            # tokenFile = "/run/secrets/healthkit-relay";      # default: generated on first start
             # forwardUrl = "http://127.0.0.1:8428/influx/write";
           };
         }
@@ -31,7 +30,9 @@ and import the module:
 }
 ```
 
-Then, after `nixos-rebuild switch`, `sudo healthkit-relay-pair` prints the setup QR code.
+Then, after `nixos-rebuild switch`, `journalctl -u healthkit-relay` shows the admin token
+and the setup link, printed once on first start; `sudo healthkit-relay-ctl pair` prints the
+setup QR code.
 
 ## Options
 
@@ -43,35 +44,44 @@ All under `services.healthkit-relay`:
 | `package` | the flake's package | the `healthkit-relay` package to run |
 | `listen` | `"127.0.0.1:8080"` | address to listen on; `"0.0.0.0:8080"` to accept phones on the LAN |
 | `publicUrl` | `null` | the URL phones use, put in setup codes. Null: the setup page offers the addresses it finds |
-| `tokenFile` | `null` | file holding the server token. Null: a random token is generated on first start in `/var/lib/healthkit-relay/token` |
+| `tokenFile` | `null` | deprecated: the server token file of earlier versions, imported into `admin.json` at start (see below) |
 | `setupFrom` | `"private"` | who may open `/setup` and pair: `"private"`, `"any"` or `"off"` |
 | `forwardUrl` | `null` | line-protocol write URL to forward numeric samples to |
 | `forwardTokenFile` | `null` | file holding a bearer token for `forwardUrl` |
 | `extraFlags` | `[ ]` | extra server flags, e.g. `[ "-measurement" "health" ]` |
 | `openFirewall` | `false` | open the `listen` port in the firewall |
 
-The service runs as the system user `healthkit-relay`, with the archive (`staging.db`,
-`devices.json`, `parquet/`) in `/var/lib/healthkit-relay`, mode 0700. `tokenFile` and
-`forwardTokenFile` are read by systemd as credentials, so they can stay owned by root with
-mode 600.
+The service runs as the system user `healthkit-relay`, with the archive and its state
+(`staging.db`, `parquet/`, `admin.json`, `devices.json`, `codes.json`) in
+`/var/lib/healthkit-relay`, mode 0700. `forwardTokenFile` is read by systemd as a credential,
+so it can stay owned by root with mode 600.
 
-## The token
+## The admin token
 
-Never put the token in the Nix configuration: everything there ends up world-readable in
-`/nix/store`. Leave `tokenFile` unset to have one generated, or point it at a file outside the
-store, created by hand (`install -m 600`) or with
-[sops-nix](https://github.com/Mic92/sops-nix) or [agenix](https://github.com/ryantm/agenix).
+On first start the service generates the admin token and prints it once, with the setup
+link, to the journal (`journalctl -u healthkit-relay`). Save it in a password manager: it
+signs in to `/setup`. `/var/lib/healthkit-relay/admin.json` holds its SHA-256.
+`sudo healthkit-relay-ctl admin reset` replaces it and prints the new one.
+
+From earlier versions: a `tokenFile`, or the `/var/lib/healthkit-relay/token` the module
+generated, is imported into `admin.json` at start, so the token keeps working as the admin
+token, and a warning is logged. Once the service has started with this version, set
+`tokenFile` to null (or remove it) and delete the file.
 
 ## Pairing and devices
 
-`healthkit-relay-pair` is installed with the module: it runs `healthkit-relay pair` with the
-service's token and settings. Run it as root. For the other commands, pass the token file
-yourself:
+`healthkit-relay-ctl` is installed with the module: it runs `healthkit-relay` with the
+service's settings and archive directory. Run it as root:
 
 ```sh
-sudo healthkit-relay-pair
-sudo healthkit-relay devices -token-file /var/lib/healthkit-relay/token   # or your tokenFile
+sudo healthkit-relay-ctl pair                       # setup QR code for the app
+sudo healthkit-relay-ctl devices                    # paired iPhones and tokens
+sudo healthkit-relay-ctl revoke 3f9a1c2e
+sudo healthkit-relay-ctl token create -name grafana # a read token for the query API
+sudo healthkit-relay-ctl admin reset                # a new admin token
 ```
+
+`healthkit-relay-pair` is short for `healthkit-relay-ctl pair`.
 
 ## VictoriaMetrics
 

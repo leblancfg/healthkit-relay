@@ -7,7 +7,7 @@ metrics database.
 ```sh
 go test ./...
 CGO_ENABLED=0 go build -o healthkit-relay .
-./healthkit-relay -archive-dir /var/lib/healthkit-relay -token-file /run/secrets/hkr-token
+./healthkit-relay -archive-dir /var/lib/healthkit-relay   # prints the admin token on first start
 ```
 
 ## Configuration
@@ -18,8 +18,8 @@ with dashes as underscores (`-archive-dir` is `HKR_ARCHIVE_DIR`). Flags win.
 | Flag | Default | |
 |------|---------|-|
 | `-listen` | `127.0.0.1:8080` | address to listen on |
-| `-archive-dir` | (required) | archive directory, created if missing; also holds `devices.json` |
-| `-token-file` | (required) | file holding the server token (at least 16 characters; surrounding whitespace ignored) |
+| `-archive-dir` | (required) | archive directory, created if missing; also holds `admin.json`, `devices.json` and `codes.json` |
+| `-token-file` | | deprecated: file holding the server token of earlier versions (at least 16 characters), imported into `admin.json` at start; then delete it |
 | `-public-url` | (offered, see below) | the URL phones use to reach the server, put in setup links, e.g. `https://health.example.com` |
 | `-setup-from` | `private` | who may open `/setup` and pair: `private` (loopback, LAN, Tailscale), `any`, or `off` |
 | `-forward-url` | | line-protocol write URL, e.g. `http://127.0.0.1:8428/influx/write` (VictoriaMetrics) or `http://influx:8086/api/v2/write?org=o&bucket=b&precision=ns` (InfluxDB 2) |
@@ -34,31 +34,64 @@ with dashes as underscores (`-archive-dir` is `HKR_ARCHIVE_DIR`). Flags win.
 The Go runtime's soft memory limit defaults to 128 MiB (`GOMEMLIMIT` overrides it): the
 server holds a batch and a Parquet row group at a time, whatever the archive's size.
 
-The token is read from a file, never from a flag value, so it stays out of process
-listings. With systemd, `LoadCredential=` and `-token-file ${CREDENTIALS_DIRECTORY}/token`
-work well.
+## Admin token
+
+The **admin token** signs in to `/setup` (pair iPhones, create and revoke read tokens) and
+authorizes the admin API (`POST /v1/pairing-codes`, `GET /v1/devices`,
+`DELETE /v1/devices/{id}`, `POST /v1/tokens`), the query API and erasing any device's data.
+On first start with no `admin.json`, the server generates one (256 random bits), keeps its
+SHA-256 in `<archive-dir>/admin.json` (mode 600):
+
+```json
+{"token_sha256": "9f86d0…", "created_at": "2026-10-19T12:00:00Z"}
+```
+
+and prints the token once, with the setup link (`-public-url` + `/setup`, else
+`http://<listen>/setup`), to stderr: `docker compose logs relay`, `journalctl -u
+healthkit-relay`, or the terminal running it. `healthkit-relay admin reset` writes a new
+one and prints it once, with the sign-in link, to stdout. The running server rereads
+`admin.json` when it changes: the old token stops working at once, and browsers signed in
+with it are signed out.
+
+From earlier versions: `-token-file` (`HKR_TOKEN_FILE`) is still read at start. With no
+`admin.json` yet, the server imports the token's hash and logs a deprecation warning: save
+the token in a password manager, delete the file and drop `-token-file`. With an
+`admin.json` holding another token (after `admin reset`), the file is ignored with a
+warning.
 
 ## Setting up the app
 
-The **server token** is the admin credential. The app does not need it: it gets a token of
-its own by scanning a one-time setup code.
+The app does not need the admin token: it gets a token of its own by scanning a one-time
+setup code.
 
-- **Setup page.** Open `https://<server>/setup` in a browser and enter the server token: the
+- **Setup page.** Open `https://<server>/setup` in a browser and enter the admin token: the
   page shows a QR code to scan with the iPhone's Camera (on the iPhone itself, an **Open in
   Health Relay** button instead), turns into "iPhone connected" once the app has paired, and
-  lists paired iPhones with a **Revoke** button. The sign-in lasts an hour (an HttpOnly,
-  SameSite=Strict cookie).
+  lists paired iPhones with a **Revoke** button. On a computer it also shows the setup link,
+  with a copy button. The sign-in lasts an hour (an HttpOnly, SameSite=Strict cookie).
 - **Terminal.** `healthkit-relay pair` prints the QR code in the terminal, and a link to the
   setup page for that code alone (no token needed to open it; for instance to send to your
-  phone). It reads the same flags and `HKR_` variables as the server, and talks to the
-  running server on `-listen` (or `-server URL`) with the server token:
+  phone).
 
-  ```sh
-  healthkit-relay pair -token-file ./token -public-url https://health.example.com
-  healthkit-relay pair -token-file ./token -valid 2h      # a link to send to your phone
-  healthkit-relay devices -token-file ./token
-  healthkit-relay revoke -token-file ./token 3f9a1c2e
-  ```
+## Commands
+
+`pair`, `devices`, `revoke <id>`, `token create -name X [-scope read|upload]` and
+`admin reset` read the same flags and `HKR_` variables as the server and act on the state
+files in the archive directory (`devices.json`, `codes.json`, `admin.json`), with file locks,
+while the server runs; the server rereads the files when they change. Run them as the
+server's user or as root (as root, the files keep the owner of the archive directory):
+
+```sh
+healthkit-relay pair -archive-dir ./data -public-url https://health.example.com
+healthkit-relay pair -archive-dir ./data -valid 2h      # a link to send to your phone
+healthkit-relay devices -archive-dir ./data
+healthkit-relay revoke -archive-dir ./data 3f9a1c2e
+healthkit-relay token create -archive-dir ./data -name grafana
+healthkit-relay admin reset -archive-dir ./data
+
+docker compose exec relay healthkit-relay pair          # Docker: HKR_ARCHIVE_DIR=/data is set
+sudo healthkit-relay-ctl pair                           # NixOS: the service's settings
+```
 
 Which address goes in the code: `-public-url` if set (do set it behind a reverse proxy).
 Otherwise the server lists the addresses it can find, best first, and the setup page lets
@@ -76,8 +109,9 @@ no code.
 
 How it works:
 
-- A setup code is 120 random bits, works once, and expires after 15 minutes; codes live in
-  memory only, so a restart voids them. The QR code holds
+- A setup code is 120 random bits, works once, and expires after 15 minutes (`pair -valid`,
+  up to a day). The server keeps its SHA-256 in `<archive-dir>/codes.json`, so it survives a
+  restart until it expires. The QR code holds
   `healthrelay://pair?server=<public url>&code=<code>`, which the app registers.
 - The app sends the code to `POST /v1/pair` and gets a token of its own (256 random bits). The
   server stores only its SHA-256, with the device's name and model, in
@@ -85,10 +119,13 @@ How it works:
   working at once. Pairing again from the same iPhone revokes its previous token.
 - `/setup` and `/v1/pair` answer only clients on private networks by default
   (`-setup-from`); behind a reverse proxy on the same host, the address the proxy puts last in
-  `X-Forwarded-For` counts. Without the server token or a valid code, the page shows only its
+  `X-Forwarded-For` counts. Without the admin token or a valid code, the page shows only its
   sign-in form. Responses are not cached, send no referrer and cannot be framed.
-- The server token still authorizes uploads, so an app set up by hand keeps working (app
-  0.4 swaps it for a device token of its own on the first start).
+- Uploads with the admin token (`POST /v1/samples`, `GET /v1/status`), from an app set up by
+  hand with the server token of earlier versions, are deprecated: this release accepts them,
+  logs a warning at most hourly and counts them in `healthkit_relay_admin_token_uploads_total`
+  on `/metrics`. Pair that app again from `/setup`. (App 0.4 and later swap a token typed in
+  by hand for a device token of their own on the first start.)
 
 ## API
 
@@ -183,7 +220,8 @@ Responses:
 - `401` missing, wrong or revoked token. `413` body too large. `500` the archive could not be
   written.
 
-The token is the server token or a device token from pairing.
+The token is a device token from pairing. The admin token is still accepted here and on
+`GET /v1/status` in this release, deprecated (see [Setting up the app](#setting-up-the-app)).
 
 ### `POST /v1/pair`
 
@@ -195,20 +233,20 @@ client outside `-setup-from`.
 
 ### `GET /v1/status`
 
-The server token or an upload token (a paired device's; read tokens get `403`). `{"version": "…", "wire_version": 2, "records": 12571973, "device": {…}}`
+An upload token (a paired device's; read tokens get `403`), or the admin token (deprecated). `{"version": "…", "wire_version": 2, "records": 12571973, "device": {…}}`
 (`device` only for a device token). The app shows the record count and detects a revoked
 token here.
 
 ### `POST /v1/pairing-codes`, `GET /v1/devices`, `DELETE /v1/devices/{id}`
 
-Server token only: mint a setup code (`{"code", "expires_at", "link", "setup_url"}`; the body
+Admin token only: mint a setup code (`{"code", "expires_at", "link", "setup_url"}`; the body
 may give `{"public_url": "…"}` when `-public-url` is not set), list paired devices, revoke
-one (`204`). The `pair`, `devices` and `revoke` commands use these. Each device has a
+one (`204`). Each device has a
 `scope`: `upload` (paired apps, and every entry written before scopes existed) or `read`.
 
 ### `POST /v1/tokens`
 
-Server token only: `{"name": "grafana", "scope": "read"}` (scope defaults to `read`) answers
+Admin token only: `{"name": "grafana", "scope": "read"}` (scope defaults to `read`) answers
 `201` with `{"token", "device"}`, the token shown this once. Read tokens may use the query API
 and nothing else: uploads, status and erase answer `403`. `healthkit-relay token create -name
 grafana` prints one; `devices` and `revoke` list and revoke them.
@@ -216,7 +254,7 @@ grafana` prints one; `devices` and `revoke` list and revoke them.
 ### Query API
 
 With `-query-duckdb`: `GET /v1/kinds`, `/v1/types`, `/v1/types/{type}`,
-`/v1/types/{type}/samples`, `/v1/types/{type}/aggregates`, for a read token or the server
+`/v1/types/{type}/samples`, `/v1/types/{type}/aggregates`, for a read token or the admin
 token (upload tokens get `403`). Described by `/openapi.json` (OpenAPI 3.1), shown at `/docs`;
 both are public. Read tokens are also created on `/setup#read-tokens`. See [docs/query-api.md](../docs/query-api.md).
 
@@ -225,7 +263,7 @@ A batch is stored entirely or not at all, so a client can safely retry until it 
 ### `DELETE /v1/data`
 
 Erases, permanently, everything the caller uploaded: with a device token, that device's
-records; with the server token, what was uploaded with the server token, or with
+records; with the admin token, what was uploaded with the admin token, or with
 `?device=<id>` what that device uploaded (also after it was revoked). It requires
 `?confirm=erase`: any other value, or none, is refused (`400`, nothing erased). Only the app
 before 0.6 may leave it out (a device token, or iOS's CFNetwork user agent). `200`
@@ -296,7 +334,7 @@ than `[A-Za-z0-9._-]` are %-escaped.
 
 **Schema.** `samples` and `records` share one: `uuid`, `type`, `kind`, `key` (records),
 `start`, `end` (timestamps, UTC), `value` (double), `unit`, `source_name`, `source_bundle`,
-`source_version`, `device`, `uploader` (the paired device's ID, `""` for the server token),
+`source_version`, `device`, `uploader` (the paired device's ID, `""` for uploads with the admin token),
 `wire` (1 or 2), `received_at`, and `json`, the record exactly as sent: nothing is lost, and
 fields added by newer apps are kept. In `records`, `type` is the record kind and `uuid` the
 sample a chunk belongs to. The point datasets have one row per point: `sample_uuid`, `chunk`,

@@ -11,14 +11,23 @@ In a new directory, with `192.168.1.10` replaced by the server's address on your
 mkdir -p healthkit-relay && cd healthkit-relay
 curl -fsSLO https://raw.githubusercontent.com/leblancfg/healthkit-relay/main/docker-compose.yml
 mkdir -p data
-(umask 077; head -c 32 /dev/urandom | base64 > token)
 printf 'HKR_USER=%s\nHKR_PUBLIC_URL=%s\n' "$(id -u):$(id -g)" http://192.168.1.10:8080 > .env
 docker compose up -d
 curl -s http://127.0.0.1:8080/healthz    # ok
+docker compose logs relay                # the admin token and the setup link
 ```
 
-`token` is the **server token**, the admin credential: it opens the setup page and manages
-devices. Keep it private. Phones never see it; each gets a token of its own when paired.
+On first start the server generates the **admin token** and prints it once, with the setup
+link, in its log:
+
+```text
+    Admin token: Zk3v...
+    Sign in at:  http://192.168.1.10:8080/setup
+```
+
+Save it in a password manager. It signs in to the setup page, where you pair iPhones and
+create read tokens. Phones never see it; each gets a token of its own when paired. Lost it?
+`docker compose exec relay healthkit-relay admin reset` prints a new one.
 `HKR_PUBLIC_URL` is the address the phone will use to reach the server. More options in
 [Docker & Compose](setup/docker.md).
 
@@ -40,7 +49,7 @@ Details: [ios/README.md](https://github.com/leblancfg/healthkit-relay/blob/main/
 
 1. In the server's directory, run `docker compose exec relay healthkit-relay pair`: it prints
    a QR code. Or open `http://192.168.1.10:8080/setup` on a computer on the same network and
-   enter the server token.
+   sign in with the admin token.
 2. Point the iPhone's Camera at the QR code and tap **Open in Health Relay**.
 3. Health asks once what Health Relay may read: select everything, then confirm.
 

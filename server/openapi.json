@@ -4,13 +4,13 @@
     "title": "Health Relay query API",
     "version": "set by the server",
     "summary": "Read-only access to one person's Apple Health archive.",
-    "description": "**Get a read token: [/setup](/setup#read-tokens)** (sign in with the server token, then **Read tokens**, **Create**). Click **Authorize** below and paste it.\n\n**Types and kinds**\n\nA *type* is one specific HealthKit measurement, named by HealthKit's identifier: `HKQuantityTypeIdentifierStepCount`, `HKQuantityTypeIdentifierHeartRate`, `HKCategoryTypeIdentifierSleepAnalysis`. A *kind* is the shape of a type's data. Each type has one kind: `HKQuantityTypeIdentifierStepCount` is a type of kind `quantity`.\n\n- `quantity`: a number with a unit. Steps: 12027 `count` on 2026-10-15. Heart rate: 67 `count/min` at 09:04.\n- `category`: a labelled interval. Sleep: `asleepDeep` from 01:10 to 01:40. Stand hours: `stood` from 14:00 to 15:00.\n- `workout`, `heartbeat_series`, `electrocardiogram`, `audiogram`, `correlation` (blood pressure), ...: records with fields of their own, in each sample's `raw`.\n\n`GET /v1/kinds` lists the kinds, `GET /v1/types` the types. Quantity and category types have aggregates.\n\n**How to use it**\n\n1. `GET /v1/types?present=true` lists the types that have data, with their kind, unit, aggregation style and date range.\n2. `GET /v1/types/{type}/aggregates` gives daily or hourly totals or averages, for questions like \"steps per day last week\", \"average heart rate per hour\" or \"minutes of deep sleep per night\". Pass `tz` (an IANA time zone such as `America/Toronto`) so days start at local midnight.\n3. `GET /v1/types/{type}/samples` gives the individual samples, paginated.\n\nExample: `GET /v1/types/HKQuantityTypeIdentifierStepCount/aggregates?tz=America/Toronto&start=2026-10-15&end=2026-10-16` returns one bucket:\n\n```json\n{\"start\": \"2026-10-15T00:00:00-04:00\", \"end\": \"2026-10-16T00:00:00-04:00\", \"date\": \"2026-10-15\", \"sum\": 12027, \"unit\": \"count\", \"samples\": 1009, \"sources\": [\"Apple Watch\", \"iPhone\"]}\n```\n\n**Conventions**\n\n- Times are RFC 3339 with an offset (in `tz` when given, else UTC). `start` and `end` take an RFC 3339 timestamp (`2026-10-17T09:00:00-04:00`) or a date (`2026-10-17`, midnight in `tz`); `end` is exclusive.\n- A sample has a start and an end; a point measurement (a heart rate reading) has start = end.\n- Cumulative quantities (steps, distance, energy) are summed; when an Apple Watch and an iPhone both counted the same minutes, aggregates count them once (see `dedup`). Discrete quantities (heart rate, body mass) are averaged, with min and max. Categories (sleep stages, stand hours) give, per value, the number of samples and the seconds they cover.\n- Values are in the unit the app sent, usually Apple's canonical unit: `count`, `count/min`, `kcal`, `m`, `kg`, `%` (a fraction from 0 to 1).\n- The archive is written hourly: samples from the last hour may appear later.\n- Errors are JSON: `{\"error\": \"tz \\\"Mars/Olympus\\\" is not in the time zone database\"}`.\n\n**Authentication**\n\n`Authorization: Bearer <token>`. The query endpoints take a read token or the server token. Get a read token on [/setup](/setup#read-tokens), signed in with the server token, or with `healthkit-relay token create -name <client>` on the server. Tokens of paired iPhones (scope `upload`) get 403. Token management (`/v1/tokens`, `/v1/devices`) takes the server token. This document and `/docs` are public.",
+    "description": "**Get a read token: [/setup](/setup#read-tokens)** (sign in with the admin token, then **Read tokens**, **Create**). Click **Authorize** below and paste it.\n\n**Types and kinds**\n\nA *type* is one specific HealthKit measurement, named by HealthKit's identifier: `HKQuantityTypeIdentifierStepCount`, `HKQuantityTypeIdentifierHeartRate`, `HKCategoryTypeIdentifierSleepAnalysis`. A *kind* is the shape of a type's data. Each type has one kind: `HKQuantityTypeIdentifierStepCount` is a type of kind `quantity`.\n\n- `quantity`: a number with a unit. Steps: 12027 `count` on 2026-10-15. Heart rate: 67 `count/min` at 09:04.\n- `category`: a labelled interval. Sleep: `asleepDeep` from 01:10 to 01:40. Stand hours: `stood` from 14:00 to 15:00.\n- `workout`, `heartbeat_series`, `electrocardiogram`, `audiogram`, `correlation` (blood pressure), ...: records with fields of their own, in each sample's `raw`.\n\n`GET /v1/kinds` lists the kinds, `GET /v1/types` the types. Quantity and category types have aggregates.\n\n**How to use it**\n\n1. `GET /v1/types?present=true` lists the types that have data, with their kind, unit, aggregation style and date range.\n2. `GET /v1/types/{type}/aggregates` gives daily or hourly totals or averages, for questions like \"steps per day last week\", \"average heart rate per hour\" or \"minutes of deep sleep per night\". Pass `tz` (an IANA time zone such as `America/Toronto`) so days start at local midnight.\n3. `GET /v1/types/{type}/samples` gives the individual samples, paginated.\n\nExample: `GET /v1/types/HKQuantityTypeIdentifierStepCount/aggregates?tz=America/Toronto&start=2026-10-15&end=2026-10-16` returns one bucket:\n\n```json\n{\"start\": \"2026-10-15T00:00:00-04:00\", \"end\": \"2026-10-16T00:00:00-04:00\", \"date\": \"2026-10-15\", \"sum\": 12027, \"unit\": \"count\", \"samples\": 1009, \"sources\": [\"Apple Watch\", \"iPhone\"]}\n```\n\n**Conventions**\n\n- Times are RFC 3339 with an offset (in `tz` when given, else UTC). `start` and `end` take an RFC 3339 timestamp (`2026-10-17T09:00:00-04:00`) or a date (`2026-10-17`, midnight in `tz`); `end` is exclusive.\n- A sample has a start and an end; a point measurement (a heart rate reading) has start = end.\n- Cumulative quantities (steps, distance, energy) are summed; when an Apple Watch and an iPhone both counted the same minutes, aggregates count them once (see `dedup`). Discrete quantities (heart rate, body mass) are averaged, with min and max. Categories (sleep stages, stand hours) give, per value, the number of samples and the seconds they cover.\n- Values are in the unit the app sent, usually Apple's canonical unit: `count`, `count/min`, `kcal`, `m`, `kg`, `%` (a fraction from 0 to 1).\n- The archive is written hourly: samples from the last hour may appear later.\n- Errors are JSON: `{\"error\": \"tz \\\"Mars/Olympus\\\" is not in the time zone database\"}`.\n\n**Authentication**\n\n`Authorization: Bearer <token>`. The query endpoints take a read token or the admin token. Get a read token on [/setup](/setup#read-tokens), signed in with the admin token, or with `healthkit-relay token create -name <client>` on the server. The admin token is printed by the server on its first start, or by `healthkit-relay admin reset`. Tokens of paired iPhones (scope `upload`) get 403. Token management (`/v1/tokens`, `/v1/devices`) takes the admin token. This document and `/docs` are public.",
     "license": { "name": "MIT", "identifier": "MIT" }
   },
   "tags": [
     { "name": "catalog", "description": "Kinds and types, and which types have data." },
     { "name": "data", "description": "Samples and aggregates of one type." },
-    { "name": "tokens", "description": "Read tokens for query clients (server token only)." }
+    { "name": "tokens", "description": "Read tokens for query clients (admin token only)." }
   ],
   "security": [ { "bearerAuth": [] } ],
   "paths": {
@@ -175,7 +175,7 @@
         "tags": [ "tokens" ],
         "operationId": "createToken",
         "summary": "Create a token",
-        "description": "Mints a token for a client other than the iPhone app (Grafana, a script, an agent). The token is in the response only: the server keeps its SHA-256. Read tokens use the query API and nothing else. List tokens with `GET /v1/devices` and revoke them with `DELETE /v1/devices/{id}`. Needs the server token. The same is on [/setup](/setup#read-tokens), under **Read tokens**.",
+        "description": "Mints a token for a client other than the iPhone app (Grafana, a script, an agent). The token is in the response only: the server keeps its SHA-256. Read tokens use the query API and nothing else. List tokens with `GET /v1/devices` and revoke them with `DELETE /v1/devices/{id}`. Needs the admin token. The same is on [/setup](/setup#read-tokens), under **Read tokens**.",
         "x-required-scope": "admin",
         "requestBody": {
           "required": true,
@@ -206,7 +206,7 @@
         "tags": [ "tokens" ],
         "operationId": "listDevices",
         "summary": "List paired iPhones and tokens",
-        "description": "Every stored token: paired iPhones (scope `upload`) and query clients (scope `read`), oldest first, with when each was last used. Needs the server token.",
+        "description": "Every stored token: paired iPhones (scope `upload`) and query clients (scope `read`), oldest first, with when each was last used. Needs the admin token.",
         "x-required-scope": "admin",
         "responses": {
           "200": {
@@ -229,7 +229,7 @@
         "tags": [ "tokens" ],
         "operationId": "revokeDevice",
         "summary": "Revoke a paired iPhone or a token",
-        "description": "Its token stops working at once. Records it uploaded stay. Needs the server token.",
+        "description": "Its token stops working at once. Records it uploaded stay. Needs the admin token.",
         "x-required-scope": "admin",
         "parameters": [ { "name": "id", "in": "path", "required": true, "description": "The device id from `GET /v1/devices`.", "schema": { "type": "string" }, "example": "4be1f07a" } ],
         "responses": {
@@ -257,7 +257,7 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "description": "`Authorization: Bearer <token>`. Query endpoints: a read token, from [/setup](/setup#read-tokens) (signed in with the server token) or `healthkit-relay token create -name <client>`, or the server token. Token management: the server token. Tokens of paired iPhones get 403 on queries."
+        "description": "`Authorization: Bearer <token>`. Query endpoints: a read token, from [/setup](/setup#read-tokens) (signed in with the admin token) or `healthkit-relay token create -name <client>`, or the admin token. Token management: the admin token, printed by the server on its first start or by `healthkit-relay admin reset`. Tokens of paired iPhones get 403 on queries."
       }
     },
     "parameters": {
@@ -267,7 +267,7 @@
     },
     "responses": {
       "BadRequest": { "description": "A parameter is invalid; the message says which and what is accepted.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "tz \"Mars/Olympus\" is not in the time zone database" } } } },
-      "Unauthorized": { "description": "No token, or an invalid one (for token management: anything but the server token).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "unauthorized" } } } },
+      "Unauthorized": { "description": "No token, or an invalid one (for token management: anything but the admin token).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "unauthorized" } } } },
       "Forbidden": { "description": "The token is valid but its scope forbids this: an upload token (a paired iPhone's) on a query endpoint.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "NotFound": { "description": "No such type or device.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "TooLarge": { "description": "The result exceeds the server's limits: lower `limit`, shorten the range or leave out `raw`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },

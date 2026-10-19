@@ -125,20 +125,21 @@ for a binary, systemd, NixOS, macOS, NAS or Raspberry Pi):
 mkdir -p healthkit-relay && cd healthkit-relay
 curl -fsSLO https://raw.githubusercontent.com/leblancfg/healthkit-relay/main/docker-compose.yml
 mkdir -p data
-(umask 077; head -c 32 /dev/urandom | base64 > token)   # the admin token
 printf 'HKR_USER=%s\nHKR_PUBLIC_URL=%s\n' "$(id -u):$(id -g)" http://192.168.1.10:8080 > .env
 docker compose up -d
+docker compose logs relay   # the admin token and the setup link, printed once
 ```
 
-`HKR_PUBLIC_URL` is the address your iPhone uses to reach the server.
+`HKR_PUBLIC_URL` is the address your iPhone uses to reach the server. The **admin token**
+signs in to the setup page; save it in a password manager.
 
 **iPhone app.** Not on the App Store yet: build it with Xcode and a paid Apple Developer
 account (HealthKit requires one). See [ios/README.md](ios/README.md).
 
 **Pair.** Run `docker compose exec relay healthkit-relay pair` for a QR code in the
 terminal, or open `http://192.168.1.10:8080/setup` in a browser on the same network and enter
-the token; scan the QR code with the iPhone's Camera. Allow Health access once and the first
-sync starts. For syncing away from home,
+the admin token; scan the QR code with the iPhone's Camera. Allow Health access once and the
+first sync starts. For syncing away from home,
 [put it behind HTTPS](https://leblancfg.com/healthkit-relay/networking/) (Tailscale is
 the easiest).
 
@@ -149,7 +150,7 @@ the easiest).
 - The app asks for **read** access only and never writes to Apple Health.
 - Each iPhone has its own token, stored in the Keychain; the server keeps only a hash and
   can revoke it. Pairing and the setup page answer private networks only, by default.
-- `/healthz`, `/metrics`, `/openapi.json` and `/docs` expose no health data. The optional query API reads it only with a read token or the server token.
+- `/healthz`, `/metrics`, `/openapi.json` and `/docs` expose no health data. The optional query API reads it only with a read token or the admin token.
 - Your data is plain files on your disk: easy to back up, easy to delete.
 
 More in [Security & privacy](https://leblancfg.com/healthkit-relay/security/).

@@ -16,12 +16,10 @@ sudo install -m 755 healthkit-relay /usr/local/bin/
 
 Or with Nix: `nix profile install github:leblancfg/healthkit-relay`.
 
-## Data directory and token
+## Data directory
 
 ```sh
 mkdir -p ~/Library/Application\ Support/healthkit-relay/data
-cd ~/Library/Application\ Support/healthkit-relay
-head -c 32 /dev/urandom | base64 > token && chmod 600 token
 ```
 
 ## launchd agent
@@ -39,7 +37,6 @@ A user agent runs while you are logged in. Replace `YOU` with your user name.
     <string>/usr/local/bin/healthkit-relay</string>
     <string>-listen</string><string>0.0.0.0:8080</string>
     <string>-archive-dir</string><string>/Users/YOU/Library/Application Support/healthkit-relay/data</string>
-    <string>-token-file</string><string>/Users/YOU/Library/Application Support/healthkit-relay/token</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -52,7 +49,16 @@ A user agent runs while you are logged in. Replace `YOU` with your user name.
 ```sh
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.healthkit-relay.plist
 launchctl print gui/$(id -u)/io.github.healthkit-relay | grep state
-tail -f ~/Library/Logs/healthkit-relay.log
+tail -f ~/Library/Logs/healthkit-relay.log   # the admin token and the setup link, printed once
+```
+
+On first start the server generates the admin token and prints it once, with the setup link,
+to the log. Save it in a password manager: it signs in to `/setup`. The commands run as you,
+on the same data directory:
+
+```sh
+healthkit-relay pair -archive-dir ~/Library/Application\ Support/healthkit-relay/data
+healthkit-relay admin reset -archive-dir ~/Library/Application\ Support/healthkit-relay/data   # a new admin token
 ```
 
 To restart after an update: `launchctl kickstart -k gui/$(id -u)/io.github.healthkit-relay`.

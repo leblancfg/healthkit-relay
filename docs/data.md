@@ -70,7 +70,7 @@ loses nothing and duplicates nothing. DuckDB can read the files while the server
 
 `samples` and `records`: `uuid`, `type`, `kind`, `key` (records), `start`, `end`
 (timestamps, UTC), `value` (double), `unit`, `source_name`, `source_bundle`,
-`source_version`, `device`, `uploader` (the paired device's ID, empty for the server token),
+`source_version`, `device`, `uploader` (the paired device's ID, empty for uploads with the admin token),
 `wire` (wire format, 1 or 2), `received_at`, and `json`, the record exactly as the app sent
 it, so fields without a column (metadata, category value names, Apple's serialized object)
 are kept. In `records`, `type` is the record kind (`activity_summary`, `characteristics`,
@@ -101,7 +101,7 @@ rows (or removed), its staged rows, tombstones and de-duplication entries are de
 SQLite's log is truncated. There is no soft delete. The app then uploads its history again.
 Not erased: numbers already forwarded to the metrics database (they age out with its
 retention) and copies outside the archive directory, such as backups and snapshots. With the
-server token, `?confirm=erase` is required; `?device=<id>` erases one device's data.
+admin token, `?confirm=erase` is required; `?device=<id>` erases one device's data.
 
 ## Querying with DuckDB
 

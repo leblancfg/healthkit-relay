@@ -5,8 +5,10 @@ you control. Back up its data directory.
 
 ## What to back up
 
-The whole data directory (`-archive-dir`): the Parquet archive, the staging database and
-`devices.json`. The server token file too, or be ready to make a new one.
+The whole data directory (`-archive-dir`): the Parquet archive, the staging database and the
+state files: `admin.json` (the admin token's hash), `devices.json` (paired iPhones and read
+tokens) and `codes.json` (setup codes not yet used). A backup without `admin.json` still
+restores everything else: `healthkit-relay admin reset` then prints a new admin token.
 
 The metrics database (VictoriaMetrics, InfluxDB) does not need a backup for this project's
 sake: everything forwarded to it is also in the archive.
@@ -43,8 +45,9 @@ keep the repository password somewhere other than the server.
 
 ## Restoring
 
-Stop the server, put the data directory back, start the server. Paired phones keep working
-(their token hashes are in `devices.json`) and send new data at their next sync. Data the
+Stop the server, put the data directory back, start the server. Paired phones and read
+tokens keep working (their hashes are in `devices.json`), the admin token too (`admin.json`),
+and phones send new data at their next sync. Data the
 server confirmed between the backup and the loss is not re-sent on its own, since the phone
 believes the server has it. To fill that gap, re-send all history from the app (Advanced);
 the server ignores what it already has.

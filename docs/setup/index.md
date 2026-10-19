@@ -25,9 +25,11 @@ batch, checks it is stored, restarts the server and checks it is still there.
 
 - **A data directory** on a disk with room to grow and in your backups. A few years of
   Apple Watch data is typically a few gigabytes before compression.
-- **A server token** in a file only the server can read:
-  `head -c 32 /dev/urandom | base64 > token && chmod 600 token`.
-  It is read from a file, never a command-line value, so it stays out of process listings.
+- **The admin token**, which the server generates on first start and prints once, with the
+  setup link, in its log (`docker compose logs relay`, `journalctl -u healthkit-relay`, or the
+  terminal running it). Save it in a password manager: it signs in to `/setup`. The server
+  keeps its SHA-256 in `admin.json` in the data directory; `healthkit-relay admin reset`
+  replaces it and prints a new one.
 - **A way for the phone to reach it**: see [Networking & HTTPS](../networking.md).
 
 ## Configuration
@@ -38,8 +40,8 @@ dashes as underscores (`-archive-dir` is `HKR_ARCHIVE_DIR`). Flags win over the 
 | Flag | Default | |
 |---|---|---|
 | `-listen` | `127.0.0.1:8080` | address to listen on; `0.0.0.0:8080` to accept other machines (and in containers) |
-| `-archive-dir` | required | data directory: `staging.db`, `parquet/`, `devices.json` |
-| `-token-file` | required | file holding the server token (16+ characters) |
+| `-archive-dir` | required | data directory: `staging.db`, `parquet/`, `admin.json`, `devices.json`, `codes.json` |
+| `-token-file` | | deprecated: the server token file of earlier versions, imported into `admin.json` at start; then delete it |
 | `-public-url` | offered | the URL phones use, put in setup codes, e.g. `https://health.example.com` |
 | `-setup-from` | `private` | who may open `/setup` and pair: `private`, `any` or `off` |
 | `-forward-url` | | line-protocol write URL for metrics forwarding (see [Grafana](../grafana.md)) |
@@ -56,9 +58,12 @@ dashes as underscores (`-archive-dir` is `HKR_ARCHIVE_DIR`). Flags win over the 
 The same binary has subcommands, which take the same flags and `HKR_` variables as the
 server:
 
-- against the **running** server, authenticated with the token file: `pair` (a setup QR code
-  in the terminal; `-valid 2h` for a longer-lived code), `devices` (list paired phones) and
-  `revoke <id>`. They connect to the `-listen` address, or `-server <url>`;
+- on the archive directory's state files (`admin.json`, `devices.json`, `codes.json`), with
+  the server running or not: `pair` (a setup QR code in the terminal; `-valid 2h` for a
+  longer-lived code), `devices` (list paired phones and tokens), `revoke <id>`,
+  `token create -name <client>` (a read token for the [query API](../query-api.md)) and
+  `admin reset` (a new admin token). The server rereads the files when they change. Run them
+  as the server's user or as root, e.g. `docker compose exec relay healthkit-relay pair`;
 - on the archive directory with the server **stopped**: `migrate` (convert the JSON Lines
   archive of versions before 0.5), `flush` and `compact` (run the hourly and nightly
   maintenance now).

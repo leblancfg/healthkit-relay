@@ -29,8 +29,7 @@ The server runs each query with the [DuckDB](https://duckdb.org) command-line to
 itself stays a static Go binary). Install `duckdb` (1.2 or newer, for `allowed_directories`; tested with 1.5) and point the server at it:
 
 ```sh
-healthkit-relay -archive-dir /var/lib/healthkit-relay -token-file /etc/healthkit-relay/token \
-  -query-duckdb /usr/bin/duckdb
+healthkit-relay -archive-dir /var/lib/healthkit-relay -query-duckdb /usr/bin/duckdb
 ```
 
 | Flag | Default | |
@@ -53,22 +52,29 @@ hourly) and are not visible to the API until then.
 
 The query API takes a **read token**, a token of its own for each client. The quickest way
 to get one: open **`/setup#read-tokens`** (the `/docs` page links to it), sign in with the
-server token, type a name under **Read tokens** and click **Create**. The token is shown once.
+admin token, type a name under **Read tokens** and click **Create**. The token is shown once,
+with a **Copy** button: save it in a password manager, then paste it into the client
+(Grafana, a script, an agent) as a Bearer token, `Authorization: Bearer <token>`. Lost it?
+Revoke it and create a new one. Over plain HTTP on a LAN address, where the browser offers no
+clipboard access, **Copy** selects the token for Ctrl+C or Cmd+C.
 
-On the server:
+On the server, as the server's user or root, with its archive directory (see
+[Commands](setup/index.md#commands)):
 
 ```sh
-healthkit-relay token create -name grafana > grafana.token   # prints the token once
-healthkit-relay devices                                       # lists it, with SCOPE read
-healthkit-relay revoke <id>                                    # revokes it
+healthkit-relay token create -archive-dir /var/lib/healthkit-relay -name grafana > grafana.token   # prints the token once
+healthkit-relay devices -archive-dir /var/lib/healthkit-relay                                       # lists it, with SCOPE read
+healthkit-relay revoke -archive-dir /var/lib/healthkit-relay <id>                                    # revokes it
 ```
 
-or `POST /v1/tokens` with the server token. The server keeps only the token's SHA-256, in
+(`docker compose exec relay healthkit-relay token create -name grafana` in Docker,
+`sudo healthkit-relay-ctl token create -name grafana` on NixOS), or `POST /v1/tokens` with
+the admin token. The server keeps only the token's SHA-256, in
 `devices.json`, next to the paired iPhones.
 
 | Token | Scope | Query API | Upload, status, erase | Tokens, devices, pairing |
 |---|---|---|---|---|
-| Server token | admin | yes | yes | yes |
+| Admin token | admin | yes | erase any device's data; uploads deprecated | yes |
 | Read token | `read` | yes | no (`403`) | no (`401`) |
 | Paired iPhone | `upload` | no (`403`) | yes, its own data | no (`401`) |
 

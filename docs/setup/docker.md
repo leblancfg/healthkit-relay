@@ -14,9 +14,8 @@ a non-root user (65532 unless you choose another) and keeps its archive in `/dat
 
 Pin a version in production and update deliberately.
 
-The image sets `HKR_LISTEN=:8080`, `HKR_ARCHIVE_DIR=/data` and
-`HKR_TOKEN_FILE=/run/secrets/hkr_token`, so you only mount the data directory and the token
-file there. Every other [flag](index.md#configuration) can be set as an `HKR_` variable.
+The image sets `HKR_LISTEN=:8080` and `HKR_ARCHIVE_DIR=/data`, so you only mount the data
+directory. Every other [flag](index.md#configuration) can be set as an `HKR_` variable.
 
 ## Docker Compose
 
@@ -27,24 +26,35 @@ is the supported setup, and the one CI tests end to end. In a directory of its o
 ```sh
 curl -fsSLO https://raw.githubusercontent.com/leblancfg/healthkit-relay/main/docker-compose.yml
 mkdir -p data
-(umask 077; head -c 32 /dev/urandom | base64 > token)
 printf 'HKR_USER=%s\nHKR_PUBLIC_URL=%s\n' "$(id -u):$(id -g)" http://192.168.1.10:8080 > .env
 docker compose up -d
+docker compose logs relay                           # the admin token, printed once
 docker compose exec relay healthkit-relay pair      # QR code for the iPhone app
 ```
+
+On first start the server generates the admin token and prints it once, with the setup link,
+to its log: save it in a password manager. It signs in to `/setup`. For a new one (the old one
+stops working at once):
+
+```sh
+docker compose exec relay healthkit-relay admin reset
+```
+
+The other commands run the same way: `docker compose exec relay healthkit-relay devices`,
+`revoke <id>`, `token create -name grafana`.
 
 The service is called `relay`. It reads these from `.env`:
 
 | Variable | |
 |---|---|
-| `HKR_USER` | required: the `uid:gid` the server runs as. Use your own, so `./data` and `./token` stay yours and are backed up with the directory |
+| `HKR_USER` | required: the `uid:gid` the server runs as. Use your own, so `./data` stays yours and are backed up with the directory |
 | `HKR_PUBLIC_URL` | required: the URL phones use to reach the server, put in setup codes, e.g. `http://192.168.1.10:8080` or `https://health.example.com` |
 | `HKR_VERSION` | image tag, default `latest`; e.g. `HKR_VERSION=0.6.0` to pin |
 | `HKR_PORT` | host port, default `8080` |
 | `HKR_FORWARD_URL` | optional: forward numeric samples to a metrics database (below) |
 
-`./data` holds the archive (`staging.db`, `devices.json`, `parquet/`); `./token` is mounted
-read-only at `/run/secrets/hkr_token`. `docker compose ps` shows the container as `healthy`
+`./data` holds the archive and the server's state (`staging.db`, `parquet/`, `admin.json`,
+`devices.json`, `codes.json`). `docker compose ps` shows the container as `healthy`
 once it answers `/healthz`.
 
 !!! note "Pairing from a container"
@@ -73,12 +83,12 @@ of it. VictoriaMetrics and Grafana keep their data in the named volumes `victori
 
 ```sh
 mkdir -p data
-(umask 077; head -c 32 /dev/urandom | base64 > token)
 docker run -d --name healthkit-relay --restart unless-stopped \
   -p 8080:8080 --user "$(id -u):$(id -g)" \
   -e HKR_PUBLIC_URL=http://192.168.1.10:8080 \
-  -v "$PWD/data:/data" -v "$PWD/token:/run/secrets/hkr_token:ro" \
+  -v "$PWD/data:/data" \
   ghcr.io/leblancfg/healthkit-relay:0.6.0
+docker logs healthkit-relay                        # the admin token
 docker exec healthkit-relay healthkit-relay pair
 ```
 
@@ -91,10 +101,17 @@ docker compose pull && docker compose up -d
 With `HKR_VERSION` pinned, change it in `.env` first. The data directory format is upgraded
 in place on start; [back it up](../backups.md) before updating across minor versions.
 
+From 0.6 and earlier, where you made a `./token` file by hand and mounted it at
+`/run/secrets/hkr_token`: on the first start of this version the server imports its hash into
+`data/admin.json`, so the same token signs in to `/setup`, and logs a deprecation warning.
+Save the token in a password manager, then delete `./token` and take its mount out of your
+`docker-compose.yml`. Paired iPhones keep their tokens; an app still set up by hand with the
+old token should be paired again from `/setup`.
+
 ## Permissions
 
-If the server cannot write `/data` or read the token, those files belong to another user than
-the one the container runs as. With Compose that is `HKR_USER`: set it to the owner of
-`./data` and `./token` (`stat -c %u:%g data`). With `docker run`, pass the same with
+If the server cannot write `/data`, it belongs to another user than the one the container
+runs as. With Compose that is `HKR_USER`: set it to the owner of `./data`
+(`stat -c %u:%g data`). With `docker run`, pass the same with
 `--user`; without it the image runs as `65532:65532`, which can write a named volume but not
 a host directory you own.

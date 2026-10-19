@@ -6,10 +6,20 @@ scrub addresses before sharing them.
 
 ## Server
 
-**It exits at start with a token error.** The token file must exist, be readable by the
-user the server runs as (in Docker, `HKR_USER`; it is mounted at `/run/secrets/hkr_token`)
-and hold at least 16 characters. Make one with
-`(umask 077; head -c 32 /dev/urandom | base64 > token)`.
+**Where is the admin token?** The server prints it once, on first start, with the setup link:
+`docker compose logs relay`, `journalctl -u healthkit-relay`, or the terminal running it.
+Lost it? `healthkit-relay admin reset` on the server prints a new one
+(`docker compose exec relay healthkit-relay admin reset`, `sudo healthkit-relay-ctl admin
+reset` on NixOS).
+
+**A command says the archive directory "belongs to uid N".** `pair`, `devices`, `revoke`,
+`token create` and `admin reset` write the server's state files: run them as the server's
+user or as root, with the server's `-archive-dir` (see [Commands](setup/index.md#commands)).
+
+**It exits at start with a token error.** That comes from `-token-file` (`HKR_TOKEN_FILE`),
+kept from an earlier version: the file must exist, be readable by the user the server runs
+as and hold at least 16 characters. Once the server has imported it into `admin.json`,
+delete the file and the flag.
 
 **Other machines cannot connect.** The binary's default, also in the systemd unit and the
 NixOS module, is `-listen 127.0.0.1:8080`, which only the server itself can reach. Set
@@ -34,8 +44,7 @@ default. From the internet, pair over a VPN or from home. Behind a reverse proxy
 host, the server sees the proxy's address; put the proxy on the same host, or use
 `healthkit-relay pair` on the server.
 
-**"Code expired or already used".** Codes work once, for 15 minutes, and a server restart
-voids them. Make a new one. For a link sent to the phone, use `pair -valid 2h`.
+**"Code expired or already used".** Codes work once, for 15 minutes. Make a new one. For a link sent to the phone, use `pair -valid 2h`.
 
 **Scanning the code opens Safari, not the app.** The app is not installed on that phone, or
 was installed under another bundle ID. Install it, then scan again.

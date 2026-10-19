@@ -9,11 +9,11 @@ enum UploadError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .notConfigured: "Server URL or token missing"
-        case let .rejected(code, msg): "Server rejected the upload (\(code)): \(msg)"
-        case let .failed(msg): "Upload failed: \(msg)"
-        case .serverTooOld: "The server is too old for this app (needs wire format v2): update healthkit-relay"
-        case .unauthorized: "The server no longer accepts this iPhone. Scan a new setup code from its setup page."
+        case .notConfigured: "Health Relay is not connected to a server. Open your server's setup page and scan its setup code."
+        case let .rejected(code, msg): "The server refused the data (error \(code)). The server's log says why. Server's answer: \(msg)"
+        case let .failed(msg): "Could not send data to the server. Health Relay tries again at the next sync. Reason: \(msg)"
+        case .serverTooOld: "The server runs an older healthkit-relay than this app needs. Update healthkit-relay on the server, then tap Sync Now."
+        case .unauthorized: "The server no longer accepts this iPhone. To connect again, open the server's setup page and scan its setup code."
         }
     }
 }

@@ -59,11 +59,11 @@ exception guard (`HealthKitSafe.swift`), so such a type is skipped and logged, n
 1. **Set up**: open your server's setup page (`https://<server>/setup`) on a computer and
    scan its code with the iPhone's Camera, then tap **Open in Health Relay** (on the iPhone
    itself, tap the page's button). Or run `healthkit-relay pair` on the server and scan the
-   code it prints. **Enter Server Details Instead** takes an address and the server token,
+   code it prints. **Enter Server Details Instead** takes the server address and the admin token,
    which the app swaps for a token of its own.
 2. Health asks once what Health Relay may read: select everything, then confirm. The app
    asks again by itself only when an update brings data types the sheet never showed.
-3. That is all. The first sync uploads all history, which can take a while; keep the app
+3. The first sync uploads all history, which can take a while; keep the app
    open. After that iOS wakes the app in the background when new data arrives (about
    hourly, at the system's discretion; Low Power Mode and force-quitting the app pause it),
    runs a background refresh about hourly as a fallback, syncs at the first unlock after a

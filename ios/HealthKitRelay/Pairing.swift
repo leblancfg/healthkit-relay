@@ -69,11 +69,11 @@ enum ServerError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case let .badCode(msg): msg
-        case .unauthorized: "The server did not accept this token."
-        case .tooOld: "This server is too old for one-tap setup: update healthkit-relay."
+        case .unauthorized: "The server did not accept this token. If you typed the admin token, check it: the server printed it in its log on its first start, and healthkit-relay admin reset on the server makes a new one."
+        case .tooOld: "This address answers, but not as a healthkit-relay server that can pair an iPhone. Check the server address. If it is right, update healthkit-relay on the server."
         case .eraseUnsupported: "This server is too old to erase data: update healthkit-relay on the server, then try again. Nothing was erased or reset."
         case let .notAllowed(msg): msg
-        case let .http(code, msg): "The server answered \(code): \(msg)"
+        case let .http(code, msg): "The server answered with error \(code): \(msg)"
         case let .network(msg): msg
         }
     }
@@ -99,7 +99,7 @@ struct ServerClient: Sendable {
         do {
             (data, response) = try await session.data(for: req)
         } catch {
-            throw ServerError.network("Could not reach \(base.host() ?? base.absoluteString): \(error.localizedDescription)")
+            throw ServerError.network("Could not reach \(base.host() ?? base.absoluteString): \(error.localizedDescription) Check that the server is running, and that this iPhone can reach it: on the same Wi-Fi, or through a VPN such as Tailscale.")
         }
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(code) else {
@@ -131,8 +131,8 @@ struct ServerClient: Sendable {
         }
     }
 
-    /// Turns the server token (typed in by hand) into a token of this iPhone's own, so the
-    /// server token does not stay on the phone and the device can be revoked on its own.
+    /// Turns the admin token (typed in by hand) into a token of this iPhone's own, so the
+    /// admin token does not stay on the phone and the device can be revoked on its own.
     func pair(serverToken: String, replacing old: String?) async throws -> Paired {
         struct Code: Decodable { let code: String }
         let data = try await request("POST", "v1/pairing-codes", token: serverToken, body: ["public_url": base.absoluteString])
@@ -147,7 +147,7 @@ struct ServerClient: Sendable {
     struct Erased: Decodable, Equatable, Sendable {
         /// How many stored items the server deleted.
         let erased: Int
-        /// The device whose data was deleted; empty for the server token.
+        /// The device whose data was deleted; empty for the admin token.
         let device: String?
     }
 

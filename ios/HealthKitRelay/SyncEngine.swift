@@ -11,11 +11,11 @@ enum SyncError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .locked: "Phone is locked; will sync after the next unlock"
-        case let .disallowed(reason): "HealthKit refused the query: \(reason)"
-        case .notAuthorized: "Not authorized"
-        case .noAnchor: "HealthKit returned no anchor"
-        case .noAccess: "Health Relay cannot read any Health data yet."
+        case .locked: "Health data cannot be read while this iPhone is locked. Health Relay syncs after you unlock it."
+        case let .disallowed(reason): "Health refused the request: \(reason)"
+        case .notAuthorized: "Health Relay has no access to this data in Health."
+        case .noAnchor: "Health gave an incomplete answer. Health Relay tries again at the next sync."
+        case .noAccess: "Health Relay cannot read any Health data yet. Pull down to try again, or allow access in Settings › Privacy & Security › Health › Health Relay."
         }
     }
 }
@@ -93,8 +93,8 @@ enum PerObjectOutcome: Codable, Equatable, Sendable {
         case .answered(nil): "Done"
         case .answered(0): "None shared"
         case let .answered(n?): "\(n) shared"
-        case .noAnswer: "No answer from Health"
-        case let .failed(reason): "Failed: \(reason)"
+        case .noAnswer: "No answer from Health: tap to ask again"
+        case let .failed(reason): "Could not ask: \(reason)"
         }
     }
 }

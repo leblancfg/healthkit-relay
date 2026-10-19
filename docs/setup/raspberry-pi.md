@@ -1,29 +1,33 @@
 # Raspberry Pi & ARM
 
-The server runs well on a Raspberry Pi 4 or 5, or any 64-bit ARM board: it is a static
-`linux/arm64` binary that uses little CPU and memory between syncs.
+The server runs well on a Raspberry Pi 4 or 5, or any board with a 64-bit ARM processor. It
+is a `linux/arm64` program that uses little processor time and memory between syncs.
 
-Requirements:
+You need:
 
-- a **64-bit** OS (Raspberry Pi OS 64-bit, Ubuntu, DietPi...). Check with `uname -m`: it must
-  say `aarch64`. 32-bit (`armv7l`) is not supported.
-- **an SSD over USB** for the data directory, not the SD card. The first sync writes years
-  of history, and SD cards wear out and corrupt under sustained writes.
+- **A 64-bit operating system**: Raspberry Pi OS (64-bit), Ubuntu, DietPi... To check, run
+  `uname -m`: it prints `aarch64`. The server runs on 64-bit ARM (`arm64`) only.
+- **An SSD over USB** for the archive, the folder where the server keeps your data. The
+  first sync writes years of history, and an SD card wears out and corrupts under that many
+  writes.
 
-Then pick one:
+Then follow one of these guides:
 
-- **Docker:** install it (`curl -fsSL https://get.docker.com | sh`) and follow
-  [Docker & Compose](docker.md); the image is multi-arch, so the same Compose file works.
-  Keep the Compose directory, and so `data/`, on the SSD.
-- **Binary + systemd:** follow [Linux binary + systemd](linux.md); the script there picks
-  the `arm64` archive by itself. The unit uses a dynamic user, so the archive really lives in
-  `/var/lib/private/healthkit-relay` (`/var/lib/healthkit-relay` is a symlink to it): mount
-  the SSD, or a directory on it, there before the first start.
+- **Docker**: install Docker with `curl -fsSL https://get.docker.com | sh`, then follow
+  [Docker & Compose](docker.md). The image runs on `arm64`, so the same Compose file works.
+  Make the server's folder on the SSD, so that its `data` folder is on the SSD too.
+- **Binary + systemd**: follow [Linux binary + systemd](linux.md). Its script picks the
+  `arm64` archive by itself. The unit's archive is `/var/lib/healthkit-relay`, a link to
+  `/var/lib/private/healthkit-relay`: mount the SSD, or a folder on it, at
+  `/var/lib/private/healthkit-relay` before the first start.
+
+To check the result, see [Check your setup](index.md#check-your-setup).
 
 ## Tips
 
-- The first sync is the heavy part: tens of thousands of samples per batch, compressed into
-  Parquet. Expect it to take longer than on a desktop; afterwards syncs are small.
-- Give the Pi a fixed address (a DHCP reservation in your router), or use Tailscale, so the
-  phone always finds it.
-- Watch the SSD's free space in [Grafana](../grafana.md) or with `df -h`.
+- The first sync is the heavy part: batches of up to 5,000 records, written to the archive
+  and compressed into Parquet every hour. It takes longer than on a desktop computer. After
+  that, syncs are small.
+- Give the Pi a fixed address with a DHCP reservation in your router, or use Tailscale, so
+  the iPhone always finds it.
+- Watch the SSD's free space with `df -h`, or in [Grafana](../grafana.md).

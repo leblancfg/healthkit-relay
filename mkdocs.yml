@@ -2,7 +2,7 @@ site_name: Health Relay
 site_description: >-
   Self-hosted Apple Health export: sync HealthKit data from your iPhone and Apple Watch
   to your own server, archive it losslessly in Parquet, query it with DuckDB and chart it
-  in Grafana. No cloud.
+  in Grafana. Your data stays on your server.
 site_url: https://leblancfg.com/healthkit-relay/
 repo_url: https://github.com/leblancfg/healthkit-relay
 repo_name: leblancfg/healthkit-relay
@@ -68,6 +68,7 @@ plugins:
 nav:
   - Home: index.md
   - Quick start: quickstart.md
+  - Glossary: glossary.md
   - Setup guides:
       - setup/index.md
       - Docker & Compose: setup/docker.md
@@ -77,7 +78,7 @@ nav:
       - Synology, Unraid, TrueNAS: setup/nas.md
       - Raspberry Pi & ARM: setup/raspberry-pi.md
   - Networking & HTTPS: networking.md
-  - Pairing a phone: pairing.md
+  - Pairing an iPhone: pairing.md
   - Data model & querying: data.md
   - Query API: query-api.md
   - Grafana: grafana.md

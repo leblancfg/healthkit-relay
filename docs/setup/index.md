@@ -1,72 +1,138 @@
 # Setup guides
 
-The server is one static binary with no runtime dependencies, published as:
+The server is the `healthkit-relay` program. It runs on a computer you keep on and receives
+your iPhone's Health data. Pick the guide for that computer and follow it from top to
+bottom. New to these words? The [glossary](../glossary.md) explains *server address*,
+*setup page*, *admin token* and the rest, each with an example.
 
-- a multi-arch **Docker image**, `ghcr.io/leblancfg/healthkit-relay` (`linux/amd64`,
-  `linux/arm64`), with a Compose file;
+| Your computer | Guide |
+|---|---|
+| Any Linux or macOS machine with Docker (the easiest start) | [Docker & Compose](docker.md) |
+| A Linux server or a VPS (virtual private server) | [Linux binary + systemd](linux.md) |
+| A NixOS machine | [NixOS](nixos.md) |
+| A Mac that stays on | [macOS (launchd)](macos.md) |
+| A NAS: Synology, Unraid or TrueNAS | [Synology, Unraid, TrueNAS](nas.md) |
+| A Raspberry Pi or another 64-bit ARM board | [Raspberry Pi & ARM](raspberry-pi.md) |
+
+The server is one self-contained program, published as:
+
+- a **Docker image**, `ghcr.io/leblancfg/healthkit-relay`, for `linux/amd64` and
+  `linux/arm64`, with a Compose file;
 - **release archives** for Linux, macOS and FreeBSD on amd64 and arm64, with a systemd unit,
   on the [releases page](https://github.com/leblancfg/healthkit-relay/releases);
-- a **Nix flake** (`github:leblancfg/healthkit-relay`) with a package and a NixOS module.
+- a **Nix flake**, `github:leblancfg/healthkit-relay`, with a package and a NixOS module.
 
-Each of the Docker Compose, binary + systemd and NixOS setups is tested end to end in CI: the
-server is installed as these guides say, then a smoke test pairs like the app, uploads a
-batch, checks it is stored, restarts the server and checks it is still there.
-
-| Where | Guide |
-|---|---|
-| Any machine with Docker | [Docker & Compose](docker.md) |
-| A Linux server or VPS | [Linux binary + systemd](linux.md) |
-| NixOS | [NixOS](nixos.md) |
-| A Mac that stays on | [macOS (launchd)](macos.md) |
-| A NAS | [Synology, Unraid, TrueNAS](nas.md) |
-| A Raspberry Pi or other ARM board | [Raspberry Pi & ARM](raspberry-pi.md) |
+The Docker Compose, binary + systemd and NixOS setups are tested end to end in CI
+(continuous integration, the tests that run on every change): the server is installed as
+these guides say, then a test pairs like the app, uploads a batch, checks that it is stored,
+restarts the server and checks that the batch is still there.
 
 ## What every setup needs
 
-- **A data directory** on a disk with room to grow and in your backups. A few years of
-  Apple Watch data is typically a few gigabytes before compression.
-- **The admin token**, which the server generates on first start and prints once, with the
-  setup link, in its log (`docker compose logs relay`, `journalctl -u healthkit-relay`, or the
-  terminal running it). Save it in a password manager: it signs in to `/setup`. The server
-  keeps its SHA-256 in `admin.json` in the data directory; `healthkit-relay admin reset`
-  replaces it and prints a new one.
-- **A way for the phone to reach it**: see [Networking & HTTPS](../networking.md).
+- **An archive**: the folder where the server keeps your data. Put it on a disk with room to
+  grow, and include it in your [backups](../backups.md). Each guide names it, e.g. `./data`
+  with Docker Compose.
+- **The admin token**: the password of your server. The server makes it on its first start
+  and prints it once, in its log. Save it in a password manager: it signs in to the setup
+  page. The archive keeps only its SHA-256 hash, in `admin.json`, and
+  `healthkit-relay admin reset` makes a new one.
+- **A server address**: the address your iPhone uses to reach the server, e.g.
+  `http://192.168.1.10:8080` on your home Wi-Fi. [Networking & HTTPS](../networking.md)
+  shows how to reach it from anywhere.
+
+## Check your setup
+
+Each guide ends with the server running. These steps check it, whichever guide you
+followed.
+
+1. On the computer running the server, ask it whether it answers:
+
+    ```sh
+    curl http://127.0.0.1:8080/healthz
+    ```
+
+    It prints `ok`.
+
+2. Read the admin token in the server's log:
+
+    | Setup | Command |
+    |---|---|
+    | Docker Compose | `docker compose logs relay` |
+    | Docker without Compose | `docker logs healthkit-relay` |
+    | systemd, NixOS | `sudo journalctl -u healthkit-relay` |
+    | macOS | `cat ~/Library/Logs/healthkit-relay.log` |
+    | NAS | the container's log in the NAS's web interface |
+
+    The log shows the admin token and the setup page's address:
+
+    ```text
+        Admin token: BBvGW16otZlTAfIc7RbrNmMVd7PXBVU8skBFvHZhO_4
+        Setup page:  http://192.168.1.10:8080/setup
+    ```
+
+3. Open the setup page in a browser on a computer on the same network, e.g.
+   `http://192.168.1.10:8080/setup`. The page shows **Sign in** and an **Admin token**
+   field.
+
+4. Pair your iPhone: follow [Pairing an iPhone](../pairing.md).
 
 ## Configuration
 
-Every flag can be set from the environment: `HKR_` plus the flag name in upper case with
-dashes as underscores (`-archive-dir` is `HKR_ARCHIVE_DIR`). Flags win over the environment.
+Every flag has an environment variable: `HKR_` plus the flag name in upper case, with dashes
+as underscores. For example, `-archive-dir /data` and `HKR_ARCHIVE_DIR=/data` do the same.
+When both are set, the flag wins.
 
 | Flag | Default | |
 |---|---|---|
-| `-listen` | `127.0.0.1:8080` | address to listen on; `0.0.0.0:8080` to accept other machines (and in containers) |
-| `-archive-dir` | required | data directory: `staging.db`, `parquet/`, `admin.json`, `devices.json`, `codes.json` |
-| `-token-file` | | deprecated: the server token file of earlier versions, imported into `admin.json` at start; then delete it |
-| `-public-url` | offered | the URL phones use, put in setup codes, e.g. `https://health.example.com` |
-| `-setup-from` | `private` | who may open `/setup` and pair: `private`, `any` or `off` |
-| `-forward-url` | | line-protocol write URL for metrics forwarding (see [Grafana](../grafana.md)) |
-| `-forward-token-file` | | bearer token for `-forward-url` |
+| `-listen` | `127.0.0.1:8080` | address and port to listen on. `127.0.0.1:8080` answers this computer only (for a reverse proxy or Tailscale); `0.0.0.0:8080` also answers other machines on your network. The Docker image sets `:8080` |
+| `-archive-dir` | required | the archive: `staging.db`, `parquet/`, `admin.json`, `devices.json`, `codes.json` |
+| `-public-url` | | the server address, put in setup codes, e.g. `http://192.168.1.10:8080` or `https://health.example.com`. Unset, the setup page offers the addresses it finds |
+| `-setup-from` | `private` | who may open the setup page and pair: `private` (this computer, your home network, Tailscale), `any` or `off` |
+| `-forward-url` | | line-protocol write URL to forward numeric samples to a metrics database (see [Grafana](../grafana.md)) |
+| `-forward-token-file` | | file holding a bearer token for `-forward-url` |
 | `-measurement` | `healthkit` | line-protocol measurement name |
-| `-max-body-bytes` | `33554432` | largest accepted request |
+| `-query-duckdb` | (off) | the `duckdb` program, which turns on the [query API](../query-api.md); the `-query-...` flags are listed there |
+| `-max-body-bytes` | `33554432` | largest request the server accepts, in bytes (32 MiB) |
 | `-flush-interval` | `1h` | how often staged records are written to Parquet |
 | `-compact-at` | `03:30` | local time of the nightly compaction, `HH:MM` |
-| `-group-read` | off | make the archive readable by the service's group (0750/0640) for backups or queries |
+| `-group-read` | off | make the archive readable by the service's group (0750/0640), for backups or queries |
+| `-token-file` | | deprecated: the server token file of earlier versions, imported into `admin.json` at start; delete the file once imported |
 | `-version` | | print the version and exit |
 
 ## Commands
 
-The same binary has subcommands, which take the same flags and `HKR_` variables as the
-server:
+The same program has commands for pairing and tokens. They take the same flags and `HKR_`
+variables as the server.
 
-- on the archive directory's state files (`admin.json`, `devices.json`, `codes.json`), with
-  the server running or not: `pair` (a setup QR code in the terminal; `-valid 2h` for a
-  longer-lived code), `devices` (list paired phones and tokens), `revoke <id>`,
-  `token create -name <client>` (a read token for the [query API](../query-api.md)) and
-  `admin reset` (a new admin token). The server rereads the files when they change. Run them
-  as the server's user or as root, e.g. `docker compose exec relay healthkit-relay pair`;
-- on the archive directory with the server **stopped**: `migrate` (convert the JSON Lines
-  archive of versions before 0.5), `flush` and `compact` (run the hourly and nightly
-  maintenance now).
+These change the files in the archive (`admin.json`, `devices.json`, `codes.json`), with the
+server running or stopped. The server rereads the files when they change, so a command takes
+effect at once.
 
-The authoritative list is `healthkit-relay -help` and the
-[server README](https://github.com/leblancfg/healthkit-relay/blob/main/server/README.md).
+| Command | What it does |
+|---|---|
+| `pair` | prints a setup code as a QR code in the terminal, valid 15 minutes; `-valid 2h` makes it last longer, up to `24h` |
+| `devices` | lists paired devices and read tokens, with their IDs |
+| `revoke <id>` | revokes a paired device or a read token, e.g. `revoke 3f9a1c2e` |
+| `token create -name <name>` | prints a new read token for the [query API](../query-api.md), e.g. `-name grafana` |
+| `admin reset` | prints a new admin token; the old one stops working at once |
+
+Run them as the server's user or as root, for example:
+
+```sh
+docker compose exec relay healthkit-relay pair                  # Docker Compose
+sudo healthkit-relay-ctl pair                                   # NixOS
+sudo healthkit-relay pair -archive-dir /var/lib/healthkit-relay \
+  -public-url http://192.168.1.10:8080                          # systemd
+```
+
+These work on the archive with the server **stopped**:
+
+| Command | What it does |
+|---|---|
+| `migrate` | converts the JSON Lines archive of versions before 0.5 |
+| `flush` | writes staged records to Parquet now (the hourly job) |
+| `compact` | merges each partition's Parquet files now (the nightly job) |
+
+`healthkit-relay -help` lists every flag, and the
+[server README](https://github.com/leblancfg/healthkit-relay/blob/main/server/README.md)
+describes each command.

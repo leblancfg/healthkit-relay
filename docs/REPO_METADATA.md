@@ -5,7 +5,7 @@ This file is excluded from the docs site.
 
 ## About (description, max 350 characters)
 
-> Self-hosted Apple Health export: sync iPhone and Apple Watch HealthKit data (heart rate, HRV, sleep, workouts, GPS routes, ECG) to your own server. Lossless Parquet archive, DuckDB queries, Grafana via VictoriaMetrics/InfluxDB. No cloud.
+> Self-hosted Apple Health export: sync iPhone and Apple Watch HealthKit data (heart rate, HRV, sleep, workouts, GPS routes, ECG) to your own server, and only there. Lossless Parquet archive, DuckDB and a read-only query API, Grafana via VictoriaMetrics/InfluxDB.
 
 ## Website
 
@@ -40,7 +40,7 @@ data-export
 
 ```sh
 gh repo edit leblancfg/healthkit-relay \
-  --description "Self-hosted Apple Health export: sync iPhone and Apple Watch HealthKit data (heart rate, HRV, sleep, workouts, GPS routes, ECG) to your own server. Lossless Parquet archive, DuckDB queries, Grafana via VictoriaMetrics/InfluxDB. No cloud." \
+  --description "Self-hosted Apple Health export: sync iPhone and Apple Watch HealthKit data (heart rate, HRV, sleep, workouts, GPS routes, ECG) to your own server, and only there. Lossless Parquet archive, DuckDB and a read-only query API, Grafana via VictoriaMetrics/InfluxDB." \
   --homepage "https://leblancfg.com/healthkit-relay/" \
   --add-topic apple-health,healthkit,apple-watch,self-hosted,health-data,quantified-self,ios,swiftui,golang,grafana,prometheus,victoriametrics,influxdb,parquet,duckdb,privacy,homelab,heart-rate-variability,sleep-tracking,data-export
 ```

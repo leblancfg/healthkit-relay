@@ -1,11 +1,25 @@
 # Query API
 
-A read-only HTTP API over the Parquet archive: which HealthKit types have data, their samples,
-and daily or hourly aggregates (steps per day, average heart rate per hour, minutes of deep
-sleep per night). It is described by an OpenAPI 3.1 document at `/openapi.json`, browsable at
-`/docs`, so dashboards, scripts and LLM agents can discover it on their own.
+The **query API** lets a program read your health data from the server: a Grafana dashboard,
+a script, or an AI agent. It answers questions such as "steps per day last week", "average
+heart rate per hour" or "minutes of deep sleep per night". It reads the
+[archive](glossary.md#archive), the folder where the server keeps your data, and it only reads: no
+request changes anything.
 
-It is **off by default**; `-query-duckdb` turns it on.
+An API (application programming interface) is a set of web addresses that answer programs
+instead of people. Each answer is JSON, a text format that programs read easily. The query
+API is described by an OpenAPI 3.1 document at `/openapi.json` and shown as a page you can
+try out at `/docs`, e.g. `http://192.168.1.10:8080/docs`.
+
+To use it you need:
+
+- the **server address**, the address the iPhone uses to reach the server, e.g.
+  `http://192.168.1.10:8080`;
+- a **read token**: a password for one program, that reads your data through the query API
+  and does nothing else. You create one for each program, e.g. one named `grafana`.
+
+The query API starts when the server has the `-query-duckdb` setting; until then, its
+addresses answer `404`.
 
 ## Types and kinds
 
@@ -20,67 +34,194 @@ has one kind: `HKQuantityTypeIdentifierStepCount` is a type of kind `quantity`.
 | `category` | a labelled interval | sleep: `asleepDeep` from 01:10 to 01:40; stand hours: `stood` from 14:00 to 15:00 |
 | `workout`, `heartbeat_series`, `electrocardiogram`, `audiogram`, `correlation`, ... | a record with fields of its own | a run with its duration, energy and distance; an ECG with its classification |
 
-Quantity and category types have aggregates; for the other kinds, read the samples with
-`raw=true`. `GET /v1/types` lists every type with its kind; `GET /v1/types?kind=category` lists
-the types of one kind.
+Quantity and category types have aggregates (totals and averages per day or hour). For the
+other kinds, read the samples with `raw=true`. `GET /v1/types` lists every type with its
+kind; `GET /v1/types?kind=category` lists the types of one kind.
 
-## Turning it on
+## Turn it on
 
-The server runs each query with the [DuckDB](https://duckdb.org) command-line tool (the server
-itself stays a static Go binary). Install `duckdb` (1.2 or newer, for `allowed_directories`; tested with 1.5) and point the server at it:
+The server runs each query with [DuckDB](https://duckdb.org), a database program that reads
+the archive's Parquet files. You install the `duckdb` program next to the server, then tell
+the server where it is.
 
-```sh
-healthkit-relay -archive-dir /var/lib/healthkit-relay -query-duckdb /usr/bin/duckdb
-```
+1. Install `duckdb`, version 1.2 or newer (tested with 1.5), on the computer that runs the
+   server:
+
+    ```sh
+    brew install duckdb          # macOS
+    ```
+
+    On Linux, download the `duckdb` command-line program for your system from
+    [duckdb.org](https://duckdb.org/docs/installation/) and copy it to `/usr/local/bin`.
+    Check it:
+
+    ```sh
+    duckdb --version
+    ```
+
+    It prints a version such as `v1.5.0`.
+
+2. Give the server the path of `duckdb` with `-query-duckdb` (or `HKR_QUERY_DUCKDB`):
+
+    - Linux with systemd: add `HKR_QUERY_DUCKDB=/usr/local/bin/duckdb` to
+      `/etc/healthkit-relay/env`, then `sudo systemctl restart healthkit-relay`.
+    - macOS: add `<string>-query-duckdb</string><string>/opt/homebrew/bin/duckdb</string>`
+      (the path `which duckdb` prints) to the `ProgramArguments` of the launchd agent (see
+      [macOS](setup/macos.md)), run
+      `launchctl bootout gui/$(id -u)/io.github.healthkit-relay`, then the
+      `launchctl bootstrap` command from that page again.
+    - NixOS: `services.healthkit-relay.extraFlags = [ "-query-duckdb" "${pkgs.duckdb}/bin/duckdb" ];`,
+      then `sudo nixos-rebuild switch`.
+    - From a terminal:
+
+        ```sh
+        healthkit-relay -archive-dir /var/lib/healthkit-relay -query-duckdb /usr/local/bin/duckdb
+        ```
+
+    The Docker image holds the server program alone. To use the query API, run the server
+    from one of the setups above.
+
+3. Read the server's log. It shows a line like this one:
+
+    ```text
+    query API on: /usr/local/bin/duckdb reads /var/lib/healthkit-relay/parquet; /docs, /openapi.json
+    ```
+
+    A second line with `the test query failed` means `duckdb` could not read the archive:
+    the line ends with DuckDB's reason.
+
+4. Open the `/docs` page in a browser, e.g. `http://192.168.1.10:8080/docs`. It shows
+   **Health Relay query API**, with every endpoint.
+
+Samples reach the Parquet files at the hourly flush. Samples the server received in the last
+hour appear in the query API after the next flush.
+
+### Settings
 
 | Flag | Default | |
 |------|---------|-|
-| `-query-duckdb` | (off) | the `duckdb` executable; empty turns the query API off |
+| `-query-duckdb` | (empty: the query API is off) | the `duckdb` program |
 | `-query-archive-dir` | `-archive-dir` | the archive whose `parquet/` is read, e.g. a replica or a restored backup |
-| `-query-timeout` | `30s` | longest a query may run, waiting for a free slot included; the process is killed at the deadline |
+| `-query-timeout` | `30s` | longest a query may run, waiting for a free slot included; DuckDB is stopped at the deadline |
 | `-query-max-rows` | `50000` | most rows one query may return |
-| `-query-memory-limit` | `512MB` | DuckDB `memory_limit` per query; nothing spills to disk, so a query needing more fails |
+| `-query-memory-limit` | `512MB` | DuckDB `memory_limit` per query; a query needing more fails (it never spills to disk) |
 | `-query-threads` | `2` | DuckDB threads per query |
-| `-query-concurrency` | `2` | queries that may run at once; others wait, then get `503` |
+| `-query-concurrency` | `2` | queries that may run at once; the others wait, up to `-query-timeout`, then get `503` |
 
-Like every flag they can be set from the environment (`HKR_QUERY_DUCKDB`, ...). Then open
-`http://<server>/docs`.
+Each flag has an environment variable: `HKR_` and the name in capitals, with `_` for `-`
+(`HKR_QUERY_TIMEOUT=60s`).
 
-Samples received in the last hour may still be in the staging database (flushed to Parquet
-hourly) and are not visible to the API until then.
+## Get a read token
 
-## Tokens
+You create read tokens on the server's **setup page**, its `/setup` page. You sign in to it
+with the **admin token**, the password of your server, which the server printed on its first
+start (see [Troubleshooting](troubleshooting.md#where-is-the-admin-token) if you do not have
+it). The `/docs` page links to the right place.
 
-The query API takes a **read token**, a token of its own for each client. The quickest way
-to get one: open **`/setup#read-tokens`** (the `/docs` page links to it), sign in with the
-admin token, type a name under **Read tokens** and click **Create**. The token is shown once,
-with a **Copy** button: save it in a password manager, then paste it into the client
-(Grafana, a script, an agent) as a Bearer token, `Authorization: Bearer <token>`. Lost it?
-Revoke it and create a new one. Over plain HTTP on a LAN address, where the browser offers no
-clipboard access, **Copy** selects the token for Ctrl+C or Cmd+C.
+1. On a computer on your home network (or your Tailscale network), open the setup page at
+   its read tokens section, e.g. `http://192.168.1.10:8080/setup#read-tokens`. The page asks
+   for the **Admin token**.
+2. Paste the admin token and click **Sign in**. The page shows **Read tokens**, below
+   **Pair your iPhone** and **Paired devices**.
+3. Under **Read tokens**, type a name that says what the token is for, e.g. `grafana`, in
+   the box that says *Name, e.g. grafana*. Click **Create**.
+4. The page shows **Read token for grafana** and the token, a line of 43 letters, digits,
+   `-` and `_`. Click the copy button next to it. On a plain `http://` address the button
+   selects the token instead: press Ctrl+C (Cmd+C on a Mac).
+5. Paste the token into your password manager now. The server keeps only a fingerprint of
+   it (its SHA-256) and shows it this once.
+6. Click **Done**. The **Read tokens** list now shows `grafana`, with the date it was
+   created.
 
-On the server, as the server's user or root, with its archive directory (see
-[Commands](setup/index.md#commands)):
+To stop a read token, click **Revoke** next to it under **Read tokens**. It stops working at
+once. Lost a token? Revoke it and create a new one.
+
+### From a terminal
+
+On the server, run `token create` as the server's user or as root, with the server's
+archive directory (see [Commands](setup/index.md#commands)):
 
 ```sh
-healthkit-relay token create -archive-dir /var/lib/healthkit-relay -name grafana > grafana.token   # prints the token once
-healthkit-relay devices -archive-dir /var/lib/healthkit-relay                                       # lists it, with SCOPE read
-healthkit-relay revoke -archive-dir /var/lib/healthkit-relay <id>                                    # revokes it
+healthkit-relay token create -archive-dir /var/lib/healthkit-relay -name grafana
 ```
 
-(`docker compose exec relay healthkit-relay token create -name grafana` in Docker,
-`sudo healthkit-relay-ctl token create -name grafana` on NixOS), or `POST /v1/tokens` with
-the admin token. The server keeps only the token's SHA-256, in
-`devices.json`, next to the paired iPhones.
+```text
+q3vN8x2LkP0aTzR7mW5cYb1HdJ9eFgUs4oXiK6nVtQA
+Created read token 4be1f07a (grafana). It is shown only this once; revoke it with: healthkit-relay revoke 4be1f07a
+```
+
+The first line is the token. With Docker Compose, run
+`docker compose exec relay healthkit-relay token create -name grafana`; on NixOS,
+`sudo healthkit-relay-ctl token create -name grafana`.
+
+`healthkit-relay devices` lists paired devices and read tokens, with `read` in the `SCOPE`
+column for read tokens; `healthkit-relay revoke 4be1f07a` revokes one.
+
+A program can also create a token with `POST /v1/tokens` and the admin token:
+
+```sh
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -d '{"name": "grafana"}' \
+  http://192.168.1.10:8080/v1/tokens
+```
+
+```json
+{"token":"q3vN8x2LkP0aTzR7mW5cYb1HdJ9eFgUs4oXiK6nVtQA","device":{"id":"4be1f07a","name":"grafana","created_at":"2026-10-19T14:02:11Z","last_seen_at":"2026-10-19T14:02:11Z","scope":"read"}}
+```
+
+### What each token may do
+
+The server keeps the SHA-256 of every token in `devices.json`, in the archive directory:
+read tokens next to the [paired devices](glossary.md#paired-device), the iPhones that used a setup code.
+Each token has a scope, the list of what it may do.
 
 | Token | Scope | Query API | Upload, status, erase | Tokens, devices, pairing |
 |---|---|---|---|---|
-| Admin token | admin | yes | erase any device's data; uploads deprecated | yes |
+| Admin token | admin | yes | erase any paired device's data; uploads are deprecated | yes |
 | Read token | `read` | yes | no (`403`) | no (`401`) |
-| Paired iPhone | `upload` | no (`403`) | yes, its own data | no (`401`) |
+| A paired device's token | `upload` | no (`403`) | yes, its own data | no (`401`) |
 
-Devices paired before scopes existed have no `scope` in `devices.json`: they are upload
-tokens, and the file keeps working unchanged. `/openapi.json` and `/docs` are public.
+A paired device from a version before scopes has no `scope` in `devices.json` and counts as
+`upload`. `/openapi.json` and `/docs` are public: they describe the API and hold no data.
+
+## Your first query
+
+This sends one request with `curl`, a command-line program for web requests (installed on
+macOS and most Linux systems). Run it on any computer that reaches the server.
+
+1. Put the server address and your read token in two variables, so the next commands can
+   use them:
+
+    ```sh
+    SERVER=http://192.168.1.10:8080
+    H="Authorization: Bearer q3vN8x2LkP0aTzR7mW5cYb1HdJ9eFgUs4oXiK6nVtQA"
+    ```
+
+2. Ask which types have data:
+
+    ```sh
+    curl -H "$H" "$SERVER/v1/types?present=true"
+    ```
+
+    The answer starts with `{"types":[{"identifier":"HKQuantityTypeIdentifierStepCount",...`.
+    It is one long line; the examples below spread it over several lines to read it.
+
+3. If it answers something else:
+
+    | Answer | Meaning | What to do |
+    |---|---|---|
+    | `{"error":"unauthorized"}` | the server does not know this token | check that you pasted the whole token; create a new one if it was revoked |
+    | another `{"error": ...}` | the server refused the request | read the message: it says what to change, e.g. that a paired device's token cannot query |
+    | `404 page not found` | the query API is off | [turn it on](#turn-it-on) |
+    | `Failed to connect` | curl cannot reach the server | check the address, as in [Troubleshooting](troubleshooting.md#other-computers-cannot-connect) |
+
+4. Ask for steps per day, with days in your time zone:
+
+    ```sh
+    curl -H "$H" "$SERVER/v1/types/HKQuantityTypeIdentifierStepCount/aggregates?tz=America/Toronto&start=2026-10-15&end=2026-10-17"
+    ```
+
+    The answer has one bucket per day, with `"sum": 12027` and the like. More examples
+    follow.
 
 ## Endpoints
 
@@ -88,26 +229,54 @@ All `GET`, with `Authorization: Bearer <token>`.
 
 | Path | |
 |---|---|
-| `/v1/types` | every HealthKit type, with kind, unit, aggregation style, category labels and what the archive holds (count, first and last sample); `?present=true`, `?kind=` |
+| `/v1/types` | every HealthKit type, with kind, unit, aggregation style, category labels and what the archive holds (count, first and last sample); `?present=true` keeps the types with data, `?kind=category` the types of one kind |
 | `/v1/types/{type}` | one type |
-| `/v1/types/{type}/samples` | its samples in `[start, end)`, paginated (`limit`, `cursor`, `order`, `raw`) |
+| `/v1/types/{type}/samples` | its samples in `[start, end)`, page by page (`limit`, `cursor`, `order`, `raw`) |
 | `/v1/types/{type}/aggregates` | per day or hour (`interval`), in a time zone (`tz`) |
 
-`{type}` is a HealthKit identifier such as `HKQuantityTypeIdentifierStepCount`; the list is
-generated from the iOS SDK the app is built with, and the document publishes it as an enum.
-Times are RFC 3339; `start` and `end` also take a date, meaning midnight in `tz`.
+`{type}` is a HealthKit identifier such as `HKQuantityTypeIdentifierStepCount`. In the
+OpenAPI document it is a string that starts with `HK` (the pattern
+`^HK[A-Za-z]+Type[A-Za-z0-9]*$`), with examples; `GET /v1/types` lists the valid values,
+over 200 of them, from the iOS SDK the app is built with. An unknown type answers `400` with
+the closest names:
+
+```sh
+curl -H "$H" "$SERVER/v1/types/HKQuantityTypeIdentifierSteps"
+```
+
+```json
+{"error":"unknown type HKQuantityTypeIdentifierSteps; did you mean HKQuantityTypeIdentifierStepCount?"}
+```
+
+`kind` takes one of the kinds the OpenAPI document lists (`quantity`, `category`,
+`workout`, ...).
+
+Times are RFC 3339 timestamps with an offset, e.g. `2026-10-17T09:00:00-04:00`. `start` and
+`end` also take a date, e.g. `2026-10-17`, meaning midnight in `tz`. `tz` is a time zone name
+such as `America/Toronto`; the default is UTC.
+
+### Errors
+
+Every error is JSON with an `error` message, e.g.
+`{"error":"tz \"Mars/Olympus\" is not in the time zone database"}`.
+
+| Status | When |
+|---|---|
+| `400` | a parameter is wrong: an unknown type, a bad date, a range over the limit |
+| `401` | no token, or a token the server does not know |
+| `403` | a paired device's token |
+| `422` | the answer would be too large: ask for fewer rows or a shorter range |
+| `503` | too many queries at once: try again after the `Retry-After` seconds |
+| `504` | the query took longer than `-query-timeout`: ask for a shorter range |
 
 ## Examples
 
-```sh
-T=$(cat grafana.token)
-H="Authorization: Bearer $T"
-```
+These use the `SERVER` and `H` variables from [Your first query](#your-first-query).
 
 Which types have data, of one kind:
 
 ```sh
-curl -H "$H" 'http://127.0.0.1:8080/v1/types?present=true&kind=category'
+curl -H "$H" "$SERVER/v1/types?present=true&kind=category"
 ```
 
 ```json
@@ -123,7 +292,7 @@ curl -H "$H" 'http://127.0.0.1:8080/v1/types?present=true&kind=category'
 Steps per day, days in Toronto time:
 
 ```sh
-curl -H "$H" 'http://127.0.0.1:8080/v1/types/HKQuantityTypeIdentifierStepCount/aggregates?tz=America/Toronto&start=2026-10-15&end=2026-10-17'
+curl -H "$H" "$SERVER/v1/types/HKQuantityTypeIdentifierStepCount/aggregates?tz=America/Toronto&start=2026-10-15&end=2026-10-17"
 ```
 
 ```json
@@ -141,7 +310,7 @@ curl -H "$H" 'http://127.0.0.1:8080/v1/types/HKQuantityTypeIdentifierStepCount/a
 Average heart rate per hour:
 
 ```sh
-curl -H "$H" 'http://127.0.0.1:8080/v1/types/HKQuantityTypeIdentifierHeartRate/aggregates?interval=hour&tz=America/Toronto&start=2026-10-17T09:00:00-04:00&end=2026-10-17T10:00:00-04:00'
+curl -H "$H" "$SERVER/v1/types/HKQuantityTypeIdentifierHeartRate/aggregates?interval=hour&tz=America/Toronto&start=2026-10-17T09:00:00-04:00&end=2026-10-17T10:00:00-04:00"
 ```
 
 ```json
@@ -156,7 +325,7 @@ curl -H "$H" 'http://127.0.0.1:8080/v1/types/HKQuantityTypeIdentifierHeartRate/a
 Sleep stages per day (seconds per label):
 
 ```sh
-curl -H "$H" 'http://127.0.0.1:8080/v1/types/HKCategoryTypeIdentifierSleepAnalysis/aggregates?tz=America/Toronto&start=2026-10-18&end=2026-10-19'
+curl -H "$H" "$SERVER/v1/types/HKCategoryTypeIdentifierSleepAnalysis/aggregates?tz=America/Toronto&start=2026-10-18&end=2026-10-19"
 ```
 
 ```json
@@ -173,7 +342,7 @@ curl -H "$H" 'http://127.0.0.1:8080/v1/types/HKCategoryTypeIdentifierSleepAnalys
 Individual heart rate readings, two per page:
 
 ```sh
-curl -H "$H" 'http://127.0.0.1:8080/v1/types/HKQuantityTypeIdentifierHeartRate/samples?tz=America/Toronto&start=2026-10-17T09:00:00-04:00&limit=2'
+curl -H "$H" "$SERVER/v1/types/HKQuantityTypeIdentifierHeartRate/samples?tz=America/Toronto&start=2026-10-17T09:00:00-04:00&limit=2"
 ```
 
 ```json
@@ -187,7 +356,8 @@ curl -H "$H" 'http://127.0.0.1:8080/v1/types/HKQuantityTypeIdentifierHeartRate/s
  "next_cursor": "MTphOjE3OTIyNDI0ODEzNDUwMDA6OTlGQUE4MjItOTdFOC00RjNELUExMUItM0M3NjY1MjBDNUNG"}
 ```
 
-Pass `next_cursor` as `&cursor=...`, with the same other parameters, for the next page.
+For the next page, send the same request with `&cursor=` and the `next_cursor` value. The
+last page has no `next_cursor`.
 
 ## Aggregates
 
@@ -197,23 +367,27 @@ What a bucket holds depends on the type:
   spanning two buckets is split in proportion to the time in each.
 - **Discrete quantities** (heart rate, HRV, body mass...): `avg`, `min`, `max` of the samples
   starting in the bucket. Sound exposure averages as energy (`10·log10(mean(10^(dB/10)))`),
-  as Apple does; temporally weighted types are averaged per sample, not weighted by duration.
+  as Apple does. Temporally weighted types (heart rate) are averaged per sample, each sample
+  counting once whatever its duration.
 - **Categories** (sleep, stand hours, symptoms...): per value, the samples and the seconds
-  they cover inside the bucket. A night's sleep is cut at local midnight.
+  they cover inside the bucket. A night's sleep is cut at local midnight: a day bucket holds
+  the part of each night after its midnight. Use `interval=hour`, or the samples, to cut
+  nights elsewhere.
 
-At most 366 days or 744 hours per request. Days are local calendar days of `tz` (23 or 25
-hours across a DST change).
+One request covers at most 366 days or 744 hours. Days are local calendar days of `tz` (23 or
+25 hours across a daylight saving time change).
 
 ### Counting each moment once (`dedup`)
 
 An Apple Watch and an iPhone carried together both count steps, distance and energy; other
-apps may write the same thing again. Summing every sample overcounts. With `dedup=priority`,
-the default, sources are ranked **Apple Watch, then iPhone, then any other app or device**
-(from the sample's hardware model, e.g. `Watch6,14`), and a sample counts only for the part of
-its time that no sample of a higher-ranked source covers; for categories, only a sample of the
-same value covers (the watch's sleep stages do not hide the phone's *in bed*). This is how
-Apple Health merges sources with its default source order: the watch wins where both
-measured, and the phone fills the time the watch was off the wrist.
+apps may write the same thing again. Summing every sample counts the same steps twice. With
+`dedup=priority`, the default, sources are ranked **Apple Watch, then iPhone, then any other
+app or device** (from the sample's hardware model, e.g. `Watch6,14`), and a sample counts
+only for the part of its time that no sample of a higher-ranked source covers. For
+categories, a sample is covered only by a sample of the same value: the watch's sleep stages
+leave the phone's *in bed* whole. Apple Health merges sources the same way with its default
+source order: the watch wins where both measured, and the phone fills the time the watch was
+off the wrist.
 
 Checked against the daily totals Apple's Activity app computes (the activity summaries in the
 archive), over 365 days of one person's data with two iPhones and a watch:
@@ -230,15 +404,18 @@ archive), over 365 days of one person's data with two iPhones and a watch:
 ## How queries run
 
 Each query is a fresh `duckdb` process, in memory, reading the archive through the views in
-[`server/sql/views.sql`](https://github.com/leblancfg/healthkit-relay/blob/main/server/sql/views.sql)
-(so deleted samples stay hidden). Before the query it sets:
+[`server/sql/views.sql`](https://github.com/leblancfg/healthkit-relay/blob/main/server/sql/views.sql),
+which hide samples deleted in Apple Health. Before the query, the server sets:
 
-- `enable_external_access = false` with `allowed_directories` = the archive's `parquet/`:
-  no other file, no network, no `getenv`;
+- `enable_external_access = false`, with `allowed_directories` set to the archive's
+  `parquet/`: DuckDB reads that folder and refuses every other file, the network and
+  `getenv`;
 - `autoinstall_known_extensions = false`, `autoload_known_extensions = false`;
-- `memory_limit`, `threads`, `temp_directory = ''` (no spilling to disk),
+- `memory_limit`, `threads`, `temp_directory = ''` (everything stays in memory),
   `preserve_insertion_order = false`;
-- `lock_configuration = true`, so nothing after it can change those.
+- `lock_configuration = true`, which freezes those settings for the rest of the process.
 
-It runs with an empty environment, as the server's user, and every query filters on the type
-and the months it needs (the archive's partitions), so it reads only those files.
+DuckDB runs with an empty environment, as the server's user. Every query filters on the type
+and the months it needs (the archive's partitions), so DuckDB opens only those files. The
+values in each query come from the server: the type from its catalog, times it parsed,
+numbers it checked.

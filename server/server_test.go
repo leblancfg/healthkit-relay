@@ -70,7 +70,7 @@ func newTestServer(t *testing.T, dir string) (*liveServer, *fakeMetrics) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{Archive: a, Token: testToken, MaxBodyBytes: 1 << 20, Devices: devices, Codes: NewCodes(),
+	s := &Server{Archive: a, AdminKey: NewAdminKey(testToken), MaxBodyBytes: 1 << 20, Devices: devices, Codes: NewCodes(),
 		Forwarder: &Forwarder{URL: metrics.URL, Measurement: "healthkit", Client: metrics.Client()}}
 	ts := &liveServer{Server: httptest.NewServer(s.Handler()), store: a}
 	t.Cleanup(ts.Close)

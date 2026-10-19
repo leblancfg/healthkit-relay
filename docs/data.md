@@ -1,10 +1,17 @@
 # Data model & querying
 
+The server keeps your data in the **archive**: the folder given by `-archive-dir`
+(`HKR_ARCHIVE_DIR`), e.g. `/var/lib/healthkit-relay`, or `./data` next to the Docker Compose
+file. This page says what the archive holds, how it is laid out, and how to read it with
+[DuckDB](https://duckdb.org). For a program that reads over the network, such as a
+dashboard, see the [query API](query-api.md). Words such as *paired device* and *admin token*
+are defined in the [glossary](glossary.md).
+
 ## What is synced
 
-Everything HealthKit exposes on the phone. The app's type list is generated from the iOS
-SDK it is built with, so a newer Xcode brings new types with no code change. With the
-iOS 27 SDK that is over 200 types:
+The app reads every type of data HealthKit offers on the phone. Its type list is generated
+from the iOS SDK it is built with: an app built with a newer Xcode reads the new types too.
+With the iOS 27 SDK that is over 200 types:
 
 - **Quantities** (heart rate, HRV, resting heart rate, walking heart rate, VO2 max, steps,
   distance, active and basal energy, blood oxygen, respiratory rate, wrist temperature,
@@ -22,23 +29,25 @@ iOS 27 SDK that is over 200 types:
   biological sex, blood type...).
 
 Every sample keeps its UUID, start and end, source (app and version), device and metadata,
-exactly as sent. Most kinds also carry Apple's own serialized object (`NSKeyedArchiver`), so
-properties without a dedicated field are still kept. Deletions in Apple Health are synced as
-deletions.
+exactly as sent. Most kinds also carry Apple's own serialized object (`NSKeyedArchiver`),
+which keeps the properties that have no field of their own. A sample you delete in Apple
+Health is deleted in the archive too.
 
-The wire format is documented in the
+The format the app sends is documented in the
 [server README](https://github.com/leblancfg/healthkit-relay/blob/main/server/README.md#api).
 
 ## Storage
 
 <!-- storage: keep this section in step with the server's storage layer (server/README.md, Archive). -->
 
-Everything lives in the archive directory (`-archive-dir`, `HKR_ARCHIVE_DIR`):
+Everything lives in the archive directory:
 
 ```text
 <archive-dir>/
   staging.db                 SQLite: batches not flushed yet, the de-duplication index, tombstones
-  devices.json               paired devices (token hashes only)
+  admin.json                 the admin token's SHA-256
+  devices.json               paired devices and read tokens (SHA-256 of each token)
+  codes.json                 setup codes not used yet (SHA-256 of each code)
   parquet/
     samples/type=HKQuantityTypeIdentifierHeartRate/month=2026-10/c1234.parquet
     samples/type=.../month=.../f5678.parquet     an hourly flush, not compacted yet
@@ -47,34 +56,35 @@ Everything lives in the archive directory (`-archive-dir`, `HKR_ARCHIVE_DIR`):
     heartbeats/type=HKDataTypeIdentifierHeartbeatSeries/month=.../...
     ecg_voltages/type=HKDataTypeIdentifierElectrocardiogram/month=.../...
     quantity_series/type=HKQuantityTypeIdentifierStepCount/month=.../...
-    */type=_/month=_/schema.parquet              no rows: queries work before any data arrives
+    */type=_/month=_/schema.parquet              zero rows: queries work before any data arrives
     deleted/deleted.parquet                      tombstones
 ```
 
-- **Write path.** A batch is validated whole and committed to `staging.db` (fsynced) before
-  the app gets its `200`. De-duplication is an on-disk index of every record ever stored, so
-  memory does not grow with history: re-sending a batch stores nothing twice.
-- **Flush, hourly** (`-flush-interval`). Staged rows are streamed into a new Parquet file per
+- **Write path.** The server checks a whole batch, then commits it to `staging.db` (written
+  to disk with fsync) before it answers the app with `200`. De-duplication uses an index on
+  disk of every record ever stored, so memory use stays the same as history grows, and a
+  batch sent twice is stored once.
+- **Flush, hourly** (`-flush-interval`). Staged rows are written into a new Parquet file per
   dataset, type and month, `f<seq>.parquet`, then removed from staging.
 - **Compaction, nightly** (`-compact-at`, 03:30 local time by default). Each partition with
   more than one file is merged into one, `c<seq>.parquet`, and samples deleted in Apple
-  Health are dropped from the files on the way. Months that received nothing are not
-  rewritten.
+  Health are dropped from the files on the way. Months that received nothing keep their
+  files as they are.
 - **Partitions.** `month` is the month of the sample's start, in UTC (`YYYY-MM`). `type` is the
   HealthKit type identifier, or the record kind in `records`.
 
-Flush, compaction and erase are journaled and atomic (temp file, fsync, rename): a crash
-loses nothing and duplicates nothing. DuckDB can read the files while the server runs.
+Flush, compaction and erase are journaled and atomic (temp file, fsync, rename): after a
+crash, every record is there once. DuckDB can read the files while the server runs.
 
 ### Columns
 
 `samples` and `records`: `uuid`, `type`, `kind`, `key` (records), `start`, `end`
 (timestamps, UTC), `value` (double), `unit`, `source_name`, `source_bundle`,
-`source_version`, `device`, `uploader` (the paired device's ID, empty for the server token),
-`wire` (wire format, 1 or 2), `received_at`, and `json`, the record exactly as the app sent
-it, so fields without a column (metadata, category value names, Apple's serialized object)
-are kept. In `records`, `type` is the record kind (`activity_summary`, `characteristics`,
-`medication`, `series`...) and `uuid` the sample a chunk belongs to.
+`source_version`, `device`, `uploader` (the paired device's ID; empty for uploads with the
+admin token), `wire` (wire format, 1 or 2), `received_at`, and `json`, the record exactly as
+the app sent it, with the fields that have no column (metadata, category value names, Apple's
+serialized object). In `records`, `type` is the record kind (`activity_summary`,
+`characteristics`, `medication`, `series`...) and `uuid` the sample a chunk belongs to.
 
 The series datasets have one row per point, joined to `samples.uuid` by `sample_uuid`, and
 ordered by `chunk` then `i`:
@@ -90,34 +100,77 @@ ordered by `chunk` then `i`:
 Every point dataset also has `uploader` and `received_at`; with `hive_partitioning`, DuckDB
 adds `type` and `month` from the folder names.
 
-Parquet is columnar and compressed, readable by DuckDB, pandas, Polars, Spark, ClickHouse and
-most data tools, and stays readable without this project.
+Parquet is a compressed file format for tables. DuckDB, pandas, Polars, Spark, ClickHouse and
+most data tools read it, with or without Health Relay.
 
 ### Erasing
 
-**Erase Server Data and Start Over** in the app calls `DELETE /v1/data?confirm=erase`, which
-permanently deletes everything that iPhone uploaded: Parquet files are rewritten without its
-rows (or removed), its staged rows, tombstones and de-duplication entries are deleted, and
-SQLite's log is truncated. There is no soft delete. The app then uploads its history again.
-Not erased: numbers already forwarded to the metrics database (they age out with its
-retention) and copies outside the archive directory, such as backups and snapshots. With the
-server token, `?confirm=erase` is required; `?device=<id>` erases one device's data.
+**Erase Server Data and Start Over**, in the app's **Advanced** screen (the gear), calls
+`DELETE /v1/data?confirm=erase`. The server permanently deletes everything that iPhone
+uploaded: it rewrites the Parquet files without its rows (or removes them), deletes its
+staged rows, tombstones and de-duplication entries, and truncates SQLite's log. The app then
+uploads its history again. Two copies stay as they are: numbers already forwarded to a
+metrics database (they age out with its retention), and copies outside the archive
+directory, such as backups and snapshots. With the admin token, `?confirm=erase` is required,
+and `?device=<id>` erases one paired device's data.
 
 ## Querying with DuckDB
 
-[DuckDB](https://duckdb.org) reads the Parquet files in place; no import, no server. Install
-it (`brew install duckdb`, or the binary from duckdb.org), download
-[`server/sql/views.sql`](https://github.com/leblancfg/healthkit-relay/blob/main/server/sql/views.sql),
-and start DuckDB in the archive directory with it:
+[DuckDB](https://duckdb.org) is a database program that reads the Parquet files where they
+are. You run it on the computer that holds the archive.
 
-```sh
-cd /var/lib/healthkit-relay && duckdb -init /path/to/views.sql
-```
+1. Install DuckDB: `brew install duckdb` on macOS, or download the command-line program from
+   [duckdb.org](https://duckdb.org/docs/installation/). Check it with `duckdb --version`: it
+   prints a version such as `v1.5.0`.
+2. Download the views, the table definitions for the archive:
 
-It defines the views `samples`, `records`, `records_latest` (the latest version of a record
-that changes, such as today's activity summary), `route_points`, `heartbeats`,
-`ecg_voltages`, `quantity_series` and `deleted`. They hide what was deleted in Apple Health
-but not compacted away yet. Filtering on `type` and `month` reads only the matching files.
+    ```sh
+    curl -LO https://raw.githubusercontent.com/leblancfg/healthkit-relay/main/server/sql/views.sql
+    ```
+
+    This saves [`views.sql`](https://github.com/leblancfg/healthkit-relay/blob/main/server/sql/views.sql)
+    in the current folder.
+
+3. Go to the archive directory and start DuckDB with the views. On Linux and NixOS the
+   archive belongs to the server's user, so open a root shell first (replace `/home/you`
+   with the folder you downloaded `views.sql` to):
+
+    ```sh
+    sudo -s
+    cd /var/lib/healthkit-relay
+    duckdb -init /home/you/views.sql
+    ```
+
+    With Docker Compose and on macOS, the archive is yours: `cd` to it (e.g. `cd data` next
+    to `docker-compose.yml`) and run `duckdb -init ~/views.sql`. DuckDB shows its prompt,
+    `D`.
+
+4. Type a query and press Enter:
+
+    ```sql
+    SELECT type, count(*) AS n FROM samples GROUP BY type ORDER BY n DESC LIMIT 3;
+    ```
+
+    DuckDB prints a table:
+
+    ```text
+    ┌────────────────────────────────────────────┬─────────┐
+    │                    type                    │    n    │
+    │                  varchar                   │  int64  │
+    ├────────────────────────────────────────────┼─────────┤
+    │ HKQuantityTypeIdentifierHeartRate          │ 1204311 │
+    │ HKQuantityTypeIdentifierStepCount          │  402118 │
+    │ HKQuantityTypeIdentifierActiveEnergyBurned │  398765 │
+    └────────────────────────────────────────────┴─────────┘
+    ```
+
+5. Type `.quit` to leave DuckDB (then `exit` to leave the root shell).
+
+The views are `samples`, `records`, `records_latest` (the latest version of a record that
+changes, such as today's activity summary), `route_points`, `heartbeats`, `ecg_voltages`,
+`quantity_series` and `deleted`. They hide what was deleted in Apple Health and is still in
+the files until the nightly compaction. A query that filters on `type` and `month` reads only
+the matching files.
 
 ```sql
 DESCRIBE samples;
@@ -159,8 +212,8 @@ SELECT json_extract_string(json, '$.date') AS day,
 FROM records_latest WHERE type = 'activity_summary' ORDER BY day;
 ```
 
-Records received in the last hour may still be in `staging.db` only; `healthkit-relay flush`
-(with the server stopped) writes them out at once.
+Records received in the last hour may still be in `staging.db` only. To write them to Parquet
+at once, stop the server and run `healthkit-relay flush` with its `-archive-dir`.
 
 Export anything to CSV or another Parquet file:
 
@@ -169,7 +222,7 @@ COPY (SELECT * FROM samples WHERE type = 'HKWorkoutTypeIdentifier')
 TO 'workouts.csv' (HEADER);
 ```
 
-From Python:
+From Python, started in the archive directory (the views use paths relative to it):
 
 ```python
 import duckdb
@@ -181,17 +234,17 @@ df = con.sql("""
 """).df()
 ```
 
-Run it from the archive directory: the views use paths relative to it.
-
 !!! tip "Sum versus average"
-    Steps, distance and energy are additive: sum them, but de-duplicate overlapping sources
-    (iPhone and Apple Watch both count steps), for instance by keeping one `source_name`. Heart
-    rate, HRV and similar are discrete measurements: average them.
+    Steps, distance and energy add up: sum them. An iPhone and an Apple Watch carried
+    together both count the same steps, so keep one source per moment, for instance one
+    `source_name`. The [query API's aggregates](query-api.md#counting-each-moment-once-dedup)
+    do this the way Apple Health does. Heart rate, HRV and similar are single measurements:
+    average them.
 
 ## Metrics forwarding
 
-If `-forward-url` is set, new numeric samples are also posted as InfluxDB line protocol after
-they are stored:
+With `-forward-url` set, the server also posts each new numeric sample to a metrics database
+as InfluxDB line protocol, after it is stored:
 
 | Sample | Line |
 |---|---|
@@ -202,5 +255,6 @@ they are stored:
 
 Field names are the HealthKit identifier in snake case
 (`HKQuantityTypeIdentifierHeartRateVariabilitySDNN` → `heart_rate_variability_sdnn`). Routes,
-ECGs, documents and other non-numeric data stay in the archive. A forwarding failure is
-logged and counted but never fails an upload. See [Grafana](grafana.md).
+ECGs, documents and the other data without a number stay in the archive only. When
+forwarding fails, the server logs it and counts it in `healthkit_relay_forward_errors_total`;
+the upload still succeeds. See [Grafana](grafana.md).

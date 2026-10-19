@@ -46,6 +46,8 @@ type tailscaleInfo struct {
 	Serve map[string]string
 }
 
+// addresses lists where phones may reach the server, best first; r is the setup page's
+// request, nil for a command.
 func (s *Server) addresses(r *http.Request) []Address {
 	if s.PublicURL != "" {
 		return []Address{{URL: strings.TrimRight(s.PublicURL, "/"), Source: "-public-url"}}
@@ -58,8 +60,10 @@ func (s *Server) addresses(r *http.Request) []Address {
 			out = append(out, Address{URL: u, Source: source})
 		}
 	}
-	if u := requestURL(r); reachableURL(u) {
-		add(u, "this page's address")
+	if r != nil {
+		if u := requestURL(r); reachableURL(u) {
+			add(u, "this page's address")
+		}
 	}
 
 	info := s.net()

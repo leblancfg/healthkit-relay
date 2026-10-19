@@ -31,8 +31,9 @@ LABEL org.opencontainers.image.title="healthkit-relay" \
       org.opencontainers.image.version="${VERSION}"
 COPY --from=build /out/healthkit-relay /out/healthcheck /usr/local/bin/
 COPY --from=build --chown=65532:65532 /out/data /data
-# Every flag can be set as HKR_<FLAG>; see server/README.md. The token file is required:
-# mount it (a Docker secret works) and point HKR_TOKEN_FILE at it.
+# Every flag can be set as HKR_<FLAG>; see server/README.md. On first start the server prints
+# the admin token once (docker logs) and keeps its hash in /data/admin.json. HKR_TOKEN_FILE
+# (deprecated): a server token mounted there by an install from earlier versions is imported.
 ENV HKR_LISTEN=:8080 \
     HKR_ARCHIVE_DIR=/data \
     HKR_TOKEN_FILE=/run/secrets/hkr_token

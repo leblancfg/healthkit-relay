@@ -3,6 +3,58 @@
 Notable changes to the server and the app. Versions follow [Semantic Versioning](https://semver.org);
 server releases and the app are versioned separately.
 
+## Unreleased
+
+### Server
+
+- Query API, turned on with `-query-duckdb`: read-only endpoints for the type catalog,
+  samples and daily or hourly aggregates, with time zones and Apple-style source
+  de-duplication. The binary serves an OpenAPI 3.1 document at `/openapi.json` and Swagger UI
+  at `/docs`. Each query runs in a locked-down `duckdb` process. See
+  [Query API](query-api.md).
+- The OpenAPI document describes `type` as a string with a pattern and examples, in place of
+  an enum of every HealthKit identifier; `GET /v1/types` lists the valid values. An unknown
+  type answers `400` with the closest names: `unknown type HKQuantityTypeIdentifierSteps; did
+  you mean HKQuantityTypeIdentifierStepCount?`. Kinds stay an enum, each described in one
+  line. `GET /v1/kinds` is removed: `GET /v1/types?kind=category` lists the types of one
+  kind. The served document goes from 67 kB to 54 kB.
+- Token scopes: a read token (from the setup page, `healthkit-relay token create` or
+  `POST /v1/tokens`) queries and does nothing else; a paired device's token uploads and gets
+  `403` on queries. Existing `devices.json` files keep working as they are.
+- The admin token (formerly the server token): the server generates it on first start, 256
+  random bits, and prints it once to its log with the setup page's address
+  (`docker compose logs relay`, `journalctl -u healthkit-relay`). `<archive-dir>/admin.json`
+  holds its SHA-256.
+- `healthkit-relay admin reset` prints a new admin token; the running server switches to it
+  at once and signs out browsers signed in with the old one.
+- `pair`, `devices`, `revoke`, `token create` and `admin reset` work on the state files in
+  the archive directory (`-archive-dir`), with file locks, while the server runs; this
+  replaces their `-token-file` and `-server` flags. Run them as the server's user or as root,
+  e.g. `docker compose exec relay healthkit-relay pair`.
+- Setup codes are kept as SHA-256 in `codes.json` and last across a restart until they
+  expire.
+- `-token-file` (`HKR_TOKEN_FILE`) is optional and deprecated: at start, the server imports
+  an existing server token file into `admin.json` and logs a warning; then delete the file
+  and the flag. The Compose file mounts no token file; the image still imports
+  `/run/secrets/hkr_token` when an earlier install mounts one.
+- Uploads and status requests with the admin token are deprecated: still accepted, logged at
+  most hourly and counted in `healthkit_relay_admin_token_uploads_total`. Pair such apps
+  again from the setup page.
+- Setup page: **Sign in** with the admin token, with where to find it; **Pair your iPhone**,
+  **Paired devices** and **Read tokens**; copy buttons for a new read token and the setup
+  code's link.
+- Reworded output: the first-start log says `Setup page:` (formerly `Sign in at:`), and the
+  `devices` column `PAIRED` is now `CREATED`.
+- NixOS: `healthkit-relay-ctl` runs any command with the service's settings
+  (`sudo healthkit-relay-ctl pair`, `admin reset`, ...). `tokenFile` is deprecated; the
+  module imports a `/var/lib/healthkit-relay/token` from its earlier versions once.
+
+### App
+
+- Welcome, pairing, Health access, status and error texts use the server's terms (server
+  address, setup page, setup code, admin token, paired device), and each error says what to
+  do next. Manual setup asks for the **Admin token**.
+
 ## 0.6.1 (unreleased)
 
 ### Server

@@ -17,10 +17,10 @@ server-test:
 server-build:
 	cd server && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o ../bin/healthkit-relay .
 
-# Local try-out: archive in ./tmp, a throwaway token.
+# Local try-out: archive in ./tmp; the first start prints the admin token.
 server-run: server-build
-	mkdir -p tmp && [ -f tmp/token ] || head -c 32 /dev/urandom | base64 > tmp/token
-	./bin/healthkit-relay -archive-dir tmp/archive -token-file tmp/token
+	mkdir -p tmp/archive
+	./bin/healthkit-relay -archive-dir tmp/archive
 
 ios-project:
 	cd ios && $(XCODEGEN) generate

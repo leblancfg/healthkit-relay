@@ -3,17 +3,16 @@ package main
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -21,10 +20,21 @@ import (
 	"unicode"
 )
 
-// Pairing. The server token is the admin credential: whoever holds it mints one-time setup
-// codes (`healthkit-relay pair`, or the setup page). The app exchanges a code for a token of
-// its own; the server keeps only its SHA-256, in <archive-dir>/devices.json, and can revoke
-// it. The server token still authorizes uploads, so apps set up by hand keep working.
+// Pairing. Whoever holds the admin token (admin.go) mints one-time setup codes (the setup
+// page, or `healthkit-relay pair` on the server). The app exchanges a code for a token of its
+// own; the server keeps only its SHA-256, in <archive-dir>/devices.json, and can revoke it.
+//
+// Each stored token has a scope: "upload" (paired apps: upload, status, erase their data) or
+// "read" (query clients: the query API only). Entries without one, from before scopes, are
+// upload tokens. The admin token manages pairing and tokens, may use the query API and erase
+// any device's data. Uploads with it are deprecated (adminUpload): this release still
+// accepts them, for apps set up by hand with the server token of earlier versions.
+
+// Token scopes.
+const (
+	ScopeUpload = "upload"
+	ScopeRead   = "read"
+)
 
 // Device is a paired app.
 type Device struct {
@@ -34,9 +44,15 @@ type Device struct {
 	CreatedAt time.Time `json:"created_at"`
 	LastSeen  time.Time `json:"last_seen_at,omitempty"`
 	TokenHash string    `json:"token_sha256,omitempty"`
+	// Scope is ScopeUpload or ScopeRead; empty (devices.json before scopes) is ScopeUpload.
+	Scope string `json:"scope,omitempty"`
 }
 
-// Devices is the list of paired apps, persisted as JSON.
+// scope is the device's scope, ScopeUpload when unset.
+func (dev *Device) scope() string { return cmpOr(dev.Scope, ScopeUpload) }
+
+// Devices is the list of paired apps, persisted as JSON. It rereads the file when another
+// process (a subcommand) changed it.
 type Devices struct {
 	path string
 	now  func() time.Time
@@ -44,26 +60,65 @@ type Devices struct {
 	mu     sync.Mutex
 	list   []*Device
 	byHash map[string]*Device
+	stamp  stamp
 }
 
 // OpenDevices loads the device list at path; a missing file is an empty list.
 func OpenDevices(path string) (*Devices, error) {
 	d := &Devices{path: path, now: time.Now, byHash: map[string]*Device{}}
-	b, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return d, nil
-	} else if err != nil {
+	if err := d.load(); err != nil {
 		return nil, err
+	}
+	return d, nil
+}
+
+func (d *Devices) load() error {
+	d.stamp.set(d.path)
+	b, err := os.ReadFile(d.path)
+	d.list, d.byHash = nil, map[string]*Device{}
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
 	}
 	var file struct{ Devices []*Device }
 	if err := json.Unmarshal(b, &file); err != nil {
-		return nil, err
+		return fmt.Errorf("%s: %w", d.path, err)
 	}
 	for _, dev := range file.Devices {
 		d.list = append(d.list, dev)
 		d.byHash[dev.TokenHash] = dev
 	}
-	return d, nil
+	return nil
+}
+
+// refresh reads the file again if it changed on disk; d.mu is held.
+func (d *Devices) refresh() {
+	if changed, _ := d.stamp.changed(d.path); changed {
+		if err := d.load(); err != nil {
+			log.Printf("devices: %v", err)
+		}
+	}
+}
+
+// update runs fn on the list as it is on disk, under the archive's lock, and saves the list
+// if fn returns true. When saving fails, the list is read again from disk. d.mu is held.
+func (d *Devices) update(fn func() bool) error {
+	unlock, err := lockState(d.path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	d.refresh()
+	if !fn() {
+		return nil
+	}
+	if err := d.save(); err != nil {
+		d.stamp = stamp{}
+		d.load()
+		return err
+	}
+	return nil
 }
 
 func hashToken(token string) string {
@@ -81,21 +136,28 @@ func randomString(n int) string {
 
 // Add pairs a new device and returns its token, which is not stored.
 func (d *Devices) Add(name, model string) (string, Device, error) {
+	return d.AddScoped(name, model, ScopeUpload)
+}
+
+// AddScoped adds a token with the given scope and returns it; only its hash is stored.
+func (d *Devices) AddScoped(name, model, scope string) (string, Device, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	token := randomString(32)
-	dev := &Device{Name: name, Model: model, CreatedAt: d.now().UTC().Truncate(time.Second), TokenHash: hashToken(token)}
-	dev.LastSeen = dev.CreatedAt
-	for dev.ID == "" || d.find(dev.ID) >= 0 {
-		b := make([]byte, 4)
-		rand.Read(b)
-		dev.ID = hex.EncodeToString(b)
-	}
-	d.list = append(d.list, dev)
-	d.byHash[dev.TokenHash] = dev
-	if err := d.save(); err != nil {
-		d.list = d.list[:len(d.list)-1]
-		delete(d.byHash, dev.TokenHash)
+	var dev *Device
+	err := d.update(func() bool {
+		dev = &Device{Name: name, Model: model, CreatedAt: d.now().UTC().Truncate(time.Second), TokenHash: hashToken(token), Scope: scope}
+		dev.LastSeen = dev.CreatedAt
+		for dev.ID == "" || d.find(dev.ID) >= 0 {
+			b := make([]byte, 4)
+			rand.Read(b)
+			dev.ID = hex.EncodeToString(b)
+		}
+		d.list = append(d.list, dev)
+		d.byHash[dev.TokenHash] = dev
+		return true
+	})
+	if err != nil {
 		return "", Device{}, err
 	}
 	return token, dev.public(), nil
@@ -106,23 +168,24 @@ func (d *Devices) Add(name, model string) (string, Device, error) {
 func (d *Devices) Rekey(oldToken, name, model string) (token string, dev Device, ok bool, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	cur, found := d.byHash[hashToken(oldToken)]
-	if !found {
-		return "", Device{}, false, nil
-	}
-	prev := *cur
-	token = randomString(32)
-	delete(d.byHash, cur.TokenHash)
-	cur.Name, cur.Model, cur.TokenHash = name, model, hashToken(token)
-	cur.LastSeen = d.now().UTC().Truncate(time.Second)
-	d.byHash[cur.TokenHash] = cur
-	if err := d.save(); err != nil {
+	err = d.update(func() bool {
+		cur, found := d.byHash[hashToken(oldToken)]
+		if !found || cur.scope() != ScopeUpload {
+			return false // a read token is never turned into an app's
+		}
+		ok = true
+		token = randomString(32)
 		delete(d.byHash, cur.TokenHash)
-		*cur = prev
+		cur.Name, cur.Model, cur.TokenHash = name, model, hashToken(token)
+		cur.LastSeen = d.now().UTC().Truncate(time.Second)
 		d.byHash[cur.TokenHash] = cur
-		return "", Device{}, true, err
+		dev = cur.public()
+		return true
+	})
+	if err != nil || !ok {
+		return "", Device{}, ok, err
 	}
-	return token, cur.public(), true, nil
+	return token, dev, true, nil
 }
 
 func (d *Devices) find(id string) int {
@@ -138,14 +201,19 @@ func (d *Devices) find(id string) int {
 func (d *Devices) Revoke(id string) (bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	i := d.find(id)
-	if i < 0 {
-		return false, nil
-	}
-	dev := d.list[i]
-	d.list = append(d.list[:i:i], d.list[i+1:]...)
-	delete(d.byHash, dev.TokenHash)
-	return true, d.save()
+	found := false
+	err := d.update(func() bool {
+		i := d.find(id)
+		if i < 0 {
+			return false
+		}
+		found = true
+		dev := d.list[i]
+		d.list = append(d.list[:i:i], d.list[i+1:]...)
+		delete(d.byHash, dev.TokenHash)
+		return true
+	})
+	return found, err
 }
 
 // Lookup returns the device a token belongs to, and records that it was seen (to the
@@ -153,13 +221,23 @@ func (d *Devices) Revoke(id string) (bool, error) {
 func (d *Devices) Lookup(token string) (Device, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	dev, ok := d.byHash[hashToken(token)]
+	d.refresh()
+	h := hashToken(token)
+	dev, ok := d.byHash[h]
 	if !ok {
 		return Device{}, false
 	}
 	if now := d.now().UTC(); now.Sub(dev.LastSeen) > 10*time.Minute {
-		dev.LastSeen = now.Truncate(time.Second)
-		_ = d.save() // a lost last-seen time is not worth failing an upload for
+		// A lost last-seen time is not worth failing an upload for.
+		_ = d.update(func() bool {
+			if dev, ok = d.byHash[h]; ok {
+				dev.LastSeen = now.Truncate(time.Second)
+			}
+			return ok
+		})
+		if !ok {
+			return Device{}, false // revoked meanwhile
+		}
 	}
 	return dev.public(), true
 }
@@ -168,6 +246,7 @@ func (d *Devices) Lookup(token string) (Device, bool) {
 func (d *Devices) List() []Device {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.refresh()
 	out := make([]Device, 0, len(d.list))
 	for _, dev := range d.list {
 		out = append(out, dev.public())
@@ -179,12 +258,14 @@ func (d *Devices) List() []Device {
 func (d *Devices) Len() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.refresh()
 	return len(d.list)
 }
 
 func (dev *Device) public() Device {
 	c := *dev
 	c.TokenHash = ""
+	c.Scope = dev.scope()
 	return c
 }
 
@@ -195,31 +276,16 @@ func (d *Devices) save() error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(d.path), ".devices-*.json")
-	if err != nil {
+	if err := writeFileAtomic(d.path, append(b, '\n')); err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(append(b, '\n')); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), d.path)
+	d.stamp.set(d.path)
+	return nil
 }
 
-// Setup codes: single use, valid for CodeTTL (or what `pair -valid` asks, up to MaxCodeTTL),
-// held in memory only (a restart voids them).
+// Setup codes: single use, valid for CodeTTL (or what `pair -valid` asks, up to MaxCodeTTL).
+// The server keeps their hashes in <archive-dir>/codes.json, where `healthkit-relay pair`
+// adds the codes it prints.
 
 const (
 	CodeTTL    = 15 * time.Minute
@@ -227,28 +293,117 @@ const (
 )
 
 type setupCode struct {
-	expires time.Time
-	minted  time.Time
-	device  *Device // set once used
+	Hash    string    `json:"code_sha256"`
+	Minted  time.Time `json:"minted_at"`
+	Expires time.Time `json:"expires_at"`
+	Device  *Device   `json:"device,omitempty"` // set once used, without its token hash
 }
 
 // Codes holds the setup codes not yet expired.
 type Codes struct {
-	now func() time.Time
+	path string // "": in memory only
+	now  func() time.Time
 
-	mu sync.Mutex
-	m  map[string]*setupCode // by SHA-256 of the code
+	mu    sync.Mutex
+	m     map[string]*setupCode // by SHA-256 of the code
+	stamp stamp
 }
 
+// NewCodes holds codes in memory only.
 func NewCodes() *Codes { return &Codes{now: time.Now, m: map[string]*setupCode{}} }
+
+// OpenCodes holds codes in the file at path (a missing file has none).
+func OpenCodes(path string) (*Codes, error) {
+	c := &Codes{path: path, now: time.Now, m: map[string]*setupCode{}}
+	return c, c.load()
+}
+
+func (c *Codes) load() error {
+	c.stamp.set(c.path)
+	c.m = map[string]*setupCode{}
+	b, err := os.ReadFile(c.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	var file struct{ Codes []*setupCode }
+	if err := json.Unmarshal(b, &file); err != nil {
+		return fmt.Errorf("%s: %w", c.path, err)
+	}
+	for _, sc := range file.Codes {
+		c.m[sc.Hash] = sc
+	}
+	return nil
+}
+
+func (c *Codes) save() error {
+	list := make([]*setupCode, 0, len(c.m))
+	for _, sc := range c.m {
+		list = append(list, sc)
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].Minted.Before(list[j].Minted) })
+	b, err := json.MarshalIndent(struct {
+		Codes []*setupCode `json:"codes"`
+	}{list}, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := writeFileAtomic(c.path, append(b, '\n')); err != nil {
+		return err
+	}
+	c.stamp.set(c.path)
+	return nil
+}
+
+// update runs fn on the codes as they are on disk, after pruning expired ones, under the
+// file's lock, and saves them if anything changed. c.mu is held.
+func (c *Codes) update(fn func(now time.Time) (changed bool, err error)) error {
+	if c.path == "" {
+		now := c.now()
+		c.prune(now)
+		_, err := fn(now)
+		return err
+	}
+	unlock, err := lockState(c.path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	c.refresh()
+	now := c.now()
+	pruned := c.prune(now)
+	changed, err := fn(now)
+	if err != nil {
+		return err
+	}
+	if changed || pruned {
+		if err := c.save(); err != nil {
+			c.load()
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Codes) refresh() {
+	if c.path == "" {
+		return
+	}
+	if changed, _ := c.stamp.changed(c.path); changed {
+		if err := c.load(); err != nil {
+			log.Printf("setup codes: %v", err)
+		}
+	}
+}
 
 var codeEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
 // Mint returns a new code (120 random bits, 24 characters of A-Z2-7).
-func (c *Codes) Mint() (string, time.Time) { return c.MintFor(CodeTTL) }
+func (c *Codes) Mint() (string, time.Time, error) { return c.MintFor(CodeTTL) }
 
 // MintFor returns a code valid for ttl, clamped to 1 minute..MaxCodeTTL.
-func (c *Codes) MintFor(ttl time.Duration) (string, time.Time) {
+func (c *Codes) MintFor(ttl time.Duration) (string, time.Time, error) {
 	ttl = min(max(ttl, time.Minute), MaxCodeTTL)
 	b := make([]byte, 15)
 	if _, err := rand.Read(b); err != nil {
@@ -257,29 +412,35 @@ func (c *Codes) MintFor(ttl time.Duration) (string, time.Time) {
 	code := codeEncoding.EncodeToString(b)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	now := c.now()
-	c.prune(now)
-	// Bound the number of live codes: a setup page left open and reloaded mints one each time.
-	for len(c.m) >= 50 {
-		var oldest string
-		for k, v := range c.m {
-			if oldest == "" || v.minted.Before(c.m[oldest].minted) {
-				oldest = k
+	var exp time.Time
+	err := c.update(func(now time.Time) (bool, error) {
+		// Bound the number of live codes: a setup page left open and reloaded mints one each time.
+		for len(c.m) >= 50 {
+			var oldest string
+			for k, v := range c.m {
+				if oldest == "" || v.Minted.Before(c.m[oldest].Minted) {
+					oldest = k
+				}
 			}
+			delete(c.m, oldest)
 		}
-		delete(c.m, oldest)
-	}
-	exp := now.Add(ttl)
-	c.m[hashToken(code)] = &setupCode{expires: exp, minted: now}
-	return code, exp
+		exp = now.Add(ttl)
+		h := hashToken(code)
+		c.m[h] = &setupCode{Hash: h, Minted: now.UTC(), Expires: exp.UTC()}
+		return true, nil
+	})
+	return code, exp, err
 }
 
-func (c *Codes) prune(now time.Time) {
+// prune drops expired codes and tells whether there were any.
+func (c *Codes) prune(now time.Time) bool {
+	n := len(c.m)
 	for k, v := range c.m {
-		if now.After(v.expires) {
+		if now.After(v.Expires) {
 			delete(c.m, k)
 		}
 	}
+	return len(c.m) != n
 }
 
 func normalizeCode(code string) string {
@@ -291,36 +452,42 @@ func normalizeCode(code string) string {
 func (c *Codes) Redeem(code string, pair func() (Device, error)) (Device, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	now := c.now()
-	c.prune(now)
-	sc, ok := c.m[hashToken(normalizeCode(code))]
-	if !ok || sc.device != nil {
-		return Device{}, errBadCode
-	}
-	dev, err := pair()
-	if err != nil {
-		return Device{}, err
-	}
-	sc.device = &dev
-	return dev, nil
+	var dev Device
+	err := c.update(func(time.Time) (bool, error) {
+		sc, ok := c.m[hashToken(normalizeCode(code))]
+		if !ok || sc.Device != nil {
+			return false, errBadCode
+		}
+		d, err := pair()
+		if err != nil {
+			return false, err
+		}
+		dev, sc.Device = d, &d
+		return true, nil
+	})
+	return dev, err
 }
 
-var errBadCode = errors.New("this setup code is not valid: it may have expired or been used already. Get a new one from the setup page")
+var errBadCode = errors.New("setup code unknown, expired or already used")
+
+// badCodeMessage answers POST /v1/pair with an unknown, expired or used code; the app shows it.
+const badCodeMessage = "This setup code expired or was already used. Get a new one from the server's setup page, " +
+	"or run healthkit-relay pair on the server."
 
 // State is "pending", "paired" (with the device) or "invalid".
 func (c *Codes) State(code string) (string, *Device, time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.prune(c.now())
+	c.refresh()
 	sc, ok := c.m[hashToken(normalizeCode(code))]
 	switch {
-	case !ok:
+	case !ok || c.now().After(sc.Expires):
 		return "invalid", nil, time.Time{}
-	case sc.device != nil:
-		d := *sc.device
-		return "paired", &d, sc.expires
+	case sc.Device != nil:
+		d := *sc.Device
+		return "paired", &d, sc.Expires
 	default:
-		return "pending", nil, sc.expires
+		return "pending", nil, sc.Expires
 	}
 }
 
@@ -333,10 +500,16 @@ func PairLink(server, code string) string {
 	return AppScheme + "://pair?" + v.Encode()
 }
 
-// Caller is who sent a request: the admin (server token) or a paired device.
+// Caller is who sent a request: the admin (admin token) or a paired device.
 type Caller struct {
 	Admin  bool
 	Device *Device
+}
+
+// Allows tells whether the caller may use what needs scope: the admin may use everything,
+// a stored token what its own scope covers.
+func (c Caller) Allows(scope string) bool {
+	return c.Admin || (c.Device != nil && c.Device.scope() == scope)
 }
 
 func bearer(r *http.Request) string {
@@ -344,8 +517,27 @@ func bearer(r *http.Request) string {
 	return strings.TrimSpace(got)
 }
 
-func (s *Server) isAdminToken(token string) bool {
-	return token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.Token)) == 1
+func (s *Server) isAdminToken(token string) bool { return s.AdminKey.Check(token) }
+
+// adminUpload counts an upload-scope request made with the admin token, and logs one at most
+// hourly. Apps set up by hand with the server token of earlier versions upload this way;
+// this release still accepts it.
+func (s *Server) adminUpload(c Caller, r *http.Request) {
+	if !c.Admin {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stats == nil {
+		s.stats = make(map[string]int64)
+	}
+	s.stats["admin_token_uploads"]++
+	if now := time.Now(); now.Sub(s.adminUploadsLog) >= time.Hour {
+		s.adminUploadsLog = now
+		log.Printf("WARNING: %s %s used the admin token (%d such requests since start). Uploads with the admin token are deprecated "+
+			"and will stop working in a future release: pair the iPhone again from the setup page (/setup), and it gets a token of its own.",
+			r.Method, r.URL.Path, s.stats["admin_token_uploads"])
+	}
 }
 
 // caller authenticates a request; ok is false without a valid token.
@@ -363,6 +555,27 @@ func (s *Server) caller(r *http.Request) (Caller, bool) {
 		}
 	}
 	return Caller{}, false
+}
+
+// authorize authenticates a request and checks its scope: without a valid token it answers
+// 401, with a token of another scope 403. ok is false when it has answered.
+func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string) (Caller, bool) {
+	c, ok := s.caller(r)
+	if !ok {
+		s.unauthorized(w)
+		return Caller{}, false
+	}
+	if !c.Allows(scope) {
+		s.count("forbidden")
+		msg := "this is a paired device's token, which only uploads: the query API needs a read token " +
+			"(create one on the setup page, or with healthkit-relay token create -name grafana)"
+		if scope == ScopeUpload {
+			msg = "this is a read token, which only reads through the query API: uploads need a paired device's token"
+		}
+		httpError(w, http.StatusForbidden, msg)
+		return Caller{}, false
+	}
+	return c, true
 }
 
 func (s *Server) unauthorized(w http.ResponseWriter) {
@@ -410,7 +623,13 @@ func (s *Server) status(dev *Device) Status {
 
 func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	if !s.setupAllowed(r) {
-		httpError(w, http.StatusForbidden, "pairing is only open to private networks on this server")
+		// The app tells this answer apart by "private networks".
+		msg := "This server pairs iPhones only on private networks: its local network or Tailscale. " +
+			"Connect the iPhone to the same network as the server, then try again."
+		if s.SetupFrom == "off" {
+			msg = "Pairing is turned off on this server (-setup-from off)."
+		}
+		httpError(w, http.StatusForbidden, msg)
 		return
 	}
 	var req PairRequest
@@ -423,13 +642,13 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 		name = "iPhone"
 	}
 	if len(name) > 100 || len(req.Model) > 100 {
-		httpError(w, http.StatusBadRequest, "name or model too long")
+		httpError(w, http.StatusBadRequest, "name and model must be at most 100 characters each")
 		return
 	}
 	// Names end up in logs, the setup page and `healthkit-relay devices` in a terminal: no
 	// escape sequences or line breaks from whoever holds a code.
 	if !printable(name) || !printable(req.Model) {
-		httpError(w, http.StatusBadRequest, "name or model has control characters")
+		httpError(w, http.StatusBadRequest, "name and model must be printable: line breaks, tabs and other control characters are refused")
 		return
 	}
 	var token string
@@ -448,11 +667,11 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	})
 	if errors.Is(err, errBadCode) {
 		s.count("pair_rejected")
-		httpError(w, http.StatusForbidden, err.Error())
+		httpError(w, http.StatusForbidden, badCodeMessage)
 		return
 	} else if err != nil {
 		log.Printf("pair: %v", err) // names server paths: not for an unauthenticated caller
-		httpError(w, http.StatusInternalServerError, "could not save the device")
+		httpError(w, http.StatusInternalServerError, "the server could not save the paired device: its log says why")
 		return
 	}
 	s.count("paired")
@@ -465,11 +684,11 @@ func printable(s string) bool {
 }
 
 func (s *Server) statusHandler(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.caller(r)
+	c, ok := s.authorize(w, r, ScopeUpload)
 	if !ok {
-		s.unauthorized(w)
 		return
 	}
+	s.adminUpload(c, r)
 	writeJSON(w, http.StatusOK, s.status(c.Device))
 }
 
@@ -485,15 +704,20 @@ type CodeResponse struct {
 	Addresses []Address `json:"addresses,omitempty"`
 }
 
-func (s *Server) mintCode(publicURL string) CodeResponse { return s.mintCodeFor(publicURL, CodeTTL) }
+func (s *Server) mintCode(publicURL string) (CodeResponse, error) {
+	return s.mintCodeFor(publicURL, CodeTTL)
+}
 
-func (s *Server) mintCodeFor(publicURL string, ttl time.Duration) CodeResponse {
-	code, exp := s.Codes.MintFor(ttl)
+func (s *Server) mintCodeFor(publicURL string, ttl time.Duration) (CodeResponse, error) {
+	code, exp, err := s.Codes.MintFor(ttl)
+	if err != nil {
+		return CodeResponse{}, err
+	}
 	c := CodeResponse{Code: code, ExpiresAt: exp.UTC().Truncate(time.Second)}
 	if publicURL != "" {
 		c.Link, c.SetupURL = PairLink(publicURL, code), publicURL+"/setup?code="+code
 	}
-	return c
+	return c, nil
 }
 
 func (s *Server) pairingCodes(w http.ResponseWriter, r *http.Request) {
@@ -521,7 +745,12 @@ func (s *Server) pairingCodes(w http.ResponseWriter, r *http.Request) {
 	if req.ValidSeconds > 0 {
 		ttl = time.Duration(req.ValidSeconds) * time.Second
 	}
-	c := s.mintCodeFor(public, ttl)
+	c, err := s.mintCodeFor(public, ttl)
+	if err != nil {
+		log.Printf("pairing codes: %v", err)
+		httpError(w, http.StatusInternalServerError, "the server could not save the setup code: its log says why")
+		return
+	}
 	c.Addresses = found
 	writeJSON(w, http.StatusOK, c)
 }
@@ -534,6 +763,58 @@ func (s *Server) devicesList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string][]Device{"devices": s.Devices.List()})
 }
 
+// TokenRequest is the body of POST /v1/tokens.
+type TokenRequest struct {
+	Name  string `json:"name"`
+	Scope string `json:"scope"` // ScopeRead (default) or ScopeUpload
+}
+
+// TokenResponse answers POST /v1/tokens. The token is shown this once; only its hash is kept.
+type TokenResponse struct {
+	Token  string `json:"token"`
+	Device Device `json:"device"`
+}
+
+// createToken mints a token for a client that is not the app (a dashboard, an agent): read
+// tokens use the query API only. It is listed and revoked with the paired devices.
+func (s *Server) createToken(name, scope string) (TokenResponse, int, error) {
+	name = strings.TrimSpace(name)
+	scope = cmpOr(scope, ScopeRead)
+	switch {
+	case scope != ScopeRead && scope != ScopeUpload:
+		return TokenResponse{}, http.StatusBadRequest, fmt.Errorf("scope must be %q or %q", ScopeRead, ScopeUpload)
+	case name == "":
+		return TokenResponse{}, http.StatusBadRequest, errors.New("a name is required: what the token is for, e.g. grafana")
+	case len(name) > 100 || !printable(name):
+		return TokenResponse{}, http.StatusBadRequest, errors.New("the name must be at most 100 characters, without line breaks or tabs")
+	}
+	token, dev, err := s.Devices.AddScoped(name, "", scope)
+	if err != nil {
+		log.Printf("tokens: %v", err)
+		return TokenResponse{}, http.StatusInternalServerError, errors.New("the server could not save the token: its log says why")
+	}
+	log.Printf("created %s token %s (%s)", scope, dev.ID, dev.Name)
+	return TokenResponse{Token: token, Device: dev}, http.StatusCreated, nil
+}
+
+func (s *Server) tokensCreate(w http.ResponseWriter, r *http.Request) {
+	if c, ok := s.caller(r); !ok || !c.Admin {
+		s.unauthorized(w)
+		return
+	}
+	var req TokenRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	resp, code, err := s.createToken(req.Name, req.Scope)
+	if err != nil {
+		httpError(w, code, err.Error())
+		return
+	}
+	writeJSON(w, code, resp)
+}
+
 func (s *Server) deviceRevoke(w http.ResponseWriter, r *http.Request) {
 	if c, ok := s.caller(r); !ok || !c.Admin {
 		s.unauthorized(w)
@@ -544,7 +825,7 @@ func (s *Server) deviceRevoke(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		httpError(w, http.StatusInternalServerError, err.Error())
 	case !ok:
-		httpError(w, http.StatusNotFound, "no such device")
+		httpError(w, http.StatusNotFound, "no paired device or read token has this ID: GET /v1/devices lists them")
 	default:
 		log.Printf("revoked device %s", r.PathValue("id"))
 		w.WriteHeader(http.StatusNoContent)

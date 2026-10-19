@@ -109,7 +109,7 @@ func (s *Store) erase(ctx context.Context, uploader string) (int64, error) {
 
 func uploaderName(u string) string {
 	if u == "" {
-		return "the server token"
+		return "the admin token"
 	}
 	return "device " + u
 }
@@ -158,13 +158,12 @@ func rewriteWithout[T any](s *Store, path string, drop func(*T) bool) error {
 	return mergeFiles(s, path, []string{path}, nil, drop)
 }
 
-// eraseHandler serves DELETE /v1/data: a device erases what it uploaded. The server token
-// erases what was uploaded with the server token, or, with ?device=<id>, what that device
+// eraseHandler serves DELETE /v1/data: a device erases what it uploaded. The admin token
+// erases what was uploaded with the admin token, or, with ?device=<id>, what that device
 // uploaded (also after it was revoked).
 func (s *Server) eraseHandler(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.caller(r)
+	c, ok := s.authorize(w, r, ScopeUpload)
 	if !ok {
-		s.unauthorized(w)
 		return
 	}
 	// confirm=erase guards against an erase by mistake (a bare curl -X DELETE). The app before

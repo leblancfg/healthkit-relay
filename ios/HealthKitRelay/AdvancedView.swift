@@ -21,10 +21,10 @@ struct AdvancedView: View {
         NavigationStack {
             Form {
                 Section("Server") {
-                    LabeledContent("Address", value: model.settings.host)
-                    LabeledContent("This iPhone", value: model.device.map { "Paired as \($0.name)" } ?? "Server token")
+                    LabeledContent("Server address", value: model.settings.host)
+                    LabeledContent("This iPhone", value: model.device.map { "Paired as \($0.name)" } ?? "Uses the admin token")
                     if let s = model.server {
-                        LabeledContent("Records stored", value: s.records.formatted())
+                        LabeledContent("Records on server", value: s.records.formatted())
                         LabeledContent("Server version", value: s.version)
                     }
                     Button("Connect to Another Server…") { showManual = true }
@@ -44,7 +44,7 @@ struct AdvancedView: View {
                 } header: {
                     Text("Health data")
                 } footer: {
-                    Text("Every type the Health app has on this iPhone, read-only.")
+                    Text("Health Relay reads every data type that Health lets apps read on this iPhone. It only reads, and leaves your Health data as it is.")
                 }
 
                 Section {
@@ -66,7 +66,7 @@ struct AdvancedView: View {
                 } header: {
                     Text("Shared item by item")
                 } footer: {
-                    Text("Health asks about these one item at a time, so they are not part of the main permission. Tap one to pick items to share; with none in Health there is nothing to pick. Health Records need a provider connected in the Health app.")
+                    Text("Health shares these one item at a time, for example each vision prescription, so each row has its own permission. Tap a row to choose the items to share. When Health has none of that kind yet, its list is empty. Health Records need a health provider connected in the Health app first.")
                 }
 
                 Section {
@@ -114,7 +114,7 @@ struct AdvancedView: View {
                     }
                 }
             } message: {
-                Text("This permanently deletes everything this iPhone uploaded to \(model.settings.host), then uploads all its Health data again from scratch. It cannot be undone.")
+                Text("This permanently deletes everything this iPhone uploaded to \(model.settings.host), then sends all its Health data again from the start. You cannot undo this.")
             }
             .confirmationDialog("Disconnect from \(model.settings.host)?", isPresented: $confirmDisconnect, titleVisibility: .visible) {
                 Button("Disconnect", role: .destructive) {
@@ -122,7 +122,7 @@ struct AdvancedView: View {
                     dismiss()
                 }
             } message: {
-                Text("Syncing stops. Data already on the server stays there.")
+                Text("Syncing stops. Data already on the server stays there. The setup page keeps listing this iPhone as a paired device until you revoke it there. To connect again, scan a new setup code.")
             }
             .alert(alert ?? "", isPresented: Binding(get: { alert != nil }, set: { if !$0 { alert = nil } })) {
                 Button("OK", role: .cancel) {}
@@ -132,14 +132,14 @@ struct AdvancedView: View {
     }
 
     private var maintenanceFooter: String {
-        let log = "The log lists sync steps and counts, never health values."
+        let log = "The diagnostic log lists sync steps and counts only, to share when you report a problem."
         if model.erasing {
-            return "The server is deleting everything this iPhone uploaded; with a long history this can take several minutes. All Health data is sent again once it is done. " + log
+            return "The server is deleting everything this iPhone uploaded. With a long history this can take several minutes. Then Health Relay sends all Health data again. " + log
         }
         if status.running {
-            return "Erasing is possible once the running sync is done. " + log
+            return "You can erase once the running sync is done. " + log
         }
-        return "Erasing permanently deletes everything this iPhone uploaded to the server, then sends all Health data again from scratch. " + log
+        return "Erasing permanently deletes everything this iPhone uploaded to the server, then sends all Health data again from the start. " + log
     }
 
     private func itemRow(_ name: String, symbol: String, result: String?, id: String,

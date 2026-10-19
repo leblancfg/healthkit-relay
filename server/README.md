@@ -1,93 +1,164 @@
 # healthkit-relay server
 
-A single static binary (pure Go, no cgo) that receives Apple Health samples from the Health
-Relay app, archives them durably in Parquet files and optionally forwards numbers to a
-metrics database.
+The `healthkit-relay` server is one static binary, in pure Go (built with `CGO_ENABLED=0`).
+It receives Apple Health samples from the Health Relay iPhone app, keeps them in the archive
+(Parquet files in a folder you choose) and can forward numbers to a metrics database.
 
 ```sh
 go test ./...
 CGO_ENABLED=0 go build -o healthkit-relay .
-./healthkit-relay -archive-dir /var/lib/healthkit-relay -token-file /run/secrets/hkr-token
+./healthkit-relay -archive-dir /var/lib/healthkit-relay   # prints the admin token on first start
 ```
+
+## First start
+
+1. Start the server with a folder for its data and the address your iPhone uses to reach
+   it (the server address):
+
+   ```sh
+   ./healthkit-relay -archive-dir ./data -listen 0.0.0.0:8080 -public-url http://192.168.1.10:8080
+   ```
+
+2. The log shows the admin token, once, and the setup page's address:
+
+   ```text
+   First start: the server made its admin token. The admin token is the password of this server. It is shown only this once.
+
+       Admin token: Zk3v...
+       Setup page:  http://192.168.1.10:8080/setup
+   ```
+
+   Save the admin token in a password manager.
+
+3. Open the setup page in a browser and sign in with the admin token. Point the iPhone's
+   Camera at the QR code and tap **Open in Health Relay**. The page shows **iPhone paired**.
 
 ## Configuration
 
 Every flag can also be set from the environment: `HKR_` plus the flag name in upper case
-with dashes as underscores (`-archive-dir` is `HKR_ARCHIVE_DIR`). Flags win.
+with dashes as underscores (`-archive-dir` is `HKR_ARCHIVE_DIR`). Flags win over the
+environment.
 
 | Flag | Default | |
 |------|---------|-|
-| `-listen` | `127.0.0.1:8080` | address to listen on |
-| `-archive-dir` | (required) | archive directory, created if missing; also holds `devices.json` |
-| `-token-file` | (required) | file holding the server token (at least 16 characters; surrounding whitespace ignored) |
-| `-public-url` | (offered, see below) | the URL phones use to reach the server, put in setup links, e.g. `https://health.example.com` |
-| `-setup-from` | `private` | who may open `/setup` and pair: `private` (loopback, LAN, Tailscale), `any`, or `off` |
+| `-listen` | `127.0.0.1:8080` | address and port to listen on; `0.0.0.0:8080` also answers other computers and phones |
+| `-archive-dir` | (required) | the archive: the folder where the server keeps your data, created if missing; also holds `admin.json`, `devices.json` and `codes.json` |
+| `-token-file` | | deprecated: file holding the token of earlier versions (formerly the server token, at least 16 characters), imported as the admin token at start; then delete it |
+| `-public-url` | (offered, see below) | the server address: the address iPhones use to reach the server, put in setup codes, e.g. `http://192.168.1.10:8080` or `https://health.example.com` |
+| `-setup-from` | `private` | who may open the setup page (`/setup`) and pair: `private` (this computer, the local network, Tailscale), `any`, or `off` (pairing is off too) |
 | `-forward-url` | | line-protocol write URL, e.g. `http://127.0.0.1:8428/influx/write` (VictoriaMetrics) or `http://influx:8086/api/v2/write?org=o&bucket=b&precision=ns` (InfluxDB 2) |
 | `-forward-token-file` | | bearer token for `-forward-url` |
 | `-measurement` | `healthkit` | line-protocol measurement name |
-| `-max-body-bytes` | `33554432` | largest accepted request |
+| `-max-body-bytes` | `33554432` | largest accepted request body, in bytes |
 | `-flush-interval` | `1h` | how often staged records are written to Parquet |
 | `-compact-at` | `03:30` | local time of the nightly compaction |
+| `-query-duckdb` | (off) | `duckdb` executable for the read-only query API, `/openapi.json` and `/docs`; see [docs/query-api.md](../docs/query-api.md) for it and the other `-query-*` flags |
 | `-group-read` | off | make the archive readable by the service's group (directories 0750, files 0640), for a backup job or a query tool; by default only the service's user can read it (0700, 0600), set at every start |
+| `-version` | | print the version and exit |
 
 The Go runtime's soft memory limit defaults to 128 MiB (`GOMEMLIMIT` overrides it): the
 server holds a batch and a Parquet row group at a time, whatever the archive's size.
 
-The token is read from a file, never from a flag value, so it stays out of process
-listings. With systemd, `LoadCredential=` and `-token-file ${CREDENTIALS_DIRECTORY}/token`
-work well.
+## Admin token
+
+The **admin token** is the password of your server. It signs in to the setup page (`/setup`),
+where you pair iPhones and create and revoke read tokens. It also authorizes the admin API
+(`POST /v1/pairing-codes`, `GET /v1/devices`, `DELETE /v1/devices/{id}`, `POST /v1/tokens`),
+the query API, and erasing any paired device's data. On first start with no `admin.json`,
+the server makes one (256 random bits) and keeps its SHA-256 in `<archive-dir>/admin.json`
+(mode 600):
+
+```json
+{"token_sha256": "9f86d0…", "created_at": "2026-10-19T12:00:00Z"}
+```
+
+It prints the token once, on the line `    Admin token: <token>`, with the setup page's
+address on the line `    Setup page:  <address>` (`-public-url` + `/setup`, else
+`http://<listen>/setup`, with `127.0.0.1` for `0.0.0.0`), to stderr: `docker compose logs
+relay`, `journalctl -u healthkit-relay`, or the terminal running it. `healthkit-relay admin
+reset` makes a new one and prints it the same way, once, to stdout. The running server
+rereads `admin.json` when it changes: the old token stops working at once, and browsers
+signed in with it are signed out.
+
+From earlier versions: `-token-file` (`HKR_TOKEN_FILE`), the token formerly called the server
+token, is still read at start. With no `admin.json` yet, the server imports the token's hash
+and logs a deprecation warning: that token is now the admin token. Save it in a password
+manager, delete the file and remove `-token-file`. With an `admin.json` holding another
+token (after `admin reset`), the server ignores the file and logs a warning.
 
 ## Setting up the app
 
-The **server token** is the admin credential. The app does not need it: it gets a token of
-its own by scanning a one-time setup code.
+The app gets a token of its own, for that iPhone only, by scanning a setup code: a one-time
+code that works for 15 minutes. The admin token stays with you.
 
-- **Setup page.** Open `https://<server>/setup` in a browser and enter the server token: the
-  page shows a QR code to scan with the iPhone's Camera (on the iPhone itself, an **Open in
-  Health Relay** button instead), turns into "iPhone connected" once the app has paired, and
-  lists paired iPhones with a **Revoke** button. The sign-in lasts an hour (an HttpOnly,
+- **Setup page.** Open the setup page (the server address + `/setup`, e.g.
+  `http://192.168.1.10:8080/setup`) in a browser and sign in with the admin token. The page
+  shows a QR code to scan with the iPhone's Camera (on the iPhone itself, an **Open in Health
+  Relay** button), turns into **iPhone paired** once the app has paired, and lists **Paired
+  devices** and **Read tokens**, each with a **Revoke** button. On a computer it also shows
+  the setup code's link, with a copy button. The sign-in lasts an hour (an HttpOnly,
   SameSite=Strict cookie).
 - **Terminal.** `healthkit-relay pair` prints the QR code in the terminal, and a link to the
-  setup page for that code alone (no token needed to open it; for instance to send to your
-  phone). It reads the same flags and `HKR_` variables as the server, and talks to the
-  running server on `-listen` (or `-server URL`) with the server token:
+  setup page for that setup code alone. That link opens without the admin token, so you can
+  send it to your phone.
 
-  ```sh
-  healthkit-relay pair -token-file ./token -public-url https://health.example.com
-  healthkit-relay pair -token-file ./token -valid 2h      # a link to send to your phone
-  healthkit-relay devices -token-file ./token
-  healthkit-relay revoke -token-file ./token 3f9a1c2e
-  ```
+## Commands
 
-Which address goes in the code: `-public-url` if set (do set it behind a reverse proxy).
-Otherwise the server lists the addresses it can find, best first, and the setup page lets
-you pick one (the terminal shows the others):
+`pair`, `devices`, `revoke <id>`, `token create -name X [-scope read|upload]` and
+`admin reset` read the same flags and `HKR_` variables as the server and act on the state
+files in the archive directory (`devices.json`, `codes.json`, `admin.json`), with file locks,
+while the server runs; the server rereads the files when they change. Run them as the
+server's user or as root (as root, the files keep the owner of the archive directory):
+
+```sh
+healthkit-relay pair -archive-dir ./data -public-url https://health.example.com   # a setup code: QR code and link
+healthkit-relay pair -archive-dir ./data -valid 2h      # one that works for 2 hours, to send its link to your phone
+healthkit-relay devices -archive-dir ./data             # lists paired devices and read tokens, with their IDs
+healthkit-relay revoke -archive-dir ./data 3f9a1c2e     # its token stops working at once
+healthkit-relay token create -archive-dir ./data -name grafana   # a read token, printed once on stdout
+healthkit-relay admin reset -archive-dir ./data         # a new admin token; the old one stops working
+
+docker compose exec relay healthkit-relay pair          # Docker: HKR_ARCHIVE_DIR=/data is set
+sudo healthkit-relay-ctl pair                           # NixOS: the service's settings
+```
+
+Which server address goes in the setup code: `-public-url` if set (set it behind a reverse
+proxy). Otherwise the server lists the addresses it can find, best first, and uses the
+first. When it finds several, the setup page lets you pick one under **Server address in
+the code**, and `pair` lists the others:
 
 1. the address the page was opened with, or a local proxy's `X-Forwarded-Host`;
-2. Tailscale serve names that proxy to this server (`https://<name>.ts.net:<port>`, read with
-   the `tailscale` command if installed);
+2. Tailscale serve names that proxy to this server (`https://<name>.ts.net`, with `:<port>`
+   unless it is 443, read with the `tailscale` command if installed);
 3. this machine's LAN IPv4 addresses, then its Tailscale IPv4 addresses, if the server
    listens on them (`-listen 0.0.0.0:8080`).
 
-Loopback (`127.0.0.1`, `localhost`) and link-local addresses are never offered: a phone
-cannot reach them. When nothing else is found the page says so, with what to set, and shows
-no code.
+The list holds only addresses a phone can reach: loopback (`127.0.0.1`, `localhost`) and
+link-local addresses stay out. When the list is empty, the setup page shows **Set the server
+address** with what to set, and `pair` exits with an error that says the same.
 
 How it works:
 
-- A setup code is 120 random bits, works once, and expires after 15 minutes; codes live in
-  memory only, so a restart voids them. The QR code holds
-  `healthrelay://pair?server=<public url>&code=<code>`, which the app registers.
-- The app sends the code to `POST /v1/pair` and gets a token of its own (256 random bits). The
-  server stores only its SHA-256, with the device's name and model, in
-  `<archive-dir>/devices.json` (mode 600). Revoking deletes the entry: the token stops
-  working at once. Pairing again from the same iPhone revokes its previous token.
+- A setup code is 120 random bits, works once, and expires after 15 minutes (`pair -valid`,
+  up to a day). The server keeps its SHA-256 in `<archive-dir>/codes.json`, so it survives a
+  restart until it expires. The QR code holds the setup code's link,
+  `healthrelay://pair?server=<server address>&code=<code>`, which the app registers.
+- The app sends the code to `POST /v1/pair` and gets a token of its own (256 random bits): it
+  is now a paired device. The server stores only the token's SHA-256, with the device's name
+  and model, in `<archive-dir>/devices.json` (mode 600). Revoking deletes the entry: the
+  token stops working at once. Pairing again from the same iPhone replaces its previous
+  token and keeps its device ID.
 - `/setup` and `/v1/pair` answer only clients on private networks by default
   (`-setup-from`); behind a reverse proxy on the same host, the address the proxy puts last in
-  `X-Forwarded-For` counts. Without the server token or a valid code, the page shows only its
-  sign-in form. Responses are not cached, send no referrer and cannot be framed.
-- The server token still authorizes uploads, so an app set up by hand keeps working (app
-  0.4 swaps it for a device token of its own on the first start).
+  `X-Forwarded-For` counts. Without the admin token or a valid setup code, the page shows its
+  sign-in form only. Responses carry `Cache-Control: no-store`, `Referrer-Policy: no-referrer`
+  and a Content Security Policy with `frame-ancestors 'none'`.
+- Uploads with the admin token (`POST /v1/samples`, `GET /v1/status`), from an app set up by
+  hand with the token of earlier versions (formerly the server token), are deprecated: this
+  release accepts them, logs a warning at most hourly and counts them in
+  `healthkit_relay_admin_token_uploads_total` on `/metrics`. Pair that iPhone again from the
+  setup page. (App 0.4 and later swap a token typed in by hand for a paired device's token of
+  their own on the first start.)
 
 ## API
 
@@ -178,44 +249,65 @@ Responses:
 - `200` `{"received": 4, "stored": 3, "duplicates": 1, "deletions": 1, "records": 0, "version": 2}`:
   the batch is on disk. `records` tells a client the server stores records (a v1 server
   would silently drop them).
-- `400` invalid JSON or an invalid record. Nothing from the batch is stored.
-- `401` missing, wrong or revoked token. `413` body too large. `500` the archive could not be
-  written.
+- `400` invalid JSON, a body cut short, or an invalid record. Nothing from the batch is
+  stored.
+- `401` missing, wrong or revoked token. `403` a read token. `413` body larger than
+  `-max-body-bytes`. `500` the archive could not be written.
 
-The token is the server token or a device token from pairing.
+A batch is stored entirely or not at all, so a client can safely retry until it gets `200`.
+
+The token is a paired device's token. The admin token is still accepted here and on
+`GET /v1/status` in this release, deprecated (see [Setting up the app](#setting-up-the-app)).
+
+Errors here and on every endpoint below are JSON: `{"error": "…"}`.
 
 ### `POST /v1/pair`
 
 No token; the setup code is the credential. Body `{"code": "…", "name": "iPhone", "model":
-"iPhone17,1", "replaces": "<previous device token, optional>"}`. `200`
+"iPhone17,1", "replaces": "<the iPhone's previous token, optional>"}`. `200`
 `{"token": "…", "device": {"id": "3f9a1c2e", "name": "iPhone", "model": "iPhone17,1",
-"created_at": "…"}, "server": {…status…}}`; `403` for an unknown, used or expired code, or a
-client outside `-setup-from`.
+"created_at": "…"}, "server": {…status…}}`; `403` for an unknown, used or expired setup code,
+or a client outside `-setup-from`. The app shows the `403` message as is.
 
 ### `GET /v1/status`
 
-Any valid token. `{"version": "…", "wire_version": 2, "records": 12571973, "device": {…}}`
-(`device` only for a device token). The app shows the record count and detects a revoked
-token here.
+A paired device's token (read tokens get `403`), or the admin token (deprecated).
+`{"version": "…", "wire_version": 2, "records": 12571973, "device": {…}}` (`device` only for
+a paired device's token). The app shows the record count and detects a revoked token here.
 
 ### `POST /v1/pairing-codes`, `GET /v1/devices`, `DELETE /v1/devices/{id}`
 
-Server token only: mint a setup code (`{"code", "expires_at", "link", "setup_url"}`; the body
-may give `{"public_url": "…"}` when `-public-url` is not set), list paired devices, revoke
-one (`204`). The `pair`, `devices` and `revoke` commands use these.
+Admin token only: mint a setup code (`{"code", "expires_at", "link", "setup_url"}`, plus
+`addresses` found when `-public-url` is not set; the body may give `{"public_url": "…",
+"valid_seconds": 7200}`, by default 15 minutes, at most a day), list paired devices and read
+tokens, revoke one (`204`, or `404` for an unknown ID). Each entry has a `scope`: `upload` (a
+paired device's token, and every entry written before scopes existed) or `read`.
 
-A batch is stored entirely or not at all, so a client can safely retry until it gets 200.
+### `POST /v1/tokens`
+
+Admin token only: `{"name": "grafana", "scope": "read"}` (scope defaults to `read`) answers
+`201` with `{"token", "device"}`, the token shown this once. Read tokens may use the query API
+and nothing else: uploads, status and erase answer `403`. `healthkit-relay token create -name
+grafana` prints one; `devices` and `revoke` list and revoke them.
+
+### Query API
+
+With `-query-duckdb`: `GET /v1/types`, `/v1/types/{type}`,
+`/v1/types/{type}/samples`, `/v1/types/{type}/aggregates`, for a read token or the admin
+token (a paired device's token gets `403`). Described by `/openapi.json` (OpenAPI 3.1), shown
+at `/docs`; both are public. Read tokens are also created on the setup page, under **Read
+tokens** (`/setup#read-tokens`). See [docs/query-api.md](../docs/query-api.md).
 
 ### `DELETE /v1/data`
 
-Erases, permanently, everything the caller uploaded: with a device token, that device's
-records; with the server token, what was uploaded with the server token, or with
+Erases, permanently, everything the caller uploaded: with a paired device's token, that
+device's records; with the admin token, what was uploaded with the admin token, or with
 `?device=<id>` what that device uploaded (also after it was revoked). It requires
 `?confirm=erase`: any other value, or none, is refused (`400`, nothing erased). Only the app
-before 0.6 may leave it out (a device token, or iOS's CFNetwork user agent). `200`
+before 0.6 may leave it out (a paired device's token, or iOS's CFNetwork user agent). `200`
 `{"erased": 12571973, "device": "3f9a1c2e"}`. The app's **Erase Server Data and Start Over**
 calls it, then uploads its history again from scratch. Numbers already forwarded to the
-metrics database are not erased. See [Erasing](#erasing).
+metrics database stay there. See [Erasing](#erasing).
 
 ### `GET /healthz`
 
@@ -225,14 +317,17 @@ metrics database are not erased. See [Erasing](#erasing).
 
 Prometheus text format: `healthkit_relay_requests_total{result}` (`ok`, `unauthorized`,
 `bad_request`, `incomplete` for a body cut short by a client going away, `archive_error`,
-`paired`, `pair_rejected`, `erased`), `healthkit_relay_records_total{outcome}`,
+`paired`, `pair_rejected`, `erased`, `forbidden` for a token of the wrong scope,
+`query_error`, `query_timeout`, `query_busy`), `healthkit_relay_admin_token_uploads_total`,
+`healthkit_relay_records_total{outcome}`,
 `healthkit_relay_archive_records`, `healthkit_relay_staged_records` (not flushed yet),
 `healthkit_relay_last_success_timestamp_seconds{job="flush"|"compaction"}` (alert when it
 gets old: more than two hours for the flush, a day and a half for the compaction),
 `healthkit_relay_maintenance_errors_total{job}`, `healthkit_relay_devices`,
 `healthkit_relay_forward_errors_total`, `healthkit_relay_last_upload_timestamp_seconds`,
 `healthkit_relay_batches_total{trigger}` (accepted batches by what started the app's sync,
-see `trigger` above; `unknown` for apps before 0.6.1). No health data.
+see `trigger` above; `unknown` for apps before 0.6.1). `/metrics` holds counts and
+timestamps only.
 
 ## Archive
 
@@ -240,7 +335,9 @@ Everything lives in `-archive-dir`:
 
 ```
 staging.db          SQLite: batches not flushed yet, the de-duplication index, tombstones
-devices.json        paired devices (token hashes)
+admin.json          the admin token's hash
+devices.json        paired devices and read tokens (token hashes)
+codes.json          setup codes until they expire (code hashes)
 parquet/
   samples/type=HKQuantityTypeIdentifierHeartRate/month=2023-03/c1234.parquet
   samples/type=…/month=…/f5678.parquet        a flush not compacted yet
@@ -263,7 +360,7 @@ client sent supersedes it; a v1 copy of a sample already stored in v2 is a dupli
 **Flush, hourly.** For each `(dataset, type, month)` in staging, the rows are streamed into a
 new Parquet file, `f<seq>.parquet` (a temp file, fsynced, renamed), then deleted from staging.
 The flush is journaled: one cut short by a crash is replayed with the same name on the next
-start, replacing what it wrote, so nothing is lost or duplicated. The tombstones are exported
+start, replacing what it wrote, so each row lands in Parquet exactly once. The tombstones are exported
 to `deleted/deleted.parquet` at each flush.
 
 **Compaction, nightly.** Each partition with more than one file is merged into one,
@@ -280,9 +377,9 @@ than `[A-Za-z0-9._-]` are %-escaped.
 
 **Schema.** `samples` and `records` share one: `uuid`, `type`, `kind`, `key` (records),
 `start`, `end` (timestamps, UTC), `value` (double), `unit`, `source_name`, `source_bundle`,
-`source_version`, `device`, `uploader` (the paired device's ID, `""` for the server token),
-`wire` (1 or 2), `received_at`, and `json`, the record exactly as sent: nothing is lost, and
-fields added by newer apps are kept. In `records`, `type` is the record kind and `uuid` the
+`source_version`, `device`, `uploader` (the paired device's ID, `""` for uploads with the admin token),
+`wire` (1 or 2), `received_at`, and `json`, the record exactly as sent, including fields
+added by newer apps. In `records`, `type` is the record kind and `uuid` the
 sample a chunk belongs to. The point datasets have one row per point: `sample_uuid`, `chunk`,
 `i`, `time`, then `lat`, `lon`, `alt`, `h_acc`, `v_acc`, `speed`, `speed_acc`, `course`,
 `course_acc`, `ellipsoidal_alt`, `floor` (routes); `t` (seconds since the sample's start) and
@@ -344,15 +441,15 @@ writes them out at once, with the server stopped).
 
 ### Erasing
 
-`DELETE /v1/data` (see above) erases, with no soft delete and no copy kept: Parquet files
-holding only that uploader's rows are removed, others are rewritten without them (a temp file
-renamed over the original), its staged rows, tombstones and de-duplication entries are
-deleted (SQLite overwrites deleted content, `secure_delete`), and the SQLite log is truncated.
-It is journaled like flush and compaction: an erase a crash interrupts is finished on the next
-start, before uploads are accepted. Uploads wait while it runs. Not erased: numbers already
-forwarded to the metrics database (`-forward-url`; they age out with its retention), and
-copies outside the archive directory (backups, filesystem snapshots). The token keeps working,
-so the app can upload its history again at once; revoke the device to stop it.
+`DELETE /v1/data` (see above) erases for good, at once: Parquet files holding only that
+uploader's rows are removed, others are rewritten without them (a temp file renamed over the
+original), its staged rows, tombstones and de-duplication entries are deleted (SQLite
+overwrites deleted content, `secure_delete`), and the SQLite log is truncated. It is
+journaled like flush and compaction: an erase a crash interrupts is finished on the next
+start, before uploads are accepted. Uploads wait while it runs. Two copies stay: numbers
+already forwarded to the metrics database (`-forward-url`; they age out with its retention),
+and copies outside the archive directory (backups, filesystem snapshots). The token keeps
+working, so the app can upload its history again at once; revoke the paired device to stop it.
 
 ### Commands
 
@@ -375,8 +472,9 @@ counts, then delete them.
 
 New samples (not duplicates, and not v2 copies of a sample already forwarded in v1) that
 carry a number are posted as line protocol after they are archived, as are new daily
-activity summaries. Other kinds (routes, ECGs, correlations...) stay in the archive. A forwarding failure is logged and counted but does not fail the upload:
-the archive stays the source of truth.
+activity summaries. Other kinds (routes, ECGs, correlations...) stay in the archive only. A
+forwarding failure is logged and counted, and the upload still succeeds: the archive stays
+the source of truth.
 
 | Sample | Line |
 |--------|------|

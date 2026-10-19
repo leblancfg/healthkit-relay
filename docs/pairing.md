@@ -1,77 +1,145 @@
-# Pairing a phone
+# Pairing an iPhone
 
-Pairing gives an iPhone a token of its own, so the server token (the admin credential) never
-leaves the server.
+Pairing connects the Health Relay app to your server. You show the iPhone a *setup code*, a
+one-time code that the setup page shows as a QR code. The app trades it for a token of its
+own, and the iPhone becomes a *paired device*: its token uploads its Health data and does
+nothing else. The admin token stays with you, and you can revoke each paired device on its
+own. The [glossary](glossary.md) defines each of these words.
 
 ![The Health Relay app after pairing: up to date, records on server, connected](assets/screenshots/home.png){ width="300" align="right" }
 
 ## From the setup page
 
-1. Open `https://<server>/setup` (or `http://<server-ip>:8080/setup` on a LAN) on a
-   computer and enter the server token. The sign-in lasts an hour.
-2. If more than one address is offered, pick the one the phone will use.
-3. Point the iPhone's Camera at the QR code and tap **Open in Health Relay**. On the iPhone
-   itself, tap the page's **Open in Health Relay** button instead.
-4. The page turns into *iPhone connected*. In the app, allow Health access once: select
-   everything, then confirm.
+1. On a computer, open the setup page: your server address followed by `/setup`, e.g.
+   `http://192.168.1.10:8080/setup` on your home network or
+   `https://health.example.ts.net/setup` with Tailscale. Enter the admin token and click
+   **Sign in**. The sign-in lasts one hour.
+2. The page shows **Pair your iPhone**, a QR code and **Waiting for your iPhone**, with
+   the time the code expires. If it also shows **Server address in the code**, click the
+   address your iPhone reaches.
+3. On the iPhone, open the Camera, point it at the QR code and tap
+   **Open in Health Relay**.
+4. The app asks whether to connect to your server: tap **Connect**. If iOS asks to find
+   devices on your local network, tap **Allow**.
+5. The setup page shows **iPhone paired** and your iPhone's name. A few seconds later it
+   shows a new code and lists your iPhone under **Paired devices**.
+6. In the app, tap **Continue** under **Allow Health access**. Health asks what Health Relay
+   may read: turn on every category, then tap **Allow**. (On iOS 27, tap **Select All**, then
+   **All Recorded Data**.)
 
-The first sync uploads your whole history. Keep the app open for it; it can take a while
-with years of Apple Watch data. After that, iOS wakes the app in the background as new data
-arrives (about hourly; Low Power Mode and force-quitting the app pause it). **Sync Now**, or
-pulling down on the main screen, syncs at once.
+To pair without a second screen, the setup page also shows a link with the code and a copy
+button. Send the link to the iPhone, e.g. by message to yourself, and open it there: the
+page shows an **Open in Health Relay** button. Tap it, then continue at step 4.
+
+## The first sync
+
+The first sync sends your whole Health history. With years of Apple Watch data it takes a
+while: keep the app open until it is done.
+
+- The app shows **Syncing**, then **Up to date** and when it last synced, e.g.
+  *Synced 2 minutes ago*.
+- **Records on server** counts the records the server holds.
+- The card with your server address shows **Connected as** and your iPhone's name.
+
+After that, iOS wakes the app in the background as new data arrives, about every hour. Low
+Power Mode, and swiping the app away in the app switcher, pause these background syncs.
+**Sync Now**, or pulling down on the main screen, syncs at once.
 
 ## From the terminal
 
+On the server, `pair` prints a setup code as a QR code in the terminal, with the setup
+page's link for the same code:
+
 ```sh
-healthkit-relay pair -token-file ./token -public-url https://health.example.com
+docker compose exec relay healthkit-relay pair                    # Docker Compose
+sudo healthkit-relay-ctl pair                                     # NixOS
+sudo healthkit-relay pair -archive-dir /var/lib/healthkit-relay \
+  -public-url http://192.168.1.10:8080                            # systemd
+healthkit-relay pair -archive-dir ./data \
+  -public-url http://192.168.1.10:8080                            # a server you run yourself
 ```
 
-prints the QR code in the terminal. To send a link to your phone instead (by message or
-email to yourself), make it last longer:
+Scan the QR code with the iPhone's Camera, then continue at step 3 above.
+
+The commands (`pair`, `devices`, `revoke`, `token create`, `admin reset`) change the files in
+the archive (`-archive-dir` or `HKR_ARCHIVE_DIR`), with the server running. The server
+rereads the files when they change. Run the commands as the server's user or as root. They
+take the server's flags and `HKR_` variables: `-public-url` sets the server address in the
+code.
+
+To send the code's link to your iPhone by message or email, make the code last longer, up to
+`24h`:
 
 ```sh
-healthkit-relay pair -token-file ./token -valid 2h
+healthkit-relay pair -archive-dir ./data -public-url http://192.168.1.10:8080 -valid 2h
 ```
 
 ## Managing devices
 
-The setup page lists paired iPhones with a **Revoke** button. From the terminal:
+The setup page lists your paired devices under **Paired devices**, each with a **Revoke**
+button.
+From the terminal:
 
 ```sh
-healthkit-relay devices -token-file ./token
-healthkit-relay revoke  -token-file ./token 3f9a1c2e
+healthkit-relay devices -archive-dir ./data
+healthkit-relay revoke  -archive-dir ./data 3f9a1c2e
 ```
 
-Revoking takes effect at once: the app sees it at its next sync and asks to be set up again.
-Pairing again from the same iPhone replaces its previous token.
+`devices` prints one line per paired device and read token, e.g.:
+
+```text
+ID        NAME    MODEL       SCOPE   CREATED           LAST SEEN
+3f9a1c2e  iPhone  iPhone16,1  upload  2026-10-19 14:02  5 min ago
+```
+
+Revoking takes effect at once. At its next sync, the app shows **Disconnected** and asks you
+to scan a new setup code. Pairing the same iPhone again gives it a new token, and its old
+token stops working.
 
 ## How setup codes work
 
-- A setup code is 120 random bits, works once and expires after 15 minutes (`-valid` up to a
-  day). Codes live in memory only; restarting the server voids them.
-- The QR code holds `healthrelay://pair?server=<url>&code=<code>`, a link the app registers.
-- The app exchanges the code for a 256-bit device token. The server stores only its SHA-256,
-  with the device's name and model.
-- `/setup` and pairing answer only private networks by default (`-setup-from private`: loopback,
-  LAN, Tailscale). `-setup-from off` disables the page; the terminal commands still work.
-- Loopback and link-local addresses are never put in a code, since a phone cannot reach them.
-  If the page finds no usable address it says so and shows no code: set `-public-url`.
+- A setup code is 120 random bits, written as 24 letters and digits, e.g.
+  `PONKKR6RFXEX5WUCJQI6EBNX`. It works once and expires after 15 minutes, or after the time
+  `pair -valid` sets, up to a day. The server keeps the codes' SHA-256 hashes in
+  `codes.json` in the archive, so a code still works after a restart, until it expires.
+- The QR code holds a link that opens the app, with the code and the server address:
+  `healthrelay://pair?code=PONKKR6RFXEX5WUCJQI6EBNX&server=http%3A%2F%2F192.168.1.10%3A8080`.
+- The app trades the code for its own token, 256 random bits. The server keeps only the
+  token's SHA-256 hash, with the iPhone's name and model.
+- By default, the setup page and pairing answer only private networks (`-setup-from
+  private`): the server's own computer, your home network (addresses such as
+  `192.168.1.25`) and Tailscale. `-setup-from off` turns the setup page off; the terminal
+  commands keep working.
+- A code holds an address the iPhone can reach: a LAN or Tailscale address, a
+  `tailscale serve` name, or `-public-url`. Loopback (`127.0.0.1`) and link-local addresses
+  stay out. When the server finds no such address, the setup page shows
+  **Set the server address**, with how to set `-public-url`.
 
 ## Manual setup
 
-In the app, **Enter Server Details Instead** takes an address and the server token; the app
-swaps that token for a device token of its own straight away.
+In the app, **Enter Server Details Instead** takes the server address and the admin token.
+The app trades the admin token for a token of its own straight away, and keeps only that one.
+
+An app set up by hand with an earlier version may still upload with the admin token (the
+server token of earlier versions). This release accepts it, logs a warning at most once an
+hour and counts it in `healthkit_relay_admin_token_uploads_total` on `/metrics`. Pair that
+iPhone again from the setup page.
 
 ## Leaving
 
-In the app, **Advanced** › **Disconnect** forgets the server on the phone. **Erase Server Data and Start Over**
-deletes what this iPhone uploaded, for good, and then uploads it again. To delete it without
-a new upload, revoke the device, then erase its data with the server token:
+In the app, open **Advanced** (the gear icon):
+
+- **Disconnect** forgets the server on the iPhone. The data on the server stays there.
+- **Erase Server Data and Start Over** deletes everything this iPhone uploaded, for good,
+  then uploads it all again.
+
+To delete one iPhone's data and keep it deleted, revoke the paired device, then erase its
+data with the admin token and the device's ID from `devices`:
 
 ```sh
-curl -X DELETE -H "Authorization: Bearer $(cat token)" \
-  "http://127.0.0.1:8080/v1/data?confirm=erase&device=<device id>"
+curl -X DELETE -H "Authorization: Bearer <admin token>" \
+  "http://127.0.0.1:8080/v1/data?confirm=erase&device=3f9a1c2e"
 ```
 
-To delete everything, stop the server and delete the data directory. See [Backups](backups.md) before
-you do either.
+To delete everything, stop the server and delete the archive. Read [Backups](backups.md)
+before you do either.

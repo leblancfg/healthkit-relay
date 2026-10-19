@@ -62,7 +62,7 @@ func runMigrate(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("healthkit-relay migrate", flag.ContinueOnError)
 	var cfg config
 	cfg.register(fs)
-	uploader := fs.String("uploader", "", "device ID to attribute the records to (default: the paired device, if there is exactly one; else the server token)")
+	uploader := fs.String("uploader", "", "device ID to attribute the records to (default: the paired device, if there is exactly one; else the admin token)")
 	every := fs.Int64("flush-rows", 1_000_000, "flush to Parquet every this many staged rows")
 	compact := fs.Bool("compact", true, "compact the archive once migrated")
 	if err := fs.Parse(args); err != nil {
@@ -72,7 +72,7 @@ func runMigrate(args []string, out io.Writer) error {
 		return err
 	}
 	if cfg.archiveDir == "" {
-		return errors.New("-archive-dir is required")
+		return errors.New("-archive-dir is required: the folder where the server keeps your data (or set HKR_ARCHIVE_DIR)")
 	}
 	files, err := filepath.Glob(filepath.Join(cfg.archiveDir, "[0-9]*", "*.jsonl"))
 	if err != nil {

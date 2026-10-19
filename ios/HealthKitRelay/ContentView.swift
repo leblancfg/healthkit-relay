@@ -13,7 +13,7 @@ struct ContentView: View {
             Group {
                 if !SyncEngine.isAvailable {
                     ContentUnavailableView("Health data is not available", systemImage: "heart.slash",
-                                           description: Text("This device has no Health app."))
+                                           description: Text("Health Relay needs an iPhone with the Health app."))
                 } else if model.isConfigured || model.connecting != nil {
                     HomeView()
                 } else {
@@ -38,8 +38,8 @@ struct ContentView: View {
                 Button("Connect") { Task { await model.confirm(link) } }
                 Button("Cancel", role: .cancel) {}
             } message: { link in
-                Text("Health Relay will send all your Health data to \(link.host). Connect only if you opened this link from your own server's setup page."
-                     + (link.isUnencrypted ? " This server uses plain HTTP: anyone on the network can read what is sent." : ""))
+                Text("Health Relay will send all your Health data to \(link.host). Connect only if this setup code comes from your own server's setup page."
+                     + (link.isUnencrypted ? " This server address starts with http://, not https://: anyone on the same network can read the data on its way." : ""))
             }
         }
         .onChange(of: phase, initial: true) { _, phase in
@@ -67,7 +67,7 @@ struct HomeView: View {
         }
         if model.revoked {
             return Look(symbol: "link.badge.plus", tint: .gray, title: "Disconnected",
-                        subtitle: "\(model.settings.host) no longer accepts this iPhone. Open its setup page and scan the code to connect again.")
+                        subtitle: "\(model.settings.host) no longer accepts this iPhone. To connect again, open the server's setup page and scan its setup code.")
         }
         if model.needsHealthAccess || model.askingHealth {
             return Look(symbol: "heart.fill", tint: .accentColor, title: "Allow Health access", subtitle: Self.healthHint)
@@ -92,9 +92,9 @@ struct HomeView: View {
     /// What to pick in Health's sheet, which covers the app while it is up.
     static var healthHint: String {
         if #available(iOS 27.0, *) {
-            return "Health asks what to share next: tap Select All, then All Recorded Data, so your whole history is copied."
+            return "Tap Continue. Health then asks what to share: tap Select All, then All Recorded Data, so your whole history is copied."
         }
-        return "Health asks what to share next: turn on everything, then tap Allow."
+        return "Tap Continue. Health then asks what to share: turn on all categories, then tap Allow."
     }
 
     var body: some View {
@@ -107,7 +107,7 @@ struct HomeView: View {
                 stats
                 serverCard
                 if let limit = status.historyLimit {
-                    Label("Health shares data since \(limit.formatted(date: .abbreviated, time: .omitted)) only. To copy older data too, allow all data for Health Relay in the Health app.",
+                    Label("Health shares only data since \(limit.formatted(date: .abbreviated, time: .omitted)) with Health Relay. To copy older data too, allow all recorded data for Health Relay in the Health app.",
                           systemImage: "clock.badge.exclamationmark")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -115,7 +115,7 @@ struct HomeView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                 }
-                Text("Syncs on its own in the background as new Health data arrives.")
+                Text("Health Relay syncs in the background as new Health data arrives. To sync at once, pull down.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -271,7 +271,7 @@ struct WelcomeView: View {
                         .shadow(color: .black.opacity(0.12), radius: 14, y: 6)
                     Text("Health Relay")
                         .font(.largeTitle.bold())
-                    Text("Keeps a copy of your Health data on your own server, automatically.")
+                    Text("Copies your Health data to your own server, and keeps the copy up to date.")
                         .font(.title3)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -279,9 +279,9 @@ struct WelcomeView: View {
                 .padding(.top, 40)
 
                 VStack(alignment: .leading, spacing: 22) {
-                    step(1, "Open your server's setup page", "On a computer: your server's address, then /setup.")
-                    step(2, "Scan its code with the Camera", "Then tap Open in Health Relay.")
-                    step(3, "Allow Health access", "From then on, Health Relay syncs in the background.")
+                    step(1, "Open your server's setup page", "On a computer, open the server address followed by /setup, for example http://192.168.1.10:8080/setup. Sign in with the admin token.")
+                    step(2, "Scan the setup code with the Camera", "Point the iPhone's Camera at the QR code on the page, then tap Open in Health Relay.")
+                    step(3, "Allow Health access", "Health Relay then copies your Health data, and keeps syncing in the background.")
                 }
                 .padding(22)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -332,22 +332,22 @@ struct ManualSetupView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("https://health.example.com", text: $url)
+                    TextField("Server address", text: $url)
                         .keyboardType(.URL)
                         .textContentType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    SecureField("Server token", text: $token)
+                    SecureField("Admin token", text: $token)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 } footer: {
-                    Text("Your healthkit-relay server's address and token. Health Relay swaps the token for one of its own, which the server can revoke. Scanning the setup page's code does all this for you.")
+                    Text("The server address is how this iPhone reaches the server, for example http://192.168.1.10:8080 or https://health.example.ts.net. Addresses with http:// work only with an IP address or a name ending in .local. The admin token is the one the server printed in its log on its first start. Health Relay uses it once to pair this iPhone, then keeps a token of its own. Scanning a setup code from the setup page does all of this for you.")
                 }
                 if let error = model.setupError, !working {
                     Section { Text(error).foregroundStyle(.red) }
                 }
             }
-            .navigationTitle("Server")
+            .navigationTitle("Server Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }

@@ -41,7 +41,7 @@ final class AppModel: ObservableObject {
     func open(_ url: URL) async {
         guard let link = PairingLink(url) else {
             Log.error("setup: not a setup link: \(url.scheme ?? "")://\(url.host ?? "")")
-            setupError = "This link is not a Health Relay setup link."
+            setupError = "This link is not a setup code from a healthkit-relay server. Open your server's setup page and scan the setup code there."
             return
         }
         if settings.sameServer(as: link.server.absoluteString) {
@@ -67,12 +67,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Server URL and token typed in by hand. The server token is exchanged for a device
+    /// Server address and admin token typed in by hand. The admin token is exchanged for a device
     /// token when the server supports it; an older server keeps the token as given.
     func connectManually(url: String, token: String) async -> Bool {
         let typed = ServerSettings(url: url, token: token)
         guard typed.isComplete, let base = typed.baseURL else {
-            setupError = "Enter the server's address (https://…) and its token."
+            setupError = "Enter the server address, starting with http:// or https://, for example http://192.168.1.10:8080. Then enter the admin token."
             return false
         }
         await connect(to: base.absoluteString, host: typed.host, token: typed.token) { old in
@@ -81,7 +81,7 @@ final class AppModel: ObservableObject {
             } catch ServerError.tooOld {
                 return nil // a server older than pairing: the token as typed authorizes uploads
             } catch ServerError.unauthorized {
-                // Not the server token: maybe a device token already. Keep it if it works.
+                // Not the admin token: maybe a paired device token already. Keep it if it works.
                 let status = try await ServerClient(base: base).status(token: typed.token)
                 guard let device = status.device else { throw ServerError.unauthorized }
                 return ServerClient.Paired(token: typed.token, device: device, server: status)
@@ -142,7 +142,7 @@ final class AppModel: ObservableObject {
             reachable = true
             revoked = false
             SyncStatus.shared.lastError = nil
-            Log.info("setup: connected to \(host)" + (paired.map { " as device \($0.device.id)" } ?? " with the server token"))
+            Log.info("setup: connected to \(host)" + (paired.map { " as device \($0.device.id)" } ?? " with the admin token"))
         } catch {
             Log.error("setup: \(host): \(error.localizedDescription)")
             setupError = error.localizedDescription
@@ -164,7 +164,7 @@ final class AppModel: ObservableObject {
         SyncStatus.shared.lastError = nil
     }
 
-    /// An app set up by hand before pairing existed holds the server token: swap it for a
+    /// An app set up by hand before pairing existed holds the admin token: swap it for a
     /// device token of its own, once, without asking anything.
     private func upgradeServerToken() async {
         await exclusively { await self.upgradeServerTokenNow() }
@@ -182,7 +182,7 @@ final class AppModel: ObservableObject {
             device = paired.device
             PairedDevice.save(paired.device)
             server = paired.server
-            Log.info("setup: server token replaced by device token \(paired.device.id)")
+            Log.info("setup: admin token replaced by the paired device token \(paired.device.id)")
         } catch ServerError.network(let reason) {
             Log.info("setup: token upgrade postponed: \(reason)")
             return // tried again next time
@@ -258,7 +258,7 @@ final class AppModel: ObservableObject {
         do {
             try await SyncEngine.shared.resetAnchors {
                 let erased = try await ServerClient(base: base).erase(token: token)
-                Log.info("erase: server deleted \(erased.erased) items of device \(erased.device.flatMap { $0.isEmpty ? nil : $0 } ?? "(server token)")")
+                Log.info("erase: server deleted \(erased.erased) items of device \(erased.device.flatMap { $0.isEmpty ? nil : $0 } ?? "(admin token)")")
             }
         } catch {
             erasing = false

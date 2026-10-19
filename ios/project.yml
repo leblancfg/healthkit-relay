@@ -54,9 +54,9 @@ targets:
         BGTaskSchedulerPermittedIdentifiers: [$(PRODUCT_BUNDLE_IDENTIFIER).refresh]
         UIApplicationSupportsIndirectInputEvents: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
-        NSHealthShareUsageDescription: Health Relay reads your health data to copy it to your own server.
-        NSHealthUpdateUsageDescription: Health Relay never writes health data.
-        NSHealthClinicalHealthRecordsShareUsageDescription: Health Relay reads your health records to copy them to your own server.
+        NSHealthShareUsageDescription: Health Relay reads your Health data and copies it to your own server.
+        NSHealthUpdateUsageDescription: Health Relay only reads your Health data, and leaves it as it is.
+        NSHealthClinicalHealthRecordsShareUsageDescription: Health Relay reads your health records and copies them to your own server.
     entitlements:
       path: HealthKitRelay/HealthKitRelay.entitlements
       properties:

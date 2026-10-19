@@ -1,13 +1,14 @@
 # healthkit-relay with Docker Compose. See docs/setup/docker.md. In this directory:
 #
 #   mkdir -p data
-#   (umask 077; head -c 32 /dev/urandom | base64 > token)
 #   printf 'HKR_USER=%s\nHKR_PUBLIC_URL=%s\n' "$(id -u):$(id -g)" http://192.168.1.10:8080 > .env
 #   docker compose up -d
+#   docker compose logs relay                            # the admin token, printed once
 #   docker compose exec relay healthkit-relay pair      # QR code for the iPhone app
 #
-# The server runs as HKR_USER, so ./data and ./token stay owned by you (and backed up with
-# the rest of this directory). HKR_PUBLIC_URL is the address phones use to reach it.
+# The server runs as HKR_USER, so ./data stays owned by you (and backed up with the rest of
+# this directory). HKR_PUBLIC_URL is the address phones use to reach it. A new admin token:
+# docker compose exec relay healthkit-relay admin reset
 #
 # Optional dashboards: add HKR_FORWARD_URL=http://victoriametrics:8428/influx/write to .env,
 # then `docker compose --profile metrics up -d`; Grafana is on http://localhost:3000.
@@ -25,7 +26,6 @@ services:
       HKR_FORWARD_URL: ${HKR_FORWARD_URL:-}
     volumes:
       - ./data:/data
-      - ./token:/run/secrets/hkr_token:ro
 
   victoriametrics:
     profiles: [metrics]

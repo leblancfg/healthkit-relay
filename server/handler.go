@@ -15,22 +15,24 @@ import (
 type Server struct {
 	Archive      *Store
 	Forwarder    *Forwarder // nil: no forwarding
-	Token        string     // the server token: admin, and accepted for uploads
+	AdminKey     *AdminKey  // the admin token (its hash, admin.json)
 	MaxBodyBytes int64
 	Devices      *Devices
 	Codes        *Codes
-	PublicURL    string // how phones reach the server, for setup links; "" offers what it finds (address.go)
-	SetupFrom    string // who may use /setup and pairing: "private" (default), "any", "off"
-	Listen       string // the listen address, to tell which local addresses reach the server
+	PublicURL    string    // how phones reach the server, for setup links; "" offers what it finds (address.go)
+	SetupFrom    string    // who may use /setup and pairing: "private" (default), "any", "off"
+	Listen       string    // the listen address, to tell which local addresses reach the server
+	Query        *queryAPI // nil: no query API (-query-duckdb not set)
 
 	netInfo *netInfo // nil: the real interfaces and tailscale CLI
 
 	sessions sessions
 
-	mu            sync.Mutex
-	stats         map[string]int64 // counter name -> value, see writeMetrics
-	lastUpload    time.Time
-	forwardErrors int64
+	mu              sync.Mutex
+	stats           map[string]int64 // counter name -> value, see writeMetrics
+	lastUpload      time.Time
+	forwardErrors   int64
+	adminUploadsLog time.Time // when an upload with the admin token was last logged
 }
 
 // MaxBatchPartitions bounds the archive partitions one batch may touch.
@@ -51,23 +53,52 @@ type Response struct {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", s.healthz)
-	mux.HandleFunc("GET /metrics", s.metrics)
-	mux.HandleFunc("POST /v1/samples", s.samples)
-	mux.HandleFunc("GET /v1/status", s.statusHandler)
-	mux.HandleFunc("DELETE /v1/data", s.eraseHandler)
-	mux.HandleFunc("POST /v1/pair", s.pair)
-	mux.HandleFunc("POST /v1/pairing-codes", s.pairingCodes)
-	mux.HandleFunc("GET /v1/devices", s.devicesList)
-	mux.HandleFunc("DELETE /v1/devices/{id}", s.deviceRevoke)
-	mux.HandleFunc("GET /setup", s.setupPage)
-	mux.HandleFunc("POST /setup", s.setupLogin)
-	mux.HandleFunc("POST /setup/revoke", s.setupRevoke)
-	mux.HandleFunc("GET /setup/status", s.setupStatus)
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
-	})
+	for _, rt := range s.routes() {
+		mux.HandleFunc(rt.pattern, rt.handler)
+	}
 	return mux
+}
+
+type route struct {
+	pattern string
+	handler http.HandlerFunc
+}
+
+// routes lists every route the server serves; the OpenAPI document must describe the query
+// API's (openapi_test.go).
+func (s *Server) routes() []route {
+	rs := []route{
+		{"GET /healthz", s.healthz},
+		{"GET /metrics", s.metrics},
+		{"POST /v1/samples", s.samples},
+		{"GET /v1/status", s.statusHandler},
+		{"DELETE /v1/data", s.eraseHandler},
+		{"POST /v1/pair", s.pair},
+		{"POST /v1/pairing-codes", s.pairingCodes},
+		{"GET /v1/devices", s.devicesList},
+		{"DELETE /v1/devices/{id}", s.deviceRevoke},
+		{"POST /v1/tokens", s.tokensCreate},
+		{"GET /setup", s.setupPage},
+		{"POST /setup", s.setupLogin},
+		{"POST /setup/revoke", s.setupRevoke},
+		{"POST /setup/tokens", s.setupToken},
+		{"GET /setup/status", s.setupStatus},
+		{"GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		}},
+	}
+	if s.Query != nil {
+		rs = append(rs,
+			route{"GET /openapi.json", s.openAPI},
+			route{"GET /docs", s.docs},
+			route{"GET /docs/{file}", s.docs},
+			route{"GET /v1/types", s.queryTypes},
+			route{"GET /v1/types/{type}", s.queryType},
+			route{"GET /v1/types/{type}/samples", s.querySamples},
+			route{"GET /v1/types/{type}/aggregates", s.queryAggregates},
+		)
+	}
+	return rs
 }
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
@@ -76,18 +107,18 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.caller(r)
+	c, ok := s.authorize(w, r, ScopeUpload)
 	if !ok {
-		s.unauthorized(w)
 		return
 	}
+	s.adminUpload(c, r)
 	r.Body = http.MaxBytesReader(w, r.Body, s.MaxBodyBytes)
 	var b Batch
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(&b); err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
-			httpError(w, http.StatusRequestEntityTooLarge, "body too large")
+			httpError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body too large: this server accepts at most %d bytes (-max-body-bytes)", s.MaxBodyBytes))
 			return
 		}
 		if errors.Is(err, io.ErrUnexpectedEOF) {
@@ -153,7 +184,7 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("archive: %v", err)
 		s.count("archive_error")
-		httpError(w, http.StatusInternalServerError, "could not store batch")
+		httpError(w, http.StatusInternalServerError, "the server could not store the batch: its log says why")
 		return
 	}
 	added := 0
@@ -233,11 +264,14 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	fmt.Fprintln(w, "# HELP healthkit_relay_requests_total Uploads (POST /v1/samples) and pairings by result.")
+	fmt.Fprintln(w, "# HELP healthkit_relay_requests_total Uploads (POST /v1/samples), pairings, refused tokens and failed queries by result.")
 	fmt.Fprintln(w, "# TYPE healthkit_relay_requests_total counter")
-	for _, res := range []string{"ok", "unauthorized", "bad_request", "incomplete", "archive_error", "paired", "pair_rejected", "erased"} {
+	for _, res := range []string{"ok", "unauthorized", "bad_request", "incomplete", "archive_error", "paired", "pair_rejected", "erased", "forbidden", "query_error", "query_timeout", "query_busy"} {
 		fmt.Fprintf(w, "healthkit_relay_requests_total{result=%q} %d\n", res, s.stats["requests_"+res])
 	}
+	fmt.Fprintln(w, "# HELP healthkit_relay_admin_token_uploads_total Uploads and status requests authenticated with the admin token instead of a paired device's token (deprecated).")
+	fmt.Fprintln(w, "# TYPE healthkit_relay_admin_token_uploads_total counter")
+	fmt.Fprintf(w, "healthkit_relay_admin_token_uploads_total %d\n", s.stats["admin_token_uploads"])
 	fmt.Fprintln(w, "# HELP healthkit_relay_records_total Records received, by outcome.")
 	fmt.Fprintln(w, "# TYPE healthkit_relay_records_total counter")
 	fmt.Fprintf(w, "healthkit_relay_records_total{outcome=\"stored\"} %d\n", s.stats["stored"])

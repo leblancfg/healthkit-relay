@@ -160,11 +160,32 @@ func partitionFilter(t *CatalogType, lo, hi time.Time) string {
 }
 
 func (s *Server) pathType(r *http.Request) (*CatalogType, error) {
-	t, ok := lookupType(r.PathValue("type"))
+	id := r.PathValue("type")
+	t, ok := lookupType(id)
 	if !ok {
-		return nil, &apiError{http.StatusNotFound, fmt.Sprintf("unknown type %q: GET /v1/types lists them", r.PathValue("type"))}
+		return nil, unknownType(id)
 	}
 	return t, nil
+}
+
+var plainNameRE = regexp.MustCompile(`^[A-Za-z0-9]+$`)
+
+// unknownType is the 400 for a type not in the catalog, with the closest names:
+// "unknown type HKQuantityTypeIdentifierSteps; did you mean HKQuantityTypeIdentifierStepCount?"
+func unknownType(id string) error {
+	name := id
+	if !plainNameRE.MatchString(id) {
+		name = strconv.Quote(id)
+	}
+	s := suggestTypes(id)
+	switch len(s) {
+	case 0:
+		return badParam("unknown type %s; GET /v1/types lists the valid types", name)
+	case 1:
+		return badParam("unknown type %s; did you mean %s?", name, s[0])
+	default:
+		return badParam("unknown type %s; did you mean %s or %s?", name, strings.Join(s[:len(s)-1], ", "), s[len(s)-1])
+	}
 }
 
 func formatTime(us int64, loc *time.Location) string {
@@ -206,26 +227,6 @@ func (q *queryAPI) typeStats(ctx context.Context) (map[string]TypeStats, error) 
 }
 
 func aggregatable(kind string) bool { return kind == "quantity" || kind == "category" }
-
-func (s *Server) queryKinds(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authorize(w, r, ScopeRead); !ok {
-		return
-	}
-	type kindInfo struct {
-		Kind
-		Types int `json:"types"`
-	}
-	out := make([]kindInfo, len(Kinds))
-	for i, k := range Kinds {
-		out[i].Kind = k
-		for _, t := range catalogTypes {
-			if t.Kind == k.Name {
-				out[i].Types++
-			}
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"kinds": out})
-}
 
 func (s *Server) queryTypes(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, ScopeRead); !ok {

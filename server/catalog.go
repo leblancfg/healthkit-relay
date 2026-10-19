@@ -1,6 +1,9 @@
 package main
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // The type catalog: every HealthKit sample type the app can sync, with what the query API
 // needs to aggregate it. catalog_gen.go is generated from the app's type list
@@ -78,14 +81,91 @@ func lookupType(id string) (*CatalogType, bool) {
 	return t, ok
 }
 
-// catalogIDs lists every identifier, sorted, for the spec's enum.
-func catalogIDs() []string {
-	out := make([]string, 0, len(catalogTypes))
-	for _, t := range catalogTypes {
-		out = append(out, t.Identifier)
+// suggestTypes returns up to three catalog identifiers close to id, best first, for an
+// unknown type: HKQuantityTypeIdentifierSteps gives HKQuantityTypeIdentifierStepCount.
+// Names are compared without case, by the part after "Identifier" (StepCount), so a wrong
+// prefix or a missing one still finds the type; matches far behind the best are left out.
+func suggestTypes(id string) []string {
+	type match struct {
+		id    string
+		score float64
 	}
-	sort.Strings(out)
+	q := typeCore(id)
+	var ms []match
+	for _, t := range catalogTypes {
+		score := jaroWinkler(q, typeCore(t.Identifier))
+		if len(q) >= 4 && strings.Contains(typeCore(t.Identifier), q) {
+			score = max(score, 0.85) // HeartRate: RestingHeartRate, HeartRateRecoveryOneMinute...
+		}
+		if score >= 0.8 {
+			ms = append(ms, match{t.Identifier, score})
+		}
+	}
+	sort.SliceStable(ms, func(i, j int) bool { return ms[i].score > ms[j].score })
+	var out []string
+	for _, m := range ms {
+		if len(out) == 3 || m.score < ms[0].score-0.1 {
+			break
+		}
+		out = append(out, m.id)
+	}
 	return out
+}
+
+// typeCore is the lower-case name after "Identifier": stepcount for
+// HKQuantityTypeIdentifierStepCount, or the whole name when nothing follows it.
+func typeCore(id string) string {
+	s := strings.ToLower(id)
+	if i := strings.LastIndex(s, "identifier"); i >= 0 && i+len("identifier") < len(s) {
+		return s[i+len("identifier"):]
+	}
+	return s
+}
+
+// jaroWinkler is the Jaro-Winkler similarity of a and b (ASCII), from 0 (nothing in common)
+// to 1 (equal); a shared prefix counts extra.
+func jaroWinkler(a, b string) float64 {
+	if a == b {
+		return 1
+	}
+	if a == "" || b == "" {
+		return 0
+	}
+	window := max(len(a), len(b))/2 - 1
+	am, bm := make([]bool, len(a)), make([]bool, len(b))
+	m := 0
+	for i := range len(a) {
+		for j := max(0, i-window); j < min(len(b), i+window+1); j++ {
+			if !bm[j] && a[i] == b[j] {
+				am[i], bm[j] = true, true
+				m++
+				break
+			}
+		}
+	}
+	if m == 0 {
+		return 0
+	}
+	t, j := 0, 0
+	for i := range len(a) {
+		if !am[i] {
+			continue
+		}
+		for !bm[j] {
+			j++
+		}
+		if a[i] != b[j] {
+			t++
+		}
+		j++
+	}
+	fm := float64(m)
+	jaro := (fm/float64(len(a)) + fm/float64(len(b)) + (fm-float64(t)/2)/fm) / 3
+	prefix := 0
+	for prefix < min(4, len(a), len(b)) && a[prefix] == b[prefix] {
+		prefix++
+	}
+	return jaro + float64(prefix)*0.1*(1-jaro)
 }
 
 func kindNames() []string {

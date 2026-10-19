@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -157,8 +158,8 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 	}
 }
 
-// The document is complete JSON with every $ref resolving, and the enums come from the
-// catalog.
+// The document is complete JSON with every $ref resolving, kinds come from Kinds, and
+// types are described by a pattern.
 func TestOpenAPIDocument(t *testing.T) {
 	s := testServer(t)
 	s.Query = &queryAPI{db: &DuckDB{}, now: time.Now}
@@ -192,12 +193,25 @@ func TestOpenAPIDocument(t *testing.T) {
 		}
 	}
 	schemas := raw["components"].(map[string]any)["schemas"].(map[string]any)
-	enum := schemas["HealthType"].(map[string]any)["enum"].([]any)
-	if len(enum) != len(catalogTypes) || len(enum) < 200 {
-		t.Errorf("HealthType enum has %d values, the catalog %d", len(enum), len(catalogTypes))
+	// Types: a pattern every catalog identifier matches, not an enum of 200 names.
+	ht := schemas["HealthType"].(map[string]any)
+	if ht["enum"] != nil {
+		t.Error("HealthType has an enum")
 	}
-	if kinds := schemas["Kind"].(map[string]any)["enum"].([]any); len(kinds) != len(Kinds) {
+	re := regexp.MustCompile(ht["pattern"].(string))
+	for _, ct := range catalogTypes {
+		if !re.MatchString(ct.Identifier) {
+			t.Errorf("%s does not match the HealthType pattern %s", ct.Identifier, re)
+		}
+	}
+	kind := schemas["Kind"].(map[string]any)
+	if kinds := kind["enum"].([]any); len(kinds) != len(Kinds) {
 		t.Errorf("Kind enum: %v", kinds)
+	}
+	for _, k := range Kinds {
+		if line := "\n- `" + k.Name + "`: " + k.Description; !strings.Contains(kind["description"].(string), line) || strings.Contains(k.Description, "\n") {
+			t.Errorf("Kind description lacks the line %q", line)
+		}
 	}
 	if v := raw["info"].(map[string]any)["version"]; v != version {
 		t.Errorf("info.version %v", v)

@@ -21,7 +21,8 @@ has one kind: `HKQuantityTypeIdentifierStepCount` is a type of kind `quantity`.
 | `workout`, `heartbeat_series`, `electrocardiogram`, `audiogram`, `correlation`, ... | a record with fields of its own | a run with its duration, energy and distance; an ECG with its classification |
 
 Quantity and category types have aggregates; for the other kinds, read the samples with
-`raw=true`. `GET /v1/kinds` lists the kinds, `GET /v1/types` the types.
+`raw=true`. `GET /v1/types` lists every type with its kind; `GET /v1/types?kind=category` lists
+the types of one kind.
 
 ## Turning it on
 
@@ -87,7 +88,6 @@ All `GET`, with `Authorization: Bearer <token>`.
 
 | Path | |
 |---|---|
-| `/v1/kinds` | kinds of samples (`quantity`, `category`, `workout`...) |
 | `/v1/types` | every HealthKit type, with kind, unit, aggregation style, category labels and what the archive holds (count, first and last sample); `?present=true`, `?kind=` |
 | `/v1/types/{type}` | one type |
 | `/v1/types/{type}/samples` | its samples in `[start, end)`, paginated (`limit`, `cursor`, `order`, `raw`) |

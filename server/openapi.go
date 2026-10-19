@@ -26,8 +26,13 @@ var openAPIDoc = sync.OnceValues(func() ([]byte, error) {
 	}
 	doc["info"].(map[string]any)["version"] = version
 	schemas := doc["components"].(map[string]any)["schemas"].(map[string]any)
-	schemas["HealthType"].(map[string]any)["enum"] = catalogIDs()
-	schemas["Kind"].(map[string]any)["enum"] = kindNames()
+	kind := schemas["Kind"].(map[string]any)
+	kind["enum"] = kindNames()
+	desc := kind["description"].(string) + "\n"
+	for _, k := range Kinds {
+		desc += "\n- `" + k.Name + "`: " + k.Description
+	}
+	kind["description"] = desc
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false)

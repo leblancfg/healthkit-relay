@@ -92,7 +92,6 @@ func (s *Server) routes() []route {
 			route{"GET /openapi.json", s.openAPI},
 			route{"GET /docs", s.docs},
 			route{"GET /docs/{file}", s.docs},
-			route{"GET /v1/kinds", s.queryKinds},
 			route{"GET /v1/types", s.queryTypes},
 			route{"GET /v1/types/{type}", s.queryType},
 			route{"GET /v1/types/{type}/samples", s.querySamples},

@@ -321,14 +321,32 @@ func TestQueryCatalog(t *testing.T) {
 	if f.get(t, f.read, "/v1/types/"+sleepType, &one); one.Data.Samples != 4 || len(one.Values) != 6 {
 		t.Errorf("sleep: %+v", one)
 	}
-	var kinds struct {
-		Kinds []struct {
-			Name  string
-			Types int
+}
+
+// An unknown type is a 400 that names the closest catalog types.
+func TestQueryUnknownTypeSuggests(t *testing.T) {
+	f := newQueryFixture(t)
+	for typ, want := range map[string]string{
+		"HKQuantityTypeIdentifierSteps":         "unknown type HKQuantityTypeIdentifierSteps; did you mean HKQuantityTypeIdentifierStepCount?",
+		"hkquantitytypeidentifierheartrate":     "did you mean HKQuantityTypeIdentifierHeartRate?",
+		"HKQuantityTypeIdentifierSleepAnalysis": "did you mean HKCategoryTypeIdentifierSleepAnalysis?",
+		"StepCount":                             "did you mean HKQuantityTypeIdentifierStepCount?",
+		"BloodPressure":                         "did you mean HKCorrelationTypeIdentifierBloodPressure, HKQuantityTypeIdentifierBloodPressureSystolic or HKQuantityTypeIdentifierBloodPressureDiastolic?",
+		"HKQuantityTypeIdentifierNope":          "unknown type HKQuantityTypeIdentifierNope; GET /v1/types lists the valid types",
+	} {
+		for _, p := range []string{"/v1/types/" + typ, "/v1/types/" + typ + "/samples", "/v1/types/" + typ + "/aggregates"} {
+			resp, body := call(t, http.MethodGet, f.url+p, f.read, nil)
+			var e struct{ Error string }
+			json.Unmarshal(body, &e)
+			if resp.StatusCode != 400 || !strings.Contains(e.Error, want) {
+				t.Errorf("%s: %d %q, want 400 with %q", p, resp.StatusCode, e.Error, want)
+			}
 		}
 	}
-	if f.get(t, f.read, "/v1/kinds", &kinds); len(kinds.Kinds) != len(Kinds) || kinds.Kinds[0].Name != "quantity" || kinds.Kinds[0].Types < 100 {
-		t.Errorf("kinds: %+v", kinds)
+	// Anything else is quoted, as sent.
+	resp, body := call(t, http.MethodGet, f.url+"/v1/types/HKQuantityTypeIdentifierStepCount%22%20OR%201=1", f.read, nil)
+	if resp.StatusCode != 400 || !strings.Contains(string(body), `unknown type \"HKQuantityTypeIdentifierStepCount\\\" OR 1=1\"; did you mean HKQuantityTypeIdentifierStepCount?`) {
+		t.Errorf("quoted: %d %s", resp.StatusCode, body)
 	}
 }
 
@@ -336,8 +354,8 @@ func TestQueryCatalog(t *testing.T) {
 func TestQueryRejectsBadParameters(t *testing.T) {
 	f := newQueryFixture(t)
 	for path, want := range map[string]int{
-		"/v1/types/HKQuantityTypeIdentifierStepCount'%20OR%201=1--/aggregates":                 404,
-		"/v1/types/HKQuantityTypeIdentifierNope/samples":                                       404,
+		"/v1/types/HKQuantityTypeIdentifierStepCount'%20OR%201=1--/aggregates":                 400,
+		"/v1/types/HKQuantityTypeIdentifierNope/samples":                                       400,
 		"/v1/types/HKWorkoutTypeIdentifier/aggregates":                                         400,
 		"/v1/types/" + stepsType + "/aggregates?tz=Mars/Olympus":                               400,
 		"/v1/types/" + stepsType + "/aggregates?tz=../../etc/passwd":                           400,
@@ -397,7 +415,7 @@ func TestQueryScopes(t *testing.T) {
 // Without -query-duckdb nothing of the query API is served.
 func TestQueryOffByDefault(t *testing.T) {
 	ts, _ := newTestServer(t, t.TempDir())
-	for _, p := range []string{"/v1/types", "/v1/kinds", "/openapi.json", "/docs", "/v1/types/" + stepsType + "/aggregates"} {
+	for _, p := range []string{"/v1/types", "/openapi.json", "/docs", "/v1/types/" + stepsType + "/aggregates"} {
 		if resp, _ := call(t, http.MethodGet, ts.URL+p, testToken, nil); resp.StatusCode != 404 {
 			t.Errorf("%s: %d", p, resp.StatusCode)
 		}

@@ -253,7 +253,7 @@ grafana` prints one; `devices` and `revoke` list and revoke them.
 
 ### Query API
 
-With `-query-duckdb`: `GET /v1/kinds`, `/v1/types`, `/v1/types/{type}`,
+With `-query-duckdb`: `GET /v1/types`, `/v1/types/{type}`,
 `/v1/types/{type}/samples`, `/v1/types/{type}/aggregates`, for a read token or the admin
 token (upload tokens get `403`). Described by `/openapi.json` (OpenAPI 3.1), shown at `/docs`;
 both are public. Read tokens are also created on `/setup#read-tokens`. See [docs/query-api.md](../docs/query-api.md).

@@ -12,6 +12,11 @@ server releases and the app are versioned separately.
   de-duplication; an OpenAPI 3.1 document at `/openapi.json` and Swagger UI at `/docs`,
   served from the binary. Queries run in a locked-down `duckdb` process. See
   [Query API](query-api.md).
+- The OpenAPI document describes `type` with a pattern and examples instead of an enum of
+  every HealthKit identifier (67 kB to 53 kB); `GET /v1/types` lists the valid values. An
+  unknown type answers `400` with the closest names: `unknown type
+  HKQuantityTypeIdentifierSteps; did you mean HKQuantityTypeIdentifierStepCount?`. Kinds
+  stay an enum, each described in one line; `GET /v1/kinds` is gone (`GET /v1/types?kind=`).
 - Token scopes: read tokens (`healthkit-relay token create`, `POST /v1/tokens`, the setup
   page) may only query; paired devices are upload tokens and may not. Existing
   `devices.json` files keep working unchanged.

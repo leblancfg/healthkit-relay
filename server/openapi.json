@@ -4,42 +4,16 @@
     "title": "Health Relay query API",
     "version": "set by the server",
     "summary": "Read-only access to one person's Apple Health archive.",
-    "description": "**Get a read token: [/setup](/setup#read-tokens)** (sign in with the admin token, then **Read tokens**, **Create**). Click **Authorize** below and paste it.\n\n**Types and kinds**\n\nA *type* is one specific HealthKit measurement, named by HealthKit's identifier: `HKQuantityTypeIdentifierStepCount`, `HKQuantityTypeIdentifierHeartRate`, `HKCategoryTypeIdentifierSleepAnalysis`. A *kind* is the shape of a type's data. Each type has one kind: `HKQuantityTypeIdentifierStepCount` is a type of kind `quantity`.\n\n- `quantity`: a number with a unit. Steps: 12027 `count` on 2026-10-15. Heart rate: 67 `count/min` at 09:04.\n- `category`: a labelled interval. Sleep: `asleepDeep` from 01:10 to 01:40. Stand hours: `stood` from 14:00 to 15:00.\n- `workout`, `heartbeat_series`, `electrocardiogram`, `audiogram`, `correlation` (blood pressure), ...: records with fields of their own, in each sample's `raw`.\n\n`GET /v1/kinds` lists the kinds, `GET /v1/types` the types. Quantity and category types have aggregates.\n\n**How to use it**\n\n1. `GET /v1/types?present=true` lists the types that have data, with their kind, unit, aggregation style and date range.\n2. `GET /v1/types/{type}/aggregates` gives daily or hourly totals or averages, for questions like \"steps per day last week\", \"average heart rate per hour\" or \"minutes of deep sleep per night\". Pass `tz` (an IANA time zone such as `America/Toronto`) so days start at local midnight.\n3. `GET /v1/types/{type}/samples` gives the individual samples, paginated.\n\nExample: `GET /v1/types/HKQuantityTypeIdentifierStepCount/aggregates?tz=America/Toronto&start=2026-10-15&end=2026-10-16` returns one bucket:\n\n```json\n{\"start\": \"2026-10-15T00:00:00-04:00\", \"end\": \"2026-10-16T00:00:00-04:00\", \"date\": \"2026-10-15\", \"sum\": 12027, \"unit\": \"count\", \"samples\": 1009, \"sources\": [\"Apple Watch\", \"iPhone\"]}\n```\n\n**Conventions**\n\n- Times are RFC 3339 with an offset (in `tz` when given, else UTC). `start` and `end` take an RFC 3339 timestamp (`2026-10-17T09:00:00-04:00`) or a date (`2026-10-17`, midnight in `tz`); `end` is exclusive.\n- A sample has a start and an end; a point measurement (a heart rate reading) has start = end.\n- Cumulative quantities (steps, distance, energy) are summed; when an Apple Watch and an iPhone both counted the same minutes, aggregates count them once (see `dedup`). Discrete quantities (heart rate, body mass) are averaged, with min and max. Categories (sleep stages, stand hours) give, per value, the number of samples and the seconds they cover.\n- Values are in the unit the app sent, usually Apple's canonical unit: `count`, `count/min`, `kcal`, `m`, `kg`, `%` (a fraction from 0 to 1).\n- The archive is written hourly: samples from the last hour may appear later.\n- Errors are JSON: `{\"error\": \"tz \\\"Mars/Olympus\\\" is not in the time zone database\"}`.\n\n**Authentication**\n\n`Authorization: Bearer <token>`. The query endpoints take a read token or the admin token. Get a read token on [/setup](/setup#read-tokens), signed in with the admin token, or with `healthkit-relay token create -name <client>` on the server. The admin token is printed by the server on its first start, or by `healthkit-relay admin reset`. Tokens of paired iPhones (scope `upload`) get 403. Token management (`/v1/tokens`, `/v1/devices`) takes the admin token. This document and `/docs` are public.",
+    "description": "**Get a read token: [/setup](/setup#read-tokens)** (sign in with the admin token, then **Read tokens**, **Create**). Click **Authorize** below and paste it.\n\n**Types and kinds**\n\nA *type* is one specific HealthKit measurement, named by HealthKit's identifier: `HKQuantityTypeIdentifierStepCount`, `HKQuantityTypeIdentifierHeartRate`, `HKCategoryTypeIdentifierSleepAnalysis`. A *kind* is the shape of a type's data. Each type has one kind: `HKQuantityTypeIdentifierStepCount` is a type of kind `quantity`.\n\n- `quantity`: a number with a unit. Steps: 12027 `count` on 2026-10-15. Heart rate: 67 `count/min` at 09:04.\n- `category`: a labelled interval. Sleep: `asleepDeep` from 01:10 to 01:40. Stand hours: `stood` from 14:00 to 15:00.\n- `workout`, `heartbeat_series`, `electrocardiogram`, `audiogram`, `correlation` (blood pressure), ...: records with fields of their own, in each sample's `raw`.\n\n`GET /v1/types` lists the types with their kind. Quantity and category types have aggregates.\n\n**How to use it**\n\n1. `GET /v1/types?present=true` lists the types that have data, with their kind, unit, aggregation style and date range.\n2. `GET /v1/types/{type}/aggregates` gives daily or hourly totals or averages, for questions like \"steps per day last week\", \"average heart rate per hour\" or \"minutes of deep sleep per night\". Pass `tz` (an IANA time zone such as `America/Toronto`) so days start at local midnight.\n3. `GET /v1/types/{type}/samples` gives the individual samples, paginated.\n\nExample: `GET /v1/types/HKQuantityTypeIdentifierStepCount/aggregates?tz=America/Toronto&start=2026-10-15&end=2026-10-16` returns one bucket:\n\n```json\n{\"start\": \"2026-10-15T00:00:00-04:00\", \"end\": \"2026-10-16T00:00:00-04:00\", \"date\": \"2026-10-15\", \"sum\": 12027, \"unit\": \"count\", \"samples\": 1009, \"sources\": [\"Apple Watch\", \"iPhone\"]}\n```\n\n**Conventions**\n\n- Times are RFC 3339 with an offset (in `tz` when given, else UTC). `start` and `end` take an RFC 3339 timestamp (`2026-10-17T09:00:00-04:00`) or a date (`2026-10-17`, midnight in `tz`); `end` is exclusive.\n- A sample has a start and an end; a point measurement (a heart rate reading) has start = end.\n- Cumulative quantities (steps, distance, energy) are summed; when an Apple Watch and an iPhone both counted the same minutes, aggregates count them once (see `dedup`). Discrete quantities (heart rate, body mass) are averaged, with min and max. Categories (sleep stages, stand hours) give, per value, the number of samples and the seconds they cover.\n- Values are in the unit the app sent, usually Apple's canonical unit: `count`, `count/min`, `kcal`, `m`, `kg`, `%` (a fraction from 0 to 1).\n- The archive is written hourly: samples from the last hour may appear later.\n- Errors are JSON: `{\"error\": \"tz \\\"Mars/Olympus\\\" is not in the time zone database\"}`.\n\n**Authentication**\n\n`Authorization: Bearer <token>`. The query endpoints take a read token or the admin token. Get a read token on [/setup](/setup#read-tokens), signed in with the admin token, or with `healthkit-relay token create -name <client>` on the server. The admin token is printed by the server on its first start, or by `healthkit-relay admin reset`. Tokens of paired iPhones (scope `upload`) get 403. Token management (`/v1/tokens`, `/v1/devices`) takes the admin token. This document and `/docs` are public.",
     "license": { "name": "MIT", "identifier": "MIT" }
   },
   "tags": [
-    { "name": "catalog", "description": "Kinds and types, and which types have data." },
+    { "name": "catalog", "description": "Types, and which types have data." },
     { "name": "data", "description": "Samples and aggregates of one type." },
     { "name": "tokens", "description": "Read tokens for query clients (admin token only)." }
   ],
   "security": [ { "bearerAuth": [] } ],
   "paths": {
-    "/v1/kinds": {
-      "get": {
-        "tags": [ "catalog" ],
-        "operationId": "listKinds",
-        "summary": "List sample kinds",
-        "description": "A kind is the shape of a type's data:\n\n- `quantity`: a number with a unit, e.g. steps (12027 `count` on a day) or heart rate (67 `count/min`).\n- `category`: a labelled interval, e.g. sleep stage `asleepDeep` from 01:10 to 01:40.\n- `workout`, `heartbeat_series`, `electrocardiogram`, `audiogram`, `correlation`, ...: records with fields of their own, read as samples with `raw=true`.\n\nEach kind comes with what it holds, whether its types have aggregates, and how many catalog types are of that kind.",
-        "x-required-scope": "read",
-        "responses": {
-          "200": {
-            "description": "The kinds.",
-            "content": { "application/json": { "schema": {
-              "type": "object", "required": [ "kinds" ],
-              "properties": { "kinds": { "type": "array", "items": { "$ref": "#/components/schemas/KindInfo" } } }
-            },
-            "example": { "kinds": [
-              { "name": "quantity", "description": "A number with a unit, e.g. steps (12027 count on a day) or heart rate (67 count/min at 09:04). Aggregates: sum for cumulative types, average/min/max for discrete ones.", "aggregates": true, "types": 121 },
-              { "name": "category", "description": "A labelled interval, e.g. sleep stage asleepDeep from 01:10 to 01:40, or stand hour stood from 14:00 to 15:00. Aggregates: count and total duration per value.", "aggregates": true, "types": 71 },
-              { "name": "workout", "description": "A workout with its activity type, duration, energy and distance.", "aggregates": false, "types": 1 },
-              { "name": "electrocardiogram", "description": "An ECG recording with its classification; voltages are in the archive's ecg_voltages.", "aggregates": false, "types": 1 }
-            ] } } }
-          },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" }
-        }
-      }
-    },
     "/v1/types": {
       "get": {
         "tags": [ "catalog" ],
@@ -83,9 +57,9 @@
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TypeInfo" },
               "example": { "identifier": "HKCategoryTypeIdentifierSleepAnalysis", "kind": "category", "display_name": "Sleep Analysis", "value_enum": "HKCategoryValueSleepAnalysis", "values": [ { "value": 0, "label": "inBed" }, { "value": 1, "label": "asleepUnspecified" }, { "value": 2, "label": "awake" }, { "value": 3, "label": "asleepCore" }, { "value": 4, "label": "asleepDeep" }, { "value": 5, "label": "asleepREM" } ], "aggregates": true, "data": { "samples": 40667, "first_start": "2016-10-24T02:40:00Z", "last_start": "2026-10-18T10:34:57.557Z" } } } }
           },
+          "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "404": { "$ref": "#/components/responses/NotFound" }
+          "403": { "$ref": "#/components/responses/Forbidden" }
         }
       }
     },
@@ -126,7 +100,6 @@
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "403": { "$ref": "#/components/responses/Forbidden" },
-          "404": { "$ref": "#/components/responses/NotFound" },
           "422": { "$ref": "#/components/responses/TooLarge" },
           "503": { "$ref": "#/components/responses/Busy" },
           "504": { "$ref": "#/components/responses/Timeout" }
@@ -163,7 +136,6 @@
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "403": { "$ref": "#/components/responses/Forbidden" },
-          "404": { "$ref": "#/components/responses/NotFound" },
           "422": { "$ref": "#/components/responses/TooLarge" },
           "503": { "$ref": "#/components/responses/Busy" },
           "504": { "$ref": "#/components/responses/Timeout" }
@@ -248,7 +220,7 @@
         "security": [],
         "x-required-scope": "none",
         "responses": { "200": { "description": "The document.", "content": { "application/json": { "schema": { "type": "object" },
-          "example": { "openapi": "3.1.0", "info": { "title": "Health Relay query API", "version": "0.7.0" }, "paths": { "/v1/kinds": {} } } } } } }
+          "example": { "openapi": "3.1.0", "info": { "title": "Health Relay query API", "version": "0.7.0" }, "paths": { "/v1/types": {} } } } } } }
       }
     }
   },
@@ -269,26 +241,17 @@
       "BadRequest": { "description": "A parameter is invalid; the message says which and what is accepted.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "tz \"Mars/Olympus\" is not in the time zone database" } } } },
       "Unauthorized": { "description": "No token, or an invalid one (for token management: anything but the admin token).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "unauthorized" } } } },
       "Forbidden": { "description": "The token is valid but its scope forbids this: an upload token (a paired iPhone's) on a query endpoint.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
-      "NotFound": { "description": "No such type or device.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "NotFound": { "description": "No such device.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "TooLarge": { "description": "The result exceeds the server's limits: lower `limit`, shorten the range or leave out `raw`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "Busy": { "description": "Too many queries are running; retry after the Retry-After header's seconds.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "Timeout": { "description": "The query ran out of time (the server's -query-timeout); ask for a shorter range.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
     },
     "schemas": {
       "Error": { "type": "object", "required": [ "error" ], "properties": { "error": { "type": "string" } } },
-      "HealthType": { "type": "string", "description": "HealthKit sample type identifier: one specific measurement, e.g. HKQuantityTypeIdentifierStepCount. The list is generated from the iOS SDK the app was built with.", "enum": [] },
-      "Kind": { "type": "string", "description": "The shape of a type's data: quantity (a number with a unit), category (a labelled interval), workout, electrocardiogram...", "enum": [] },
+      "HealthType": { "type": "string", "pattern": "^HK[A-Za-z]+Type[A-Za-z0-9]*$", "description": "A HealthKit sample type identifier: one specific measurement. `GET /v1/types` lists the valid values, with the kind, unit and amount of data of each.", "examples": [ "HKQuantityTypeIdentifierStepCount", "HKQuantityTypeIdentifierHeartRate", "HKCategoryTypeIdentifierSleepAnalysis" ] },
+      "Kind": { "type": "string", "description": "The shape of a type's data. Each type has one kind.", "enum": [] },
       "Scope": { "type": "string", "enum": [ "read", "upload" ], "default": "read", "description": "`read`: the query API only. `upload`: what a paired iPhone may do (upload, status, erase what it uploaded)." },
       "Aggregation": { "type": "string", "enum": [ "cumulative", "discreteArithmetic", "discreteTemporallyWeighted", "discreteEquivalentContinuousLevel" ], "description": "HealthKit's HKQuantityAggregationStyle. Cumulative values add up over time (sum); discrete ones are levels (average). discreteTemporallyWeighted types are averaged per sample." },
-      "KindInfo": {
-        "type": "object", "required": [ "name", "description", "aggregates", "types" ],
-        "properties": {
-          "name": { "$ref": "#/components/schemas/Kind" },
-          "description": { "type": "string" },
-          "aggregates": { "type": "boolean", "description": "Types of this kind have /aggregates." },
-          "types": { "type": "integer", "description": "Catalog types of this kind." }
-        }
-      },
       "TypeInfo": {
         "type": "object", "required": [ "identifier", "kind", "display_name", "aggregates", "data" ],
         "properties": {

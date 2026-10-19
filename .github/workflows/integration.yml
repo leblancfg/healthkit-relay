@@ -32,7 +32,6 @@ jobs:
       - name: Set up as docs/setup/docker.md says
         run: |
           mkdir -p data
-          (umask 077; head -c 32 /dev/urandom | base64 > token)
           {
             echo "HKR_USER=$(id -u):$(id -g)"
             echo "HKR_PUBLIC_URL=http://127.0.0.1:8080"
@@ -60,10 +59,12 @@ jobs:
           done
           echo "$out"
           grep -q '"__name__":"healthkit_heart_rate"' <<<"$out"
-      - name: Archive is on the host, owned by the user
+      - name: Archive is on the host, owned by the user; the admin token was printed once, its hash stored
         run: |
           find data -ls | head -20
           [ "$(stat -c %u data/devices.json)" = "$(id -u)" ]
+          [ "$(stat -c %a data/admin.json)" = 600 ]
+          [ "$(docker compose logs relay | grep -c 'Admin token: ')" = 1 ]
       - name: Logs
         if: always()
         run: docker compose logs --no-color relay
@@ -101,7 +102,6 @@ jobs:
           sudo install -m 755 healthkit-relay /usr/local/bin/
           sudo install -m 644 packaging/healthkit-relay.service /etc/systemd/system/
           sudo install -d -m 700 /etc/healthkit-relay
-          sudo sh -c 'umask 077; head -c 32 /dev/urandom | base64 > /etc/healthkit-relay/token'
           echo HKR_PUBLIC_URL=http://127.0.0.1:8080 | sudo tee /etc/healthkit-relay/env
           sudo systemd-analyze verify /etc/systemd/system/healthkit-relay.service
           sudo systemctl daemon-reload
@@ -109,13 +109,15 @@ jobs:
           healthkit-relay -version
       - name: Smoke test
         env:
-          HKR_PAIR_CMD: sudo healthkit-relay pair -token-file /etc/healthkit-relay/token
+          HKR_PAIR_CMD: sudo healthkit-relay pair -archive-dir /var/lib/healthkit-relay -public-url http://127.0.0.1:8080
           HKR_RESTART_CMD: sudo systemctl restart healthkit-relay
         run: scripts/smoke-test.sh
       - name: Archive is private to the service
         run: |
           sudo ls -la /var/lib/private/healthkit-relay
           [ "$(sudo stat -c %a /var/lib/private/healthkit-relay)" = 700 ]
+          [ "$(sudo stat -c %a /var/lib/private/healthkit-relay/admin.json)" = 600 ]
+          [ "$(sudo journalctl -u healthkit-relay -o cat | grep -c 'Admin token: ')" = 1 ]
           systemd-analyze security healthkit-relay.service --no-pager | tail -1
       - name: Logs
         if: always()

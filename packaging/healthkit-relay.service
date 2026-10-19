@@ -3,10 +3,13 @@
 #   install -m 755 healthkit-relay /usr/local/bin/
 #   install -m 644 healthkit-relay.service /etc/systemd/system/
 #   install -d -m 700 /etc/healthkit-relay
-#   (umask 077; head -c 32 /dev/urandom | base64 > /etc/healthkit-relay/token)
 #   echo HKR_PUBLIC_URL=https://health.example.com > /etc/healthkit-relay/env
 #   systemctl daemon-reload && systemctl enable --now healthkit-relay
-#   healthkit-relay pair -token-file /etc/healthkit-relay/token    # as root
+#   journalctl -u healthkit-relay      # the admin token and the setup link, printed once
+#   healthkit-relay pair -archive-dir /var/lib/healthkit-relay -public-url https://health.example.com   # as root
+#
+# Commands (pair, devices, revoke, token create, admin reset) run as root with
+# -archive-dir /var/lib/healthkit-relay.
 #
 # Settings go in /etc/healthkit-relay/env as HKR_<FLAG>=value (see server/README.md), e.g.
 # HKR_LISTEN=0.0.0.0:8080 to accept phones on the LAN without a reverse proxy.
@@ -20,10 +23,14 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/healthkit-relay -archive-dir ${STATE_DIRECTORY} -token-file ${CREDENTIALS_DIRECTORY}/token
+ExecStart=/usr/local/bin/healthkit-relay -archive-dir ${STATE_DIRECTORY}
 Environment=HKR_LISTEN=127.0.0.1:8080
 EnvironmentFile=-/etc/healthkit-relay/env
-LoadCredential=token:/etc/healthkit-relay/token
+# Upgrading with an /etc/healthkit-relay/token from earlier versions: uncomment these two
+# lines for one start, which imports the token's hash into admin.json; then comment them
+# again and delete the file.
+#LoadCredential=token:/etc/healthkit-relay/token
+#Environment=HKR_TOKEN_FILE=%d/token
 StateDirectory=healthkit-relay
 StateDirectoryMode=0700
 DynamicUser=yes

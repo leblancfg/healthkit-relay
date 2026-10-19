@@ -201,8 +201,12 @@ final class AppModel: ObservableObject {
         await upgradeServerToken()
         await refreshHealthAccess()
         await refreshServer()
+        // What a locked launch could not read from HealthKit is read now, and a sync owed
+        // (skipped while locked, or failed) runs, whenever the last one was.
+        let owed = await SyncEngine.shared.pending != nil
+        await SyncEngine.shared.startObserving()
         let last = SyncStatus.shared.lastSuccess
-        if !revoked, !needsHealthAccess, last == nil || Date.now.timeIntervalSince(last!) > Self.syncAfter {
+        if !revoked, !needsHealthAccess, owed || last == nil || Date.now.timeIntervalSince(last!) > Self.syncAfter {
             await sync()
         }
     }

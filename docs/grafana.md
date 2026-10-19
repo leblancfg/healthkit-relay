@@ -60,7 +60,9 @@ added to Grafana as a second Prometheus data source), or receive the lines with 
 `healthkit_relay_archive_records`, `healthkit_relay_staged_records`,
 `healthkit_relay_last_success_timestamp_seconds{job="flush"|"compaction"}`,
 `healthkit_relay_maintenance_errors_total{job}`, `healthkit_relay_devices`,
-`healthkit_relay_forward_errors_total` and `healthkit_relay_last_upload_timestamp_seconds`.
+`healthkit_relay_forward_errors_total`, `healthkit_relay_last_upload_timestamp_seconds` and
+`healthkit_relay_batches_total{trigger}` (batches by what started the sync: `foreground`,
+`observer`, `refresh`, `unlock`, `retry`, or `unknown` for apps before 0.6.1).
 Scrape it with VictoriaMetrics (or Prometheus). Useful alerts: the hourly flush has not
 succeeded for two hours, or the nightly compaction for a day and a half,
 
@@ -76,3 +78,8 @@ time() - healthkit_relay_last_upload_timestamp_seconds > 86400
 ```
 
 which usually means the phone could not reach the server, or background syncing is paused.
+Whether the phone syncs in the background at all shows in
+
+```promql
+sum by (trigger) (increase(healthkit_relay_batches_total{trigger=~"observer|refresh|unlock|retry"}[1d]))
+```

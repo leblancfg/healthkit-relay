@@ -62,6 +62,8 @@ struct AuthPlan: @unchecked Sendable {
     var companions: [String: [HKObjectType]] = [:]
     /// Identifier -> reason it cannot be requested (HealthKit forbids it, unsupported device...).
     var excluded: [String: String] = [:]
+    /// False when HealthKit could not answer for some types (phone locked): not to be kept.
+    var complete = true
 }
 
 /// Counts for the UI.
@@ -126,15 +128,26 @@ actor SyncEngine {
     private var inFlight: [String: Task<Int, Error>] = [:]
     private var busy = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
-    private var observed = Set<String>()
-    /// Types HealthKit refuses observer queries for.
-    private var unobservable = Set<String>()
-    private var deliveryEnabled = Set<String>()
+    let observers = Observers()
     private var planTask: Task<AuthPlan, Never>?
-    private var requestedTask: Task<Set<String>, Never>?
+    private var requestedTask: Task<(Set<String>, Bool), Never>?
     private var lastAux: Date?
-    /// A sync was skipped because the phone was locked: run it after the next unlock.
-    private(set) var pendingAfterUnlock = false
+    /// A full sync still owed, see PendingSync. Also kept here: before the first unlock after
+    /// a restart, UserDefaults can neither be read nor written.
+    private var pendingInMemory: PendingSync?
+
+    var pending: PendingSync? { pendingInMemory ?? PendingSync.load() }
+
+    private func markPending(_ reason: PendingSync) {
+        let merged = PendingSync.merge(pending, reason)
+        pendingInMemory = merged
+        PendingSync.save(merged)
+    }
+
+    private func clearPending() {
+        pendingInMemory = nil
+        PendingSync.save(nil)
+    }
 
     static var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
@@ -150,16 +163,21 @@ actor SyncEngine {
     /// exclusions. HealthKit raises an exception (not an error) for types an app may not
     /// request, so each type is probed on its own first, without showing anything.
     func authPlan() async -> AuthPlan {
-        // Shared by concurrent callers (launch observers, the UI), computed once per launch.
+        // Shared by concurrent callers (launch observers, the UI), computed once per launch
+        // if HealthKit answered every probe. A plan from a locked phone is not kept: the next
+        // call (unlock, the app opening) computes it again.
         if let planTask { return await planTask.value }
         let task = Task { await self.computePlan() }
         planTask = task
-        return await task.value
+        let p = await task.value
+        if !p.complete, planTask == task { planTask = nil }
+        return p
     }
 
     private func computePlan() async -> AuthPlan {
         let started = Date.now
         var p = AuthPlan()
+        let readable = await MainActor.run { UIApplication.shared.isProtectedDataAvailable }
         let healthRecords = store.supportsHealthRecords()
         for synced in HealthTypes.all {
             let type = synced.type
@@ -179,6 +197,10 @@ actor SyncEngine {
                 p.read.insert(type)
                 continue
             }
+            if reason == Self.inaccessible {
+                p.complete = false
+                continue
+            }
             // Some types must be requested with others ("Authorization for
             // HKWorkoutTypeIdentifier should also be requested when requesting ... route").
             let companions = Self.identifiers(in: reason).filter { $0 != type.identifier }.compactMap { HealthTypes.named($0)?.type }
@@ -194,11 +216,16 @@ actor SyncEngine {
                 p.excluded[type.identifier] = reason
             }
         }
+        let stillReadable = await MainActor.run { UIApplication.shared.isProtectedDataAvailable }
+        if !readable || !stillReadable || p.read.isEmpty { p.complete = false }
         Log.info("authorization: plan in \(Self.elapsed(since: started)): \(p.read.count) in the main request, "
             + "per-object \(p.perObject.map(\.identifier)), \(p.derived.count) derived, \(p.healthRecords.count) health records, "
-            + "\(p.excluded.count) excluded")
+            + "\(p.excluded.count) excluded" + (p.complete ? "" : "; incomplete (phone locked?), computed again next time"))
         return p
     }
+
+    /// What probe returns when HealthKit's database cannot be read (the phone is locked).
+    private static let inaccessible = "HealthKit database inaccessible"
 
     static func elapsed(since start: Date) -> String {
         String(format: "%.1f s", Date.now.timeIntervalSince(start))
@@ -226,7 +253,11 @@ actor SyncEngine {
             let once = ResumeOnce(cont)
             let raised = HKRTry {
                 self.store.getRequestStatusForAuthorization(toShare: [], read: Set(types)) { _, error in
-                    once.resume(error?.localizedDescription)
+                    if let e = error as? HKError, e.code == .errorDatabaseInaccessible {
+                        once.resume(Self.inaccessible)
+                    } else {
+                        once.resume(error?.localizedDescription)
+                    }
                 }
             }
             if let raised { once.resume(raised) }
@@ -245,6 +276,8 @@ actor SyncEngine {
         let p = await authPlan()
         let before = await requestStatus(p.read)
         Log.info("authorization: main request, \(p.read.count) types, status before: \(Self.statusName(before))")
+        // Saved before asking: launches observe these without asking HealthKit first.
+        ObservedTypes.add(p.read.map(\.identifier) + p.derived.map(\.identifier))
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             let once = ResumeOnceThrowing(cont)
             let raised = HKRTry {
@@ -354,6 +387,7 @@ actor SyncEngine {
         else { return .failed("not available on this iPhone") }
         let started = Date.now
         Log.info("authorization: per-object request for \(identifier)")
+        ObservedTypes.add([identifier])
         let store = store
         let answer: String?? = await withTimeout(Self.perObjectTimeout, late: { error in
             Log.info("authorization: \(identifier) answered late, after \(Self.elapsed(since: started))")
@@ -430,6 +464,7 @@ actor SyncEngine {
     func requestHealthRecords() async throws {
         let p = await authPlan()
         guard !p.healthRecords.isEmpty else { return }
+        ObservedTypes.add(p.healthRecords.map(\.identifier))
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             let once = ResumeOnceThrowing(cont)
             let raised = HKRTry {
@@ -463,19 +498,27 @@ actor SyncEngine {
     /// Types the user has been asked about. Only those sync: an anchored query over a type
     /// never requested returns nothing, and its anchor must not advance past real history.
     private func requestedTypes() async -> Set<String> {
-        if let requestedTask { return await requestedTask.value }
+        // Kept for the process only when HealthKit answered for every type: an empty or
+        // partial answer from a locked phone would otherwise stop syncing until the app is
+        // ended.
+        if let requestedTask { return await requestedTask.value.0 }
         let task = Task { await self.computeRequested() }
         requestedTask = task
-        return await task.value
+        let (out, reliable) = await task.value
+        if !reliable, requestedTask == task { requestedTask = nil }
+        return out
     }
 
-    private func computeRequested() async -> Set<String> {
+    private func computeRequested() async -> (Set<String>, Bool) {
         let p = await authPlan()
+        var reliable = p.complete
         var out = Set<String>()
         for type in p.read {
             let set = Set([type] + (p.companions[type.identifier] ?? []))
-            if await requestStatus(set) == .unnecessary {
-                out.insert(type.identifier)
+            switch await requestStatus(set) {
+            case .unnecessary?: out.insert(type.identifier)
+            case nil: reliable = false
+            default: break
             }
         }
         // Asked from their row, whatever the outcome: reading a type nothing was shared of
@@ -490,7 +533,11 @@ actor SyncEngine {
         if !out.isEmpty {
             for type in p.derived { out.insert(type.identifier) }
         }
-        return out
+        let readable = await MainActor.run { UIApplication.shared.isProtectedDataAvailable }
+        if !readable || out.isEmpty { reliable = false }
+        // Installs from before 0.6.1 never saved what they asked for: this is it.
+        if reliable { ObservedTypes.add(out) }
+        return (out, reliable)
     }
 
     func coverage() async -> Coverage {
@@ -510,69 +557,104 @@ actor SyncEngine {
 
     // MARK: Background delivery
 
-    /// Registers an observer query per sample type and asks HealthKit to wake the app (at most
-    /// hourly) when new data arrives. Must run at every launch, including background ones.
+    /// Starts the observer queries of the types asked about, from what was saved when asking:
+    /// no HealthKit call first, so it can run synchronously while the app launches, as
+    /// HealthKit requires for background delivery (late or missing observers make it stop
+    /// waking the app).
+    nonisolated func observeAtLaunch() {
+        guard Self.isAvailable else { return }
+        let types = ObservedTypes.atLaunch()
+        observers.observe(types, store: store)
+        let (observed, _) = observers.counts
+        Log.info("observe: \(observed) types observed at launch" + (ObservedTypes.load() == nil ? " (all: asked types unknown)" : ""))
+    }
+
+    /// Adds observers and background delivery for readable types not observed yet, from
+    /// HealthKit's current answers. Runs after launch, at unlock and when the app opens.
     func startObserving() async {
         guard Self.isAvailable else { return }
         let req = await requestedTypes()
-        for synced in HealthTypes.all {
-            guard let type = synced.sampleType, req.contains(synced.key) else { continue }
-            let key = synced.key
-            if !observed.contains(key) && !unobservable.contains(key) {
-                // HealthKit raises for some types (vision prescriptions) already when the query
-                // is created: those sync with the others, just without waking the app.
-                let raised = store.safeExecute {
-                    HKObserverQuery(sampleType: type, predicate: nil) { _, completion, error in
-                        let done = CompletionOnce(completion)
-                        guard error == nil else { done.call(); return }
-                        Task {
-                            let task = await BackgroundTask.begin("sync \(key)")
-                            await SyncEngine.shared.observerFired(key, done: done)
-                            await task.end()
-                        }
-                    }
-                }
-                if let raised {
-                    Log.info("observe: \(Self.shortName(key)) cannot be observed, synced with the others: \(raised)")
-                    unobservable.insert(key)
-                } else {
-                    observed.insert(key)
-                }
-            }
-            if !deliveryEnabled.contains(key) {
-                let ok = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-                    let once = ResumeOnce(cont)
-                    let raised = HKRTry {
-                        self.store.enableBackgroundDelivery(for: type, frequency: .hourly) { ok, _ in once.resume(ok) }
-                    }
-                    if raised != nil { once.resume(false) }
-                }
-                if ok { deliveryEnabled.insert(key) }
-            }
-        }
-        Log.info("observe: \(observed.count) types observed, \(deliveryEnabled.count) with background delivery")
+        observers.observe(HealthTypes.all.filter { $0.sampleType != nil && req.contains($0.key) }, store: store)
+        let (observed, delivery) = observers.counts
+        Log.info("observe: \(observed) types observed, \(delivery) with background delivery, \(req.count) readable")
     }
 
     /// HealthKit stops waking an app that does not call the observer completion promptly, so it
     /// is called when the type is synced or after 20 s, whichever comes first; the sync goes on
     /// for as long as iOS lets the app run.
-    private func observerFired(_ key: String, done: CompletionOnce) async {
+    func observerFired(_ key: String, done: CompletionOnce) async {
+        let state = await AppState.now
+        Log.info("observe: wake \(Self.shortName(key)), \(state.description)")
         Task {
             try? await Task.sleep(for: .seconds(20))
             done.call()
         }
-        if let synced = HealthTypes.named(key) {
-            _ = try? await sync(synced)
+        await SyncTrigger.$current.withValue(.observer) {
+            if let synced = HealthTypes.named(key) {
+                do {
+                    _ = try await self.sync(synced)
+                } catch {
+                    self.notePending(error)
+                }
+            }
+            done.call()
+            do {
+                _ = try await self.syncAuxIfDue()
+            } catch {
+                self.notePending(error)
+            }
         }
-        done.call()
-        _ = try? await syncAuxIfDue()
+    }
+
+    /// Remembers to sync again later after an error that may pass (the lock is noted where it
+    /// is detected).
+    private func notePending(_ error: Error) {
+        switch error {
+        case UploadError.failed, is CancellationError: markPending(.failed)
+        default: break
+        }
+    }
+
+    /// Protected data became readable (the phone was unlocked), or the app opened: compute
+    /// again what a locked launch could not, observe what is new, and run a sync still owed.
+    /// Returns whether a sync was owed (and run).
+    @discardableResult
+    func dataBecameAvailable(_ trigger: SyncTrigger) async -> Bool {
+        await startObserving()
+        guard let pending else { return false }
+        Log.info("sync: making up for a \(pending == .locked ? "skipped (locked)" : "failed") sync")
+        await syncAll(trigger: pending.trigger(trigger))
+        return true
+    }
+
+    /// The background app refresh: a full incremental sync if HealthKit can be read, else
+    /// one owed for the next unlock. Returns whether nothing is left owed.
+    func backgroundRefresh() async -> Bool {
+        let state = await AppState.now
+        Log.info("refresh: woke, \(state.description)")
+        guard ServerSettings.load().isComplete else { return true }
+        guard state.protectedData else {
+            markPending(.locked)
+            return true
+        }
+        await startObserving()
+        await syncAll(trigger: (pending ?? .locked).trigger(.refresh))
+        return pending == nil
     }
 
     // MARK: Sync
 
-    /// Syncs everything. Returns the number of records uploaded.
+    /// Syncs everything. Returns the number of records uploaded. `trigger` goes with every
+    /// batch it sends.
     @discardableResult
-    func syncAll() async -> Int {
+    func syncAll(trigger: SyncTrigger = .foreground) async -> Int {
+        await SyncTrigger.$current.withValue(trigger) { await self.runAll() }
+    }
+
+    private func runAll() async -> Int {
+        Log.info("sync: started (\(SyncTrigger.current.rawValue))")
+        // This sync is the one owed; a lock or failure in it marks one owed again.
+        clearPending()
         await MainActor.run {
             SyncStatus.shared.running = true
             SyncStatus.shared.lastError = nil
@@ -592,6 +674,11 @@ actor SyncEngine {
             firstError = SyncError.noAccess
         }
         for (i, synced) in types.enumerated() where !Self.isFatal(firstError) {
+            // Background time is over (refresh task expired): the next sync goes on from here.
+            if Task.isCancelled {
+                firstError = CancellationError()
+                break
+            }
             await show(Self.readableName(synced.key), progress: Double(i) / Double(max(1, types.count)))
             do {
                 total += try await sync(synced)
@@ -610,13 +697,15 @@ actor SyncEngine {
         }
         let uploaded = total
         let failure = firstError
-        if failure == nil { Log.info("sync: done, \(uploaded) uploaded") }
+        if let failure { notePending(failure) } else { Log.info("sync: done, \(uploaded) uploaded") }
         await MainActor.run {
             let status = SyncStatus.shared
             status.running = false
             status.detail = ""
             status.progress = nil
-            if let failure {
+            if failure is CancellationError {
+                Log.info("sync: stopped, out of background time")
+            } else if let failure {
                 Log.error("sync: \(failure)")
                 status.lastError = failure.localizedDescription
             } else {
@@ -679,12 +768,6 @@ actor SyncEngine {
         }
     }
 
-    func syncAfterUnlockIfPending() async {
-        guard pendingAfterUnlock else { return }
-        pendingAfterUnlock = false
-        await syncAll()
-    }
-
     /// Forgets all sync positions, so the next sync re-sends all history.
     func resetAnchors() async {
         anchors.reset()
@@ -704,16 +787,20 @@ actor SyncEngine {
     private struct Context {
         let uploader: Uploader
         let device: JSON
+        let trigger: SyncTrigger
+        let appState: String
     }
 
     private func context() async throws -> Context {
         let settings = ServerSettings.load()
         guard settings.isComplete else { throw UploadError.notConfigured }
-        guard await MainActor.run(body: { UIApplication.shared.isProtectedDataAvailable }) else {
-            pendingAfterUnlock = true
+        let state = await AppState.now
+        guard state.protectedData else {
+            markPending(.locked)
             throw SyncError.locked
         }
-        return Context(uploader: Uploader(settings: settings), device: await Self.deviceInfo())
+        return Context(uploader: Uploader(settings: settings), device: await Self.deviceInfo(),
+                       trigger: SyncTrigger.current, appState: state.state)
     }
 
     private func pageLimit(_ type: HKSampleType) -> Int {
@@ -792,7 +879,7 @@ actor SyncEngine {
                 if let raised { once.fail(SyncError.disallowed(raised)) }
             }
         } catch let error as HKError where error.code == .errorDatabaseInaccessible {
-            pendingAfterUnlock = true
+            markPending(.locked)
             throw SyncError.locked
         } catch let error as HKError where error.code == .errorAuthorizationDenied || error.code == .errorAuthorizationNotDetermined {
             throw SyncError.notAuthorized
@@ -802,7 +889,7 @@ actor SyncEngine {
     /// Posts items in order, cut into batches by size. Records come before the sample they
     /// belong to, so an archived sample always has its series and files.
     private func upload(_ items: [WireItem], _ ctx: Context) async throws {
-        var batch = WireBatch(device: ctx.device, items: [])
+        var batch = WireBatch(device: ctx.device, items: [], trigger: ctx.trigger.rawValue, appState: ctx.appState)
         var bytes = 0
         for item in items {
             if !batch.items.isEmpty && (bytes + item.data.count > maxBatchBytes || batch.count >= maxBatchItems) {

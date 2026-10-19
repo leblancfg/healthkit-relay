@@ -158,6 +158,14 @@ JSON in `fhir.data`), `cda_document`, and `sample` for anything newer. Enum valu
 3339 strings and quantities `{"value", "unit"}`. `archive` is the object's NSKeyedArchiver
 archive (base64), on every kind except `quantity` and `category`.
 
+App 0.6.1 adds two optional top-level fields: `"trigger"`, what started the sync that sent
+the batch (`foreground`: the app on screen; `observer`: HealthKit background delivery;
+`refresh`: the hourly background app refresh; `unlock`: the first unlock after a sync was
+skipped because the phone was locked; `retry`: a sync again after one failed), and
+`"app_state"` (`active`, `inactive` or `background`, when the sync started). The server logs
+both and counts batches by trigger; a batch without them (older apps) counts as `unknown`.
+Neither is archived. Servers before 0.6.1 ignore them.
+
 Record kinds: `series` (points of a route, heartbeat series, ECG or quantity series, in
 chunks; the last has `final: true`), `blob` (base64 chunks of a CDA document or an attachment),
 `activity_summary` (one per day), `characteristics`, `medication`,
@@ -222,8 +230,9 @@ Prometheus text format: `healthkit_relay_requests_total{result}` (`ok`, `unautho
 `healthkit_relay_last_success_timestamp_seconds{job="flush"|"compaction"}` (alert when it
 gets old: more than two hours for the flush, a day and a half for the compaction),
 `healthkit_relay_maintenance_errors_total{job}`, `healthkit_relay_devices`,
-`healthkit_relay_forward_errors_total`, `healthkit_relay_last_upload_timestamp_seconds`.
-No health data.
+`healthkit_relay_forward_errors_total`, `healthkit_relay_last_upload_timestamp_seconds`,
+`healthkit_relay_batches_total{trigger}` (accepted batches by what started the app's sync,
+see `trigger` above; `unknown` for apps before 0.6.1). No health data.
 
 ## Archive
 

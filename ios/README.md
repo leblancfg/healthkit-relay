@@ -66,7 +66,8 @@ exception guard (`HealthKitSafe.swift`), so such a type is skipped and logged, n
 3. That is all. The first sync uploads all history, which can take a while; keep the app
    open. After that iOS wakes the app in the background when new data arrives (about
    hourly, at the system's discretion; Low Power Mode and force-quitting the app pause it),
-   and it also syncs whenever it is opened. **Sync Now** (or pulling down) syncs at once.
+   runs a background refresh about hourly as a fallback, syncs at the first unlock after a
+   sync was skipped while locked, and also syncs whenever it is opened. **Sync Now** (or pulling down) syncs at once.
 
 The main screen shows only how syncing goes. **Advanced** (the gear) has the server and
 this iPhone's pairing, which data types are read, the types shared item by item and a
@@ -88,7 +89,8 @@ gets a message to update it, and nothing changes.
 | `JSON.swift` | JSON values, typed metadata, NSKeyedArchiver archives |
 | `Support/HKRObjC.m` | catches the Objective-C exceptions HealthKit raises for disallowed types |
 | `HealthKitSafe.swift` | every query built and run inside that guard; streams, one-shot results, timeouts |
-| `SyncEngine.swift` | authorization plan, main and per-object requests, observer queries, background delivery, anchored queries, activity summaries, characteristics, medications, lock handling |
+| `SyncEngine.swift` | authorization plan, main and per-object requests, anchored queries, activity summaries, characteristics, medications, lock handling |
+| `BackgroundSync.swift` | observer queries and background delivery set up at launch, the hourly background refresh, syncs owed after a lock or failure, sync triggers |
 | `Uploader.swift` | batched POST with retry and exponential backoff |
 | `WireFormat.swift` | batches (wire format v2), source and device fields |
 | `AnchorStore.swift` | persisted query anchors |

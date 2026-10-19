@@ -7,6 +7,8 @@ import HealthKit
 // records:   everything without a sample UUID, keyed by (kind, key): series points and file
 //            chunks of large samples, daily activity summaries, characteristics, medications.
 // deletions: tombstones for samples HealthKit reports deleted.
+// App 0.6.1 adds "trigger" (what started the sync, see SyncTrigger) and "app_state"; servers
+// before 0.6.1 ignore both.
 // server/README.md documents every field. Version 1 (app 0.1) had no "version" and no "records".
 
 enum Wire {
@@ -32,6 +34,8 @@ struct WireItem: Sendable {
 struct WireBatch {
     var device: JSON
     var items: [WireItem]
+    var trigger: String?
+    var appState: String?
 
     var count: Int { items.count }
     var recordCount: Int { items.filter { $0.section == .record }.count }
@@ -40,6 +44,11 @@ struct WireBatch {
     func body() throws -> Data {
         var out = Data("{\"version\":\(Wire.version),\"device\":".utf8)
         out.append(try device.data())
+        for (name, value) in [("trigger", trigger), ("app_state", appState)] {
+            guard let value else { continue }
+            out.append(Data(",\"\(name)\":".utf8))
+            out.append(try JSON.string(value).data())
+        }
         for (name, section) in [("samples", WireSection.sample), ("records", .record), ("deletions", .deletion)] {
             out.append(Data(",\"\(name)\":[".utf8))
             var first = true

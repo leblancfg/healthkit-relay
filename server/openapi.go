@@ -10,8 +10,8 @@ import (
 )
 
 // /openapi.json describes the query API (and token management); /docs shows it with Swagger
-// UI, vendored in swaggerui/ (scripts/vendor-swagger-ui.sh) so nothing loads from a CDN.
-// Neither needs a token: they hold no health data.
+// UI, vendored in swaggerui/ (scripts/vendor-swagger-ui.sh) and served from the binary.
+// Both are public.
 
 //go:embed openapi.json
 var openAPITemplate []byte

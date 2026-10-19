@@ -48,8 +48,8 @@ type Kind struct {
 
 // Kinds are the sample kinds the app sends ("kind" of each sample), in catalog order.
 var Kinds = []Kind{
-	{"quantity", "A number with a unit (steps, heart rate, body mass...). Aggregates: sum for cumulative types, average/min/max for discrete ones.", true},
-	{"category", "An enumerated value over a time interval (sleep stages, stand hours, symptoms...). Aggregates: count and total duration per value.", true},
+	{"quantity", "A number with a unit, e.g. steps (12027 count on a day) or heart rate (67 count/min at 09:04). Aggregates: sum for cumulative types, average/min/max for discrete ones.", true},
+	{"category", "A labelled interval, e.g. sleep stage asleepDeep from 01:10 to 01:40, or stand hour stood from 14:00 to 15:00. Aggregates: count and total duration per value.", true},
 	{"workout", "A workout with its activity type, duration, energy and distance.", false},
 	{"workout_route", "The GPS route of a workout; its points are in the archive's route_points.", false},
 	{"heartbeat_series", "Beat-to-beat timings recorded with an HRV reading.", false},

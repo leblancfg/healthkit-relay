@@ -204,6 +204,38 @@ func TestOpenAPIDocument(t *testing.T) {
 	}
 }
 
+// Every parameter and every JSON success response has an example.
+func TestOpenAPIExamples(t *testing.T) {
+	var doc map[string]any
+	if err := json.Unmarshal(openAPITemplate, &doc); err != nil {
+		t.Fatal(err)
+	}
+	has := func(m map[string]any) bool { return m["example"] != nil || m["examples"] != nil }
+	params := doc["components"].(map[string]any)["parameters"].(map[string]any)
+	for path, ops := range doc["paths"].(map[string]any) {
+		for method, op := range ops.(map[string]any) {
+			key := routeKey(method, path)
+			op := op.(map[string]any)
+			ps, _ := op["parameters"].([]any)
+			for _, p := range ps {
+				p := p.(map[string]any)
+				if ref, ok := p["$ref"].(string); ok {
+					p = params[strings.TrimPrefix(ref, "#/components/parameters/")].(map[string]any)
+				}
+				if !has(p) {
+					t.Errorf("%s: parameter %v has no example", key, p["name"])
+				}
+			}
+			for code, resp := range op["responses"].(map[string]any) {
+				content, _ := resp.(map[string]any)["content"].(map[string]any)
+				if body, ok := content["application/json"].(map[string]any); ok && code[0] == '2' && !has(body) {
+					t.Errorf("%s: %s response has no example", key, code)
+				}
+			}
+		}
+	}
+}
+
 // The vendored Swagger UI files are the ones scripts/vendor-swagger-ui.sh checked.
 func TestSwaggerUIVendored(t *testing.T) {
 	sums, err := os.ReadFile("swaggerui/SHA256SUMS")

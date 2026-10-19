@@ -15,7 +15,7 @@ import (
 type Server struct {
 	Archive      *Store
 	Forwarder    *Forwarder // nil: no forwarding
-	Token        string     // the server token: admin, and accepted for uploads
+	AdminKey     *AdminKey  // the admin token (its hash, admin.json)
 	MaxBodyBytes int64
 	Devices      *Devices
 	Codes        *Codes
@@ -28,10 +28,11 @@ type Server struct {
 
 	sessions sessions
 
-	mu            sync.Mutex
-	stats         map[string]int64 // counter name -> value, see writeMetrics
-	lastUpload    time.Time
-	forwardErrors int64
+	mu              sync.Mutex
+	stats           map[string]int64 // counter name -> value, see writeMetrics
+	lastUpload      time.Time
+	forwardErrors   int64
+	adminUploadsLog time.Time // when an upload with the admin token was last logged
 }
 
 // MaxBatchPartitions bounds the archive partitions one batch may touch.
@@ -111,6 +112,7 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.adminUpload(c, r)
 	r.Body = http.MaxBytesReader(w, r.Body, s.MaxBodyBytes)
 	var b Batch
 	dec := json.NewDecoder(r.Body)
@@ -268,6 +270,9 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	for _, res := range []string{"ok", "unauthorized", "bad_request", "incomplete", "archive_error", "paired", "pair_rejected", "erased", "forbidden", "query_error", "query_timeout", "query_busy"} {
 		fmt.Fprintf(w, "healthkit_relay_requests_total{result=%q} %d\n", res, s.stats["requests_"+res])
 	}
+	fmt.Fprintln(w, "# HELP healthkit_relay_admin_token_uploads_total Uploads and status requests authenticated with the admin token instead of a paired device's token (deprecated).")
+	fmt.Fprintln(w, "# TYPE healthkit_relay_admin_token_uploads_total counter")
+	fmt.Fprintf(w, "healthkit_relay_admin_token_uploads_total %d\n", s.stats["admin_token_uploads"])
 	fmt.Fprintln(w, "# HELP healthkit_relay_records_total Records received, by outcome.")
 	fmt.Fprintln(w, "# TYPE healthkit_relay_records_total counter")
 	fmt.Fprintf(w, "healthkit_relay_records_total{outcome=\"stored\"} %d\n", s.stats["stored"])

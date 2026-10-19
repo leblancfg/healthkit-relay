@@ -80,7 +80,7 @@ func newQueryFixture(t *testing.T) *queryFixture {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 10, 12, 16, 0, 0, 0, time.UTC)
-	s := &Server{Archive: store, Token: testToken, MaxBodyBytes: 1 << 20, Devices: devices, Codes: NewCodes(),
+	s := &Server{Archive: store, AdminKey: NewAdminKey(testToken), MaxBodyBytes: 1 << 20, Devices: devices, Codes: NewCodes(),
 		Query: &queryAPI{db: db, now: func() time.Time { return now }}}
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
@@ -420,7 +420,7 @@ func TestQueryTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{Token: testToken, Query: &queryAPI{db: db, now: time.Now}}
+	s := &Server{AdminKey: NewAdminKey(testToken), Query: &queryAPI{db: db, now: time.Now}}
 	path := "/v1/types/" + stepsType + "/aggregates"
 	start := time.Now()
 	codes := make(chan int, 2)

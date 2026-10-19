@@ -129,24 +129,34 @@ func TestReadTokenCannotUpload(t *testing.T) {
 
 func TestTokenCreateCommand(t *testing.T) {
 	dir := t.TempDir()
-	ts, _ := newTestServer(t, dir)
-	tok := filepath.Join(dir, "token")
-	os.WriteFile(tok, []byte(testToken+"\n"), 0o600)
+	s := fileServer(t, dir)
 	var out, errOut bytes.Buffer
-	if err := runCommand("token create", []string{"-server", ts.URL, "-token-file", tok, "-name", "grafana"}, &out, &errOut); err != nil {
+	if err := runCommand("token create", []string{"-archive-dir", dir, "-name", "grafana"}, &out, &errOut); err != nil {
 		t.Fatal(err)
 	}
 	token := strings.TrimSpace(out.String())
 	if len(token) < 40 || strings.Contains(token, " ") || !strings.Contains(errOut.String(), "read token") {
 		t.Fatalf("stdout %q, stderr %q", out.String(), errOut.String())
 	}
+	// The running server accepts the token at once.
+	dev, ok := s.Devices.Lookup(token)
+	if !ok || dev.Scope != ScopeRead {
+		t.Fatalf("the server does not know the new token: %+v %v", dev, ok)
+	}
 	out.Reset()
-	if err := runCommand("devices", []string{"-server", ts.URL, "-token-file", tok}, &out, &errOut); err != nil ||
+	if err := runCommand("devices", []string{"-archive-dir", dir}, &out, &errOut); err != nil ||
 		!strings.Contains(out.String(), "SCOPE") || !strings.Contains(out.String(), "read") {
 		t.Fatalf("devices: %v\n%s", err, out.String())
 	}
-	if err := runCommand("token create", []string{"-server", ts.URL, "-token-file", tok, "-name", "x", "-scope", "admin"}, &out, &errOut); err == nil {
+	if err := runCommand("token create", []string{"-archive-dir", dir, "-name", "x", "-scope", "admin"}, &out, &errOut); err == nil {
 		t.Error("scope admin accepted")
+	}
+	out.Reset()
+	if err := runCommand("revoke", []string{"-archive-dir", dir, dev.ID}, &out, &errOut); err != nil || !strings.Contains(out.String(), "Revoked") {
+		t.Fatalf("revoke: %v %s", err, out.String())
+	}
+	if _, ok := s.Devices.Lookup(token); ok {
+		t.Error("the server still accepts a token revoked by the command")
 	}
 }
 
@@ -166,8 +176,8 @@ func TestSetupPageReadTokens(t *testing.T) {
 	if w.Code != 200 || len(list) != 2 || list[1].Scope != ScopeRead || !strings.Contains(body, "Read token for grafana") {
 		t.Fatalf("create: %d %+v\n%s", w.Code, list, body)
 	}
-	i := strings.Index(body, `<code class="token">`)
-	token := body[i+len(`<code class="token">`):]
+	i := strings.Index(body, `<code class="token" id="new-token">`)
+	token := body[i+len(`<code class="token" id="new-token">`):]
 	token = token[:strings.Index(token, "<")]
 	if dev, ok := s.Devices.Lookup(token); !ok || dev.Scope != ScopeRead {
 		t.Fatalf("the shown token %q is not the read token", token)

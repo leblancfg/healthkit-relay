@@ -46,7 +46,7 @@ type Row struct {
 	SourceBundle  *string  `parquet:"source_bundle,optional,dict"`
 	SourceVersion *string  `parquet:"source_version,optional,dict"`
 	Device        *string  `parquet:"device,optional,dict"`
-	Uploader      string   `parquet:"uploader,dict"` // paired device that uploaded it ("": server token)
+	Uploader      string   `parquet:"uploader,dict"` // paired device that uploaded it ("": admin token)
 	Wire          int32    `parquet:"wire"`
 	ReceivedAt    int64    `parquet:"received_at,timestamp(microsecond)"`
 	JSON          string   `parquet:"json"`

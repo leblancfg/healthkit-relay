@@ -15,7 +15,7 @@ import (
 )
 
 // The setup page, /setup: a QR code and a link that set up the app in one tap. It never
-// shows anything to a visitor without either the server token (asked by a form, then kept
+// shows anything to a visitor without either the admin token (asked by a form, then kept
 // in a session cookie for an hour) or a setup code minted by `healthkit-relay pair`. By
 // default it, and pairing, only answer clients on private networks (loopback, RFC 1918,
 // unique local and link-local addresses, and 100.64.0.0/10, which Tailscale uses).
@@ -24,33 +24,40 @@ const sessionCookie = "hkr_setup"
 
 type sessions struct {
 	mu sync.Mutex
-	m  map[string]time.Time
+	m  map[string]session
 }
 
-func (ss *sessions) add() string {
+// session is a signed-in browser: until when, and which admin token signed it in (an admin
+// reset ends it).
+type session struct {
+	expires time.Time
+	admin   string
+}
+
+func (ss *sessions) add(admin string) string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	id := hex.EncodeToString(b)
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 	if ss.m == nil {
-		ss.m = map[string]time.Time{}
+		ss.m = map[string]session{}
 	}
 	now := time.Now()
-	for k, exp := range ss.m {
-		if now.After(exp) {
+	for k, se := range ss.m {
+		if now.After(se.expires) {
 			delete(ss.m, k)
 		}
 	}
-	ss.m[id] = now.Add(time.Hour)
+	ss.m[id] = session{expires: now.Add(time.Hour), admin: admin}
 	return id
 }
 
-func (ss *sessions) valid(id string) bool {
+func (ss *sessions) valid(id, admin string) bool {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
-	exp, ok := ss.m[id]
-	return ok && time.Now().Before(exp)
+	se, ok := ss.m[id]
+	return ok && time.Now().Before(se.expires) && se.admin == admin
 }
 
 var cgnat = netip.MustParsePrefix("100.64.0.0/10")
@@ -123,6 +130,7 @@ type setupView struct {
 	Configured bool     // -public-url is set
 	Devices    []Device // paired apps (upload tokens)
 	Tokens     []Device // read tokens, for the query API
+	SetupLink  string   // the setup page with the code, to send to a phone
 	NewToken   string   // a token just created, shown once
 	NewName    string
 	LoginErr   bool
@@ -172,7 +180,7 @@ func setupForm(w http.ResponseWriter, r *http.Request) bool {
 
 func (s *Server) admin(r *http.Request) bool {
 	c, err := r.Cookie(sessionCookie)
-	return err == nil && s.sessions.valid(c.Value)
+	return err == nil && s.sessions.valid(c.Value, s.AdminKey.ID())
 }
 
 func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +206,7 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 		case "invalid":
 			if !v.Admin {
 				v.Mode = "login"
-				v.Message = "This setup link has expired or was already used. Sign in with the server token, or run healthkit-relay pair again."
+				v.Message = "This setup link has expired or was already used. Sign in with the admin token, or run healthkit-relay pair again."
 				s.render(w, http.StatusGone, v)
 				return
 			}
@@ -222,7 +230,12 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if code == "" {
-		c := s.mintCode(public)
+		c, err := s.mintCode(public)
+		if err != nil {
+			log.Printf("setup page: %v", err)
+			http.Error(w, "Could not save the setup code.", http.StatusInternalServerError)
+			return
+		}
 		code, exp = c.Code, c.ExpiresAt
 	}
 	v.Server = strings.TrimPrefix(strings.TrimPrefix(public, "https://"), "http://")
@@ -236,6 +249,7 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v.Mode, v.Code, v.Link, v.QR = "pair", code, template.URL(PairLink(public, code)), template.HTML(q.SVG())
+	v.SetupLink = public + "/setup?code=" + code
 	v.Expires = exp.Local().Format("15:04")
 	if v.Admin {
 		v.Devices, v.Tokens = s.deviceLists()
@@ -292,7 +306,7 @@ func (s *Server) setupLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: s.sessions.add(), Path: "/setup", MaxAge: 3600,
+		Name: sessionCookie, Value: s.sessions.add(s.AdminKey.ID()), Path: "/setup", MaxAge: 3600,
 		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: strings.HasPrefix(requestURL(r), "https://"),
 	})
 	http.Redirect(w, r, "/setup", http.StatusSeeOther)
@@ -395,7 +409,15 @@ label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); 
 input[type=password] { width: 100%; font: inherit; padding: 13px 14px; border-radius: 12px; border: 1px solid var(--line);
   background: var(--bg); color: var(--text); margin-bottom: 14px; }
 input[type=text] { font: inherit; font-size: 15px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
-code.token { white-space: normal; word-break: break-all; user-select: all; font-size: 15px; }
+code.token { white-space: normal; word-break: break-all; user-select: all; font-size: 15px; text-align: left; }
+.secret { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 14px 0 0; }
+button.copy { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); cursor: pointer; }
+button.copy:active { opacity: .7; }
+button.copy svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.copied { color: var(--ok); font-size: 13px; min-height: 1.4em; margin: 4px 0 8px; }
+ul.steps { text-align: left; color: var(--muted); font-size: 14px; margin: 4px 0 20px; padding-left: 20px; }
+ul.steps li { margin: 0 0 4px; }
 input[type=password]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .error { color: var(--accent); font-size: 15px; margin: 0 0 14px; }
 code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); padding: 2px 6px; border-radius: 6px; white-space: nowrap; }
@@ -429,13 +451,14 @@ footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8
 {{if eq .Mode "login"}}
 <section class="card">
   <h2>Set up your iPhone</h2>
-  <p class="sub">Enter this server's token to get a setup code or a read token.</p>
+  <p class="sub">Sign in with this server's admin token to pair an iPhone or create a read token.</p>
   {{if .Message}}<p class="error">{{.Message}}</p>{{end}}
   <form class="login" method="post" action="/setup">
-    <label for="token">Server token</label>
+    <label for="token">Admin token</label>
     <input id="token" name="token" type="password" autocomplete="current-password" required autofocus>
     <button class="button" type="submit">Continue</button>
   </form>
+  <p class="hint">The server printed the admin token in its log when it first started, e.g. in <code>docker compose logs relay</code> or <code>journalctl -u healthkit-relay</code>. Lost it? <code>healthkit-relay admin reset</code> on the server prints a new one.</p>
   <p class="hint">Or run <code>healthkit-relay pair</code> on the server: it shows a code to scan right in the terminal.</p>
 </section>
 <script nonce="{{.Nonce}}">
@@ -451,8 +474,15 @@ if (location.hash) document.querySelector("form.login").action = "/setup" + loca
 {{else if eq .Mode "token"}}
 <section class="card">
   <h2>Read token for {{.NewName}}</h2>
-  <p class="sub">Copy it now: it is shown only this once. It reads health data through the query API (<code>/docs</code>), and nothing else.</p>
-  <p><code class="token">{{.NewToken}}</code></p>
+  <p class="sub">It reads health data through the query API (<code>/docs</code>), and nothing else.</p>
+  <div class="secret"><code class="token" id="new-token">{{.NewToken}}</code>{{template "copy" "new-token"}}</div>
+  <p class="copied" role="status"></p>
+  <ul class="steps">
+    <li>Copy it now: it is shown only this once.</li>
+    <li>Save it in a password manager.</li>
+    <li>Paste it into the client (Grafana, a script, an agent) as a Bearer token: <code>Authorization: Bearer &lt;token&gt;</code></li>
+    <li>Lost it? Revoke it on the setup page and create a new one.</li>
+  </ul>
   <a class="button" href="/setup#read-tokens">Done</a>
 </section>
 {{else if eq .Mode "used"}}
@@ -467,6 +497,11 @@ if (location.hash) document.querySelector("form.login").action = "/setup" + loca
   <div class="desktop">
     <p class="sub">Point the iPhone's Camera at this code, then tap <b>Open in Health Relay</b>.</p>
     <div class="qr">{{.QR}}</div>
+    {{if .SetupLink}}
+    <p class="hint">Or send this link to the iPhone and open it there:</p>
+    <div class="secret"><code class="token" id="setup-link">{{.SetupLink}}</code>{{template "copy" "setup-link"}}</div>
+    <p class="copied" role="status"></p>
+    {{end}}
   </div>
   <div class="phone">
     <p class="sub">Connects Health Relay on this iPhone to {{.Server}}.</p>
@@ -535,8 +570,33 @@ if (location.hash) document.querySelector("form.login").action = "/setup" + loca
 })();
 </script>
 {{end}}
+<script nonce="{{.Nonce}}">
+// Copy buttons: the Clipboard API where the page is a secure context (HTTPS, localhost);
+// elsewhere (plain HTTP on a LAN address) the text is selected for Ctrl+C or Cmd+C.
+document.querySelectorAll("button.copy").forEach(function (b) {
+  b.addEventListener("click", function () {
+    var el = document.getElementById(b.getAttribute("data-copy")), status = b.parentNode.nextElementSibling;
+    var say = function (msg) { status.textContent = msg; setTimeout(function () { status.textContent = ""; }, 3000); };
+    var select = function () {
+      var r = document.createRange(); r.selectNodeContents(el);
+      var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    };
+    var fallback = function () {
+      select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) {}
+      say(ok ? "Copied" : "Selected: press Ctrl+C (Cmd+C on a Mac) to copy");
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(el.textContent).then(function () { say("Copied"); }, fallback);
+    } else {
+      fallback();
+    }
+  });
+});
+</script>
 <footer>healthkit-relay {{.Version}}</footer>
 </main>
 </body>
 </html>
-`))
+{{define "copy"}}<button class="copy" type="button" data-copy="{{.}}" aria-label="Copy" title="Copy"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>{{end}}`))

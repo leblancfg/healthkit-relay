@@ -6,11 +6,16 @@
 // Every flag can also be set with an environment variable: -archive-dir is HKR_ARCHIVE_DIR,
 // and so on (upper case, dashes as underscores, HKR_ prefix). Flags win over the environment.
 //
-// Subcommands talk to the running server with the same configuration: `pair` prints a
-// one-time setup code (QR code and link) for the app, `devices` lists paired devices and
-// `revoke <id>` removes one, `token create -name grafana` mints a read token for the query API. Offline commands work on the archive directly, with the server
-// stopped: `migrate` converts the JSON Lines archive of versions before 0.5, `flush` and
-// `compact` run the hourly and nightly maintenance at once.
+// On first start the server generates the admin token, prints it once with the setup link,
+// and keeps only its hash in <archive-dir>/admin.json (admin.go).
+//
+// Subcommands change the archive directory's state files with the same configuration, as the
+// server's user or root, while the server runs: `pair` prints a one-time setup code (QR code
+// and link) for the app, `devices` lists paired devices and `revoke <id>` removes one,
+// `token create -name grafana` mints a read token for the query API, `admin reset` replaces
+// the admin token. Offline commands work on the archive with the server stopped: `migrate`
+// converts the JSON Lines archive of versions before 0.5, `flush` and `compact` run the
+// hourly and nightly maintenance at once.
 package main
 
 import (
@@ -55,7 +60,7 @@ func (c *config) storeOptions() StoreOptions { return StoreOptions{GroupRead: c.
 func (c *config) register(fs *flag.FlagSet) {
 	fs.StringVar(&c.listen, "listen", "127.0.0.1:8080", "address to listen on")
 	fs.StringVar(&c.archiveDir, "archive-dir", "", "archive directory (staging.db, parquet/) and devices.json (required)")
-	fs.StringVar(&c.tokenFile, "token-file", "", "file holding the server token: admin credential, also accepted for uploads (required)")
+	fs.StringVar(&c.tokenFile, "token-file", "", "deprecated: file holding the server token of earlier versions, imported into admin.json at start; delete it once imported")
 	fs.StringVar(&c.publicURL, "public-url", "", "URL phones use to reach this server, put in setup links, e.g. https://health.example.com (default: the setup page offers the addresses it finds)")
 	fs.StringVar(&c.setupFrom, "setup-from", "private", "who may open /setup and pair: private (loopback, LAN, Tailscale), any, or off")
 	fs.BoolVar(&c.groupRead, "group-read", false, "make the archive readable by the service's group (directories 0750, files 0640) for backups or queries; default: owner only (0700, 0600)")
@@ -66,6 +71,11 @@ func run(args []string) error {
 		switch args[0] {
 		case "pair", "devices", "revoke":
 			return runCommand(args[0], args[1:], os.Stdout, os.Stderr)
+		case "admin":
+			if len(args) < 2 || args[1] != "reset" {
+				return errors.New("usage: healthkit-relay admin reset: replaces the admin token and prints the new one")
+			}
+			return runCommand("admin reset", args[2:], os.Stdout, os.Stderr)
 		case "token":
 			if len(args) < 2 || args[1] != "create" {
 				return errors.New("usage: healthkit-relay token create -name <what it is for> [-scope read|upload]; list and revoke tokens with devices and revoke")
@@ -105,8 +115,8 @@ func run(args []string) error {
 		fmt.Println(version)
 		return nil
 	}
-	if *archiveDir == "" || *tokenFile == "" {
-		return errors.New("-archive-dir and -token-file are required")
+	if *archiveDir == "" {
+		return errors.New("-archive-dir is required")
 	}
 	switch cfg.setupFrom {
 	case "private", "any", "off":
@@ -114,13 +124,6 @@ func run(args []string) error {
 		return fmt.Errorf("-setup-from must be private, any or off, not %q", cfg.setupFrom)
 	}
 
-	token, err := readSecret(*tokenFile)
-	if err != nil {
-		return err
-	}
-	if len(token) < 16 {
-		return errors.New("token is shorter than 16 characters")
-	}
 	if *flushEvery < time.Minute {
 		return errors.New("-flush-interval must be at least a minute")
 	}
@@ -138,7 +141,15 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("open devices: %w", err)
 	}
-	srv := &Server{Archive: archive, Token: token, MaxBodyBytes: *maxBody, Devices: devices, Codes: NewCodes(),
+	codes, err := OpenCodes(filepath.Join(*archiveDir, "codes.json"))
+	if err != nil {
+		return fmt.Errorf("open setup codes: %w", err)
+	}
+	adminKey, err := openAdmin(*archiveDir, *tokenFile, setupURL(cfg.publicURL, *listen), log.Default())
+	if err != nil {
+		return fmt.Errorf("admin token: %w", err)
+	}
+	srv := &Server{Archive: archive, AdminKey: adminKey, MaxBodyBytes: *maxBody, Devices: devices, Codes: codes,
 		PublicURL: strings.TrimRight(cfg.publicURL, "/"), SetupFrom: cfg.setupFrom, Listen: *listen}
 	if *queryDuckDB != "" {
 		dir := cmpOr(*queryDir, *archiveDir)
@@ -242,6 +253,14 @@ func applyEnv(fs *flag.FlagSet) error {
 		}
 	})
 	return err
+}
+
+// setupURL is the setup page's address for the admin: -public-url, else the listen address.
+func setupURL(publicURL, listen string) string {
+	if publicURL != "" {
+		return strings.TrimRight(publicURL, "/") + "/setup"
+	}
+	return "http://" + loopback(listen) + "/setup"
 }
 
 func readSecret(path string) (string, error) {

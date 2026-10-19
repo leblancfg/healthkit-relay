@@ -468,7 +468,7 @@ func unixNano(t time.Time) int64 {
 var minNanoTime, maxNanoTime = time.Unix(0, math.MinInt64+1), time.Unix(0, math.MaxInt64-1)
 
 // Ingest durably stores the items that are new, in one transaction, and tells what it did
-// with each. uploader is the paired device that sent them ("" for the server token).
+// with each. uploader is the paired device that sent them ("" for the admin token).
 func (s *Store) Ingest(uploader string, items []Item) ([]Outcome, error) {
 	s.ingest.Lock()
 	defer s.ingest.Unlock()

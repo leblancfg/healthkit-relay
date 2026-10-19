@@ -17,7 +17,7 @@ import (
 )
 
 // The query API: typed, read-only endpoints under /v1 over the Parquet archive, described by
-// /openapi.json (openapi.go). Read tokens and the server token may call it; upload tokens may
+// /openapi.json (openapi.go). Read tokens and the admin token may call it; upload tokens may
 // not. Rows still in staging (received in the last hour, before the hourly flush) are not
 // visible to it.
 

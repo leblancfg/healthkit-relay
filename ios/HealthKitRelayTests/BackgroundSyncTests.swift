@@ -71,42 +71,170 @@ final class BackgroundSyncTests: XCTestCase {
 
     // MARK: Observer wakes
 
-    func testCoalescerRunsOnceMoreForCallersDuringARun() async {
-        let c = Coalescer()
-        let runs = Counter()
-        let gate = Gate()
-        // The first caller starts a run that waits at the gate; five more arrive meanwhile.
-        let first = Task { await c.run { await runs.add(); await gate.wait() } }
-        await runs.waitFor(1)
-        let others = (0..<5).map { _ in Task { await c.run { await runs.add() } } }
-        try? await Task.sleep(for: .milliseconds(50))
-        await gate.open()
-        await first.value
-        for o in others { await o.value }
-        // One run for the first caller, one more for everyone who came during it.
-        let n = await runs.value
-        XCTAssertEqual(n, 2)
-        // Idle again: the next caller gets a run of its own.
-        await c.run { await runs.add() }
-        let after = await runs.value
-        XCTAssertEqual(after, 3)
+    /// A pass that reads `keys` in order, like SyncEngine.runAll; `during(key)` runs while a
+    /// type is being read.
+    private func reader(_ s: SyncSessions, keys: [String], log: Passes,
+                        during: @escaping @Sendable (Int, String) async -> Void = { _, _ in }) -> SyncSessions.Run {
+        { pass in
+            let n = log.add(pass)
+            for key in keys where pass.only?.contains(key) ?? true {
+                s.willSync(key)
+                await during(n, key)
+                s.didSync(key)
+            }
+            return .init(uploaded: 1, failed: false)
+        }
     }
 
-    func testCoalescerCancel() async {
-        let c = Coalescer()
-        XCTAssertFalse(c.cancel(), "nothing to cancel")
-        let started = Counter()
-        let task = Task {
-            await c.run {
-                await started.add()
-                try? await Task.sleep(for: .seconds(30))
-                XCTAssertTrue(Task.isCancelled, "the job sees the cancellation")
+    func testBurstOfWakesIsOnePass() async {
+        let active = Flags()
+        let s = SyncSessions(debounce: .milliseconds(200)) { active.add($0) }
+        let log = Passes(), ends = Ends()
+        let keys = (0..<50).map { "type\($0)" }
+        let run = reader(s, keys: keys, log: log)
+        let dones = keys.map { _ in Counter.Sync() }
+        // Fifty wakes, spread over 100 ms, all inside the wait for the rest of the burst.
+        await withTaskGroup(of: Void.self) { group in
+            for (i, key) in keys.enumerated() {
+                group.addTask {
+                    try? await Task.sleep(for: .milliseconds(i * 2))
+                    await s.request(.observer, allAux: false, key: key, done: CompletionOnce { dones[i].add() },
+                                    run: run, ended: { ends.add($0) })
+                }
             }
         }
-        await started.waitFor(1)
-        XCTAssertTrue(c.cancel())
-        await task.value
-        XCTAssertFalse(c.cancel(), "the run is over")
+        XCTAssertEqual(log.all.count, 1, "one pass for the burst")
+        XCTAssertEqual(log.all.first, .init(trigger: .observer, allAux: false, only: nil))
+        XCTAssertTrue(dones.allSatisfy { $0.value == 1 }, "every wake answered once")
+        XCTAssertEqual(ends.all.map(\.passes), [1], "one session, one heartbeat")
+        XCTAssertEqual(ends.all.first?.triggers, [.observer])
+        XCTAssertFalse(s.isActive)
+        await active.settle()
+        XCTAssertEqual(active.all, [true, false], "one sync on screen")
+    }
+
+    func testOtherTriggersJoinAndStartAtOnce() async {
+        let s = SyncSessions(debounce: .seconds(30))
+        let log = Passes(), ends = Ends()
+        let run = reader(s, keys: ["a", "b"], log: log)
+        let started = Date.now
+        async let wake: Void = s.request(.observer, allAux: false, key: "a", done: CompletionOnce {}, run: run, ended: { ends.add($0) })
+        try? await Task.sleep(for: .milliseconds(50))
+        // The unlock does not wait for more wakes.
+        async let unlock: Void = s.request(.unlock, allAux: true, run: run, ended: { ends.add($0) })
+        async let open: Void = s.request(.foreground, allAux: true, run: run, ended: { ends.add($0) })
+        _ = await (wake, unlock, open)
+        XCTAssertLessThan(Date.now.timeIntervalSince(started), 5)
+        XCTAssertEqual(log.all, [.init(trigger: .observer, allAux: true, only: nil)], "one pass, tagged with the first trigger")
+        XCTAssertEqual(ends.all.count, 1)
+        XCTAssertEqual(ends.all.first?.triggers.first, .observer)
+        XCTAssertEqual(Set(ends.all.first?.triggers ?? []), [.observer, .unlock, .foreground])
+    }
+
+    func testWakeForATypeNotReadYetJoinsThePass() async {
+        let s = SyncSessions(debounce: .milliseconds(10))
+        let log = Passes(), ends = Ends()
+        let gate = Gate()
+        let late = Counter.Sync()
+        let run = reader(s, keys: ["a", "b"], log: log) { _, key in if key == "a" { await gate.wait() } }
+        async let first: Void = s.request(.foreground, allAux: true, run: run, ended: { ends.add($0) })
+        while log.all.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        // While "a" is read, "b" has new data: the pass reads "b" after.
+        async let wake: Void = s.request(.observer, allAux: false, key: "b", done: CompletionOnce { late.add() },
+                                         run: run, ended: { ends.add($0) })
+        try? await Task.sleep(for: .milliseconds(50))
+        await gate.open()
+        _ = await (first, wake)
+        XCTAssertEqual(log.all.count, 1)
+        XCTAssertEqual(late.value, 1)
+        XCTAssertEqual(ends.all.count, 1)
+    }
+
+    func testWakeForATypeAlreadyReadIsNotLost() async {
+        let s = SyncSessions(debounce: .milliseconds(10))
+        let log = Passes(), ends = Ends()
+        let gate = Gate()
+        let answeredAfter = Flags()
+        let run = reader(s, keys: ["a", "b"], log: log) { n, key in if n == 1 && key == "b" { await gate.wait() } }
+        async let first: Void = s.request(.observer, allAux: false, key: "a", done: CompletionOnce {}, run: run, ended: { ends.add($0) })
+        while log.all.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        try? await Task.sleep(for: .milliseconds(20))
+        // "a" was read already when its new data comes: one follow-up pass, for "a" only.
+        async let wake: Void = s.request(.observer, allAux: false, key: "a",
+                                         done: CompletionOnce { answeredAfter.add(log.all.count == 2) },
+                                         run: run, ended: { ends.add($0) })
+        try? await Task.sleep(for: .milliseconds(50))
+        await gate.open()
+        _ = await (first, wake)
+        XCTAssertEqual(log.all.map(\.only), [nil, ["a"]])
+        XCTAssertEqual(answeredAfter.all, [true], "answered once the follow-up read it")
+        XCTAssertEqual(ends.all.map(\.passes), [2], "still one session")
+    }
+
+    func testWakesDuringTheFollowUpStartANewSession() async {
+        let s = SyncSessions(debounce: .milliseconds(10))
+        let log = Passes(), ends = Ends()
+        let answered = Counter.Sync()
+        // The first pass and its follow-up each get new data for "a" while reading it.
+        let detached = reader(s, keys: ["a"], log: log) { n, _ in
+            guard n <= 2 else { return }
+            Task { await s.request(.observer, allAux: false, key: "a", done: CompletionOnce { answered.add() },
+                                   run: { _ in .init(uploaded: 0, failed: false) }, ended: { _ in }) }
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+        await s.request(.foreground, allAux: true, run: detached, ended: { ends.add($0) })
+        while s.isActive { try? await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(log.all.map(\.only), [nil, ["a"], nil], "a pass, one follow-up, then a new session")
+        XCTAssertEqual(answered.value, 2, "both wakes answered")
+        XCTAssertEqual(ends.all.count, 2)
+    }
+
+    func testFailedPassAnswersWakesAndRunsAgainOnlyIfSomethingJoined() async {
+        let s = SyncSessions(debounce: .milliseconds(10))
+        let log = Passes(), ends = Ends()
+        let answered = Counter.Sync()
+        let failing: SyncSessions.Run = { pass in
+            log.add(pass)
+            return .init(uploaded: 0, failed: true)  // locked: nothing read
+        }
+        await s.request(.observer, allAux: false, key: "a", done: CompletionOnce { answered.add() }, run: failing, ended: { ends.add($0) })
+        XCTAssertEqual(log.all.count, 1, "no retry of its own")
+        XCTAssertEqual(answered.value, 1)
+        // An unlock while a pass fails: once more.
+        let gate = Gate()
+        let slow: SyncSessions.Run = { pass in
+            let n = log.add(pass)
+            if n == 2 { await gate.wait() }
+            return .init(uploaded: 0, failed: n == 2)
+        }
+        async let wake: Void = s.request(.observer, allAux: false, key: "a", done: CompletionOnce { answered.add() }, run: slow, ended: { ends.add($0) })
+        while log.all.count < 2 { try? await Task.sleep(for: .milliseconds(5)) }
+        async let unlock: Void = s.request(.unlock, allAux: true, run: slow, ended: { ends.add($0) })
+        try? await Task.sleep(for: .milliseconds(50))
+        await gate.open()
+        _ = await (wake, unlock)
+        XCTAssertEqual(log.all.count, 3)
+        XCTAssertEqual(answered.value, 2)
+    }
+
+    func testCancelAnswersWakesAndEnds() async {
+        let s = SyncSessions(debounce: .milliseconds(10))
+        XCTAssertFalse(s.cancel(), "nothing to cancel")
+        let log = Passes(), ends = Ends()
+        let answered = Counter.Sync()
+        let run: SyncSessions.Run = { pass in
+            log.add(pass)
+            try? await Task.sleep(for: .seconds(30))
+            XCTAssertTrue(Task.isCancelled, "the pass sees the cancellation")
+            return .init(uploaded: 0, failed: true)
+        }
+        async let wake: Void = s.request(.observer, allAux: false, key: "a", done: CompletionOnce { answered.add() }, run: run, ended: { ends.add($0) })
+        while log.all.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(s.cancel())
+        await wake
+        XCTAssertEqual(answered.value, 1)
+        XCTAssertEqual(log.all.count, 1, "no follow-up after a cancel")
+        XCTAssertFalse(s.cancel(), "the session is over")
     }
 
     func testAnswerAllAnswersOpenObserverCalls() {
@@ -179,4 +307,29 @@ private actor Gate {
     func wait() async {
         while !isOpen { try? await Task.sleep(for: .milliseconds(5)) }
     }
+}
+
+/// Passes a test's SyncSessions ran.
+private final class Passes: @unchecked Sendable {
+    private let lock = NSLock()
+    private var passes: [SyncSessions.Pass] = []
+    /// Returns the pass's number, from 1.
+    @discardableResult
+    func add(_ p: SyncSessions.Pass) -> Int { lock.withLock { passes.append(p); return passes.count } }
+    var all: [SyncSessions.Pass] { lock.withLock { passes } }
+}
+
+private final class Ends: @unchecked Sendable {
+    private let lock = NSLock()
+    private var ends: [SyncSessions.Summary] = []
+    func add(_ s: SyncSessions.Summary) { lock.withLock { ends.append(s) } }
+    var all: [SyncSessions.Summary] { lock.withLock { ends } }
+}
+
+private final class Flags: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flags: [Bool] = []
+    func add(_ f: Bool) { lock.withLock { flags.append(f) } }
+    var all: [Bool] { lock.withLock { flags } }
+    func settle() async { try? await Task.sleep(for: .milliseconds(20)) }
 }

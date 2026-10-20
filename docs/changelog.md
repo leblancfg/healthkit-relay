@@ -5,6 +5,17 @@ server releases and the app are versioned separately.
 
 ## Unreleased
 
+### App 0.6.3
+
+- One sync at a time for everything that starts one. Opening the app sets off an unlock, the
+  foreground sync and HealthKit wakes for many types within a second or two; in 0.6.2 these
+  ran as separate syncs, so the sync animation ran several times in a row and the server got
+  a heartbeat for each. Now they join the sync already running, which shows as one sync and
+  sends one heartbeat, tagged with what started it.
+- A HealthKit wake waits 1.5 seconds before syncing, so the rest of its burst joins it. New
+  data for a type the running sync has read already makes one more pass over just that type.
+- Each HealthKit wake is answered once its type was read, at the latest after 20 seconds.
+
 ### App 0.6.2
 
 - Background sync that keeps running: every HealthKit wake syncs all types, in one sync

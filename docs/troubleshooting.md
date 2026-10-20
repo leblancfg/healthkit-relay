@@ -199,8 +199,10 @@ continues where it stopped.
 **What you see.** The app syncs when you open it, and at no other time.
 
 **Why.** iOS decides when to wake the app, about hourly at best. Low Power Mode, closing the
-app from the app switcher, and Background App Refresh turned off all stop it. With
-Tailscale, the iPhone reaches the server in the background only with VPN On Demand.
+app from the app switcher, and Background App Refresh turned off all stop it. Health data
+can be read only while the iPhone is unlocked: a wake while it is locked sends nothing, and
+the app syncs at its next wake after an unlock. With Tailscale, the iPhone reaches the
+server in the background only with VPN On Demand.
 
 **What to do.**
 
@@ -213,6 +215,24 @@ Tailscale, the iPhone reaches the server in the background only with VPN On Dema
 `batch v2: … trigger observer, app background`, and
 `healthkit_relay_batches_total{trigger}` counts them. Triggers other than `foreground` mean
 iOS woke the app.
+
+From app 0.6.2 and server 0.6.2, the app also sends a heartbeat at the end of each background
+wake, even when it could read or send nothing. The server logs one line per heartbeat:
+
+```text
+heartbeat: device eae02a2e, app 0.6.2 (9), trigger refresh, background, protected data unavailable, outcome locked, 0 uploaded in 0.2s, 28s background time left, owes a sync (locked), process 5h0m0s old; wakes: observer 3 (last 10-20 08:12:40), refresh 5 (last 10-20 13:05:11)
+```
+
+- `protected data unavailable` and `outcome locked`: the iPhone was locked; the sync waits
+  for a wake after an unlock.
+- `outcome upload failed` or `cancelled`, or a `last error`: the app read Health but could
+  not send everything in the time iOS gave it. The next wake sends the rest.
+- No heartbeat at all for hours: iOS did not wake the app. See the steps above.
+
+`healthkit_relay_last_heartbeat_timestamp_seconds{trigger}` and
+`healthkit_relay_last_batch_timestamp_seconds{trigger}` give the time of the last of each, and
+refused tokens are logged with the client's address and user agent (`refused: POST
+/v1/samples from …, 401, …`).
 
 ### The app shows the server as not reachable on a home network
 

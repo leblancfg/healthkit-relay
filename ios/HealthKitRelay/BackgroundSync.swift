@@ -88,6 +88,42 @@ final class Observers: @unchecked Sendable {
     private var unobservable = Set<String>()
     /// Background delivery enabled, or asked for and not answered yet.
     private var delivery = Set<String>()
+    /// Observer calls not answered yet, see answerAll.
+    private var waiting: [CompletionOnce] = []
+
+    /// Types HealthKit may wake the app for as soon as they change, not at most hourly: data
+    /// that arrives all day (from a watch too), so the app runs soon after an unlock. Each wake
+    /// syncs every type. HealthKit keeps some (steps) to hourly anyway.
+    static let immediate: Set<String> = [
+        HKQuantityTypeIdentifier.heartRate.rawValue,
+        HKQuantityTypeIdentifier.stepCount.rawValue,
+        HKQuantityTypeIdentifier.activeEnergyBurned.rawValue,
+        HKQuantityTypeIdentifier.distanceWalkingRunning.rawValue,
+        HKCategoryTypeIdentifier.sleepAnalysis.rawValue,
+    ]
+
+    static func frequency(_ key: String) -> HKUpdateFrequency { immediate.contains(key) ? .immediate : .hourly }
+
+    /// Keeps an observer call until it is answered or answerAll answers it.
+    func wait(_ done: CompletionOnce) {
+        lock.lock()
+        waiting.removeAll { $0.isDone }
+        waiting.append(done)
+        lock.unlock()
+    }
+
+    /// Answers every observer call still open; returns how many were. For when iOS is about
+    /// to suspend the app: HealthKit counts an unanswered call as a failed delivery, and stops
+    /// waking an app that fails three times.
+    @discardableResult
+    func answerAll() -> Int {
+        lock.lock()
+        let open = waiting.filter { !$0.isDone }
+        waiting.removeAll()
+        lock.unlock()
+        open.forEach { $0.call() }
+        return open.count
+    }
 
     var counts: (observed: Int, delivery: Int) {
         lock.lock()
@@ -96,7 +132,7 @@ final class Observers: @unchecked Sendable {
     }
 
     /// Starts an observer query for each type not observed yet, then asks HealthKit to wake
-    /// the app for new data of each (at most hourly). Returns at once: background delivery
+    /// the app for new data of each (at most hourly, or at once for `immediate`). Returns at once: background delivery
     /// answers later, and only failures are logged.
     func observe(_ types: [SyncedType], store: HKHealthStore) {
         var refused: [String] = []
@@ -128,6 +164,7 @@ final class Observers: @unchecked Sendable {
     private func query(_ type: HKSampleType, _ key: String, store: HKHealthStore) -> HKObserverQuery {
         HKObserverQuery(sampleType: type, predicate: nil) { query, completion, error in
             let done = CompletionOnce(completion)
+            self.wait(done)
             if let error {
                 // The query is over: stopped and forgotten, so the next startObserving (the
                 // app opening, an unlock) starts it again. Not determined is expected for each
@@ -143,7 +180,7 @@ final class Observers: @unchecked Sendable {
                 return
             }
             Task {
-                let task = await BackgroundTask.begin("sync \(key)")
+                let task = await BackgroundTask.begin("observer wake") { SyncEngine.shared.backgroundTimeOver() }
                 await SyncEngine.shared.observerFired(key, done: done)
                 await task.end()
             }
@@ -164,7 +201,7 @@ final class Observers: @unchecked Sendable {
                 self.lock.unlock()
             }
             let raised = HKRTry {
-                store.enableBackgroundDelivery(for: type, frequency: .hourly) { ok, error in
+                store.enableBackgroundDelivery(for: type, frequency: Self.frequency(key)) { ok, error in
                     if !ok { fail(error?.localizedDescription) }
                     once.call()
                 }
@@ -244,6 +281,7 @@ enum RefreshTask {
         task.expirationHandler = {
             Log.info("refresh: out of background time; the rest syncs next time")
             work.cancel()
+            SyncEngine.shared.backgroundTimeOver()
             finish.complete(false)
         }
         Task { finish.complete(await work.value) }
@@ -287,4 +325,82 @@ struct AppState: Sendable {
     }
 
     var description: String { "app \(state), protected data \(protectedData ? "available" : "unavailable")" }
+}
+
+/// Runs one job at a time for many callers. A caller arriving while the job runs waits for it,
+/// and the job runs once more after it, so a change that came in meanwhile is not missed;
+/// however many callers arrive during a run, that makes one more run, not one each.
+final class Coalescer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: Task<Void, Never>?
+    private var again = false
+
+    func run(_ job: @escaping @Sendable () async -> Void) async {
+        let task = lock.withLock { () -> Task<Void, Never> in
+            if let current {
+                again = true
+                return current
+            }
+            // The task's first step waits for this lock, so `current` is set before it runs.
+            let task = Task { await self.loop(job) }
+            current = task
+            return task
+        }
+        await task.value
+    }
+
+    private func loop(_ job: @escaping @Sendable () async -> Void) async {
+        while true {
+            lock.withLock { again = false }
+            await job()
+            let done = lock.withLock { () -> Bool in
+                if again && !Task.isCancelled { return false }
+                current = nil
+                return true
+            }
+            if done { return }
+        }
+    }
+
+    /// Cancels the run under way, if any; returns whether there was one.
+    @discardableResult
+    func cancel() -> Bool {
+        lock.withLock {
+            current?.cancel()
+            return current != nil
+        }
+    }
+}
+
+/// What a background run did, sent to the server (POST /v1/heartbeat, server 0.6.2+). No health
+/// data: triggers, states, counts, times and error messages.
+struct AppHeartbeat: Encodable, Sendable {
+    var trigger: String
+    var appState: String
+    var protectedData: Bool
+    var outcome: String
+    var error: String?
+    var lastError: String?
+    var pending: String?
+    var uploaded: Int
+    var seconds: Double
+    /// -1: in the foreground (no limit).
+    var backgroundTimeLeft: Double
+    var processAge: Int
+    var appVersion: String
+    var wakes: [String: WakeCount]
+
+    static let encoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.keyEncodingStrategy = .convertToSnakeCase
+        e.dateEncodingStrategy = .iso8601
+        e.outputFormatting = .sortedKeys
+        return e
+    }()
+}
+
+/// How often one trigger woke this process, and when last.
+struct WakeCount: Encodable, Sendable, Equatable {
+    var count: Int
+    var last: Date
 }

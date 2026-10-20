@@ -562,11 +562,12 @@ func (s *Server) caller(r *http.Request) (Caller, bool) {
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string) (Caller, bool) {
 	c, ok := s.caller(r)
 	if !ok {
-		s.unauthorized(w)
+		s.unauthorized(w, r)
 		return Caller{}, false
 	}
 	if !c.Allows(scope) {
 		s.count("forbidden")
+		s.logRefusal(r, "403 (token of another scope)")
 		msg := "this is a paired device's token, which only uploads: the query API needs a read token " +
 			"(create one on the setup page, or with healthkit-relay token create -name grafana)"
 		if scope == ScopeUpload {
@@ -578,8 +579,9 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string)
 	return c, true
 }
 
-func (s *Server) unauthorized(w http.ResponseWriter) {
+func (s *Server) unauthorized(w http.ResponseWriter, r *http.Request) {
 	s.count("unauthorized")
+	s.logRefusal(r, "401")
 	w.Header().Set("WWW-Authenticate", "Bearer")
 	httpError(w, http.StatusUnauthorized, "unauthorized")
 }
@@ -722,7 +724,7 @@ func (s *Server) mintCodeFor(publicURL string, ttl time.Duration) (CodeResponse,
 
 func (s *Server) pairingCodes(w http.ResponseWriter, r *http.Request) {
 	if c, ok := s.caller(r); !ok || !c.Admin {
-		s.unauthorized(w)
+		s.unauthorized(w, r)
 		return
 	}
 	var req struct {
@@ -757,7 +759,7 @@ func (s *Server) pairingCodes(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) devicesList(w http.ResponseWriter, r *http.Request) {
 	if c, ok := s.caller(r); !ok || !c.Admin {
-		s.unauthorized(w)
+		s.unauthorized(w, r)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string][]Device{"devices": s.Devices.List()})
@@ -799,7 +801,7 @@ func (s *Server) createToken(name, scope string) (TokenResponse, int, error) {
 
 func (s *Server) tokensCreate(w http.ResponseWriter, r *http.Request) {
 	if c, ok := s.caller(r); !ok || !c.Admin {
-		s.unauthorized(w)
+		s.unauthorized(w, r)
 		return
 	}
 	var req TokenRequest
@@ -817,7 +819,7 @@ func (s *Server) tokensCreate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deviceRevoke(w http.ResponseWriter, r *http.Request) {
 	if c, ok := s.caller(r); !ok || !c.Admin {
-		s.unauthorized(w)
+		s.unauthorized(w, r)
 		return
 	}
 	ok, err := s.Devices.Revoke(r.PathValue("id"))

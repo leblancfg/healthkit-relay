@@ -41,12 +41,7 @@ type Batch struct {
 var Triggers = []string{"foreground", "observer", "refresh", "unlock", "retry", "unknown"}
 
 func (b *Batch) trigger() string {
-	for _, t := range Triggers {
-		if b.Trigger == t {
-			return t
-		}
-	}
-	return "unknown"
+	return knownTrigger(b.Trigger)
 }
 
 func (b *Batch) appState() string {

@@ -5,6 +5,14 @@ server releases and the app are versioned separately.
 
 ## Unreleased
 
+### App 0.6.4
+
+- Heartbeats say whether the iPhone was plugged in or on battery, in Low Power Mode, and
+  whether Background App Refresh is on for the app: iOS weighs these before it wakes the app,
+  and the server's log shows them with each heartbeat.
+- The app's log notes each lock, each move to the background and each change of power
+  state while the app runs, and the power state at every launch, refresh and HealthKit wake.
+
 ### App 0.6.3
 
 - One sync at a time for everything that starts one. Opening the app sets off an unlock, the
@@ -34,6 +42,9 @@ server releases and the app are versioned separately.
 
 ### Server
 
+- The heartbeat line says `plugged in` or `on battery`, `low power mode` and `background app
+  refresh denied` or `restricted`, from app 0.6.4's heartbeats; older apps' lines are
+  unchanged.
 - `POST /v1/heartbeat` (an upload token): logs the app's heartbeat in one line, and counts
   it in `healthkit_relay_heartbeats_total{trigger}` and
   `healthkit_relay_last_heartbeat_timestamp_seconds{trigger}`.

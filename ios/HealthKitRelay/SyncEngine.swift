@@ -600,8 +600,8 @@ actor SyncEngine {
     func observerFired(_ key: String, done: CompletionOnce) async {
         noteWake(.observer)
         if Date.now.timeIntervalSince(wakeLoggedAt) >= 30 {
-            let state = await AppState.now
-            Log.info("observe: wake \(Self.shortName(key)), \(state.description)"
+            let (state, power) = await MainActor.run { (AppState.now, PowerState.now) }
+            Log.info("observe: wake \(Self.shortName(key)), \(state.description), \(power.description)"
                 + (wakesNotLogged > 0 ? " (\(wakesNotLogged) more wakes since the last such line)" : ""))
             wakeLoggedAt = .now
             wakesNotLogged = 0
@@ -640,7 +640,7 @@ actor SyncEngine {
     func report(_ trigger: SyncTrigger, uploaded: Int, started: Date, outcome: String? = nil, error: String? = nil) async {
         let settings = ServerSettings.load()
         guard settings.isComplete else { return }
-        let (state, left) = await MainActor.run { (AppState.now, UIApplication.shared.backgroundTimeRemaining) }
+        let (state, power, left) = await MainActor.run { (AppState.now, PowerState.now, UIApplication.shared.backgroundTimeRemaining) }
         let info = Bundle.main.infoDictionary
         let failure = lastFailure
         let hb = AppHeartbeat(
@@ -651,7 +651,8 @@ actor SyncEngine {
             backgroundTimeLeft: left > 1e6 ? -1 : left.rounded(),
             processAge: Int(Date.now.timeIntervalSince(processStart)),
             appVersion: "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))",
-            wakes: wakes)
+            wakes: wakes, battery: power.battery, lowPowerMode: power.lowPowerMode,
+            backgroundRefresh: power.backgroundRefresh)
         do {
             try await Uploader(settings: settings).heartbeat(hb)
             lastError = nil
@@ -699,8 +700,8 @@ actor SyncEngine {
     /// The background app refresh: a full incremental sync if HealthKit can be read, else
     /// one owed for the next unlock. Returns whether nothing is left owed.
     func backgroundRefresh() async -> Bool {
-        let state = await AppState.now
-        Log.info("refresh: woke, \(state.description)")
+        let (state, power) = await MainActor.run { (AppState.now, PowerState.now) }
+        Log.info("refresh: woke, \(state.description), \(power.description)")
         noteWake(.refresh)
         let started = Date.now
         guard ServerSettings.load().isComplete else { return true }

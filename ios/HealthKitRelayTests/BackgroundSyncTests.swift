@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 @testable import HealthKitRelay
 
@@ -237,6 +238,46 @@ final class BackgroundSyncTests: XCTestCase {
         XCTAssertFalse(s.cancel(), "the session is over")
     }
 
+    /// 2026-10-20: after a refresh while locked, 0.6.3 got no HealthKit wake for hours. Not
+    /// SyncSessions: a locked pass, or background time ending while a burst waits for the rest
+    /// of it, leaves nothing behind, and the next burst is synced and answered.
+    func testLockedOrCutShortSessionLeavesNothingStuck() async {
+        let s = SyncSessions(debounce: .milliseconds(200))
+        let log = Passes(), ends = Ends()
+        let answered = Counter.Sync()
+        let locked: SyncSessions.Run = { pass in
+            log.add(pass)
+            return .init(uploaded: 0, failed: true)
+        }
+        await s.request(.refresh, allAux: true, run: locked, ended: { ends.add($0) })
+        XCTAssertFalse(s.isActive)
+        // A wake, then iOS ends the background time before the burst's wait is over.
+        async let cut: Void = s.request(.observer, allAux: false, key: "a", done: CompletionOnce { answered.add() },
+                                        run: locked, ended: { ends.add($0) })
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(s.cancel())
+        await cut
+        XCTAssertEqual(answered.value, 1, "answered when cut short")
+        XCTAssertEqual(log.all.count, 1, "nothing read after the cancel")
+        XCTAssertFalse(s.isActive)
+        // Unlocked later: a burst of wakes is one pass, and every wake is answered.
+        let keys = (0..<20).map { "type\($0)" }
+        let run = reader(s, keys: keys, log: log)
+        await withTaskGroup(of: Void.self) { group in
+            for key in keys {
+                group.addTask {
+                    await s.request(.observer, allAux: false, key: key, done: CompletionOnce { answered.add() },
+                                    run: run, ended: { ends.add($0) })
+                }
+            }
+        }
+        XCTAssertEqual(log.all.count, 2)
+        XCTAssertEqual(log.all.last, .init(trigger: .observer, allAux: false, only: nil))
+        XCTAssertEqual(answered.value, 21)
+        XCTAssertEqual(ends.all.map(\.triggers), [[.refresh], [.observer], [.observer]])
+        XCTAssertFalse(s.isActive)
+    }
+
     func testAnswerAllAnswersOpenObserverCalls() {
         let observers = Observers()
         let answered = Counter.Sync()
@@ -265,14 +306,26 @@ final class BackgroundSyncTests: XCTestCase {
         let beat = AppHeartbeat(trigger: "refresh", appState: "background", protectedData: false, outcome: "locked",
                                 error: nil, lastError: "heartbeat not sent: offline", pending: "locked", uploaded: 0,
                                 seconds: 0.2, backgroundTimeLeft: 27, processAge: 5400, appVersion: "0.6.2 (9)",
-                                wakes: ["refresh": WakeCount(count: 3, last: Date(timeIntervalSince1970: 1_792_500_000))])
+                                wakes: ["refresh": WakeCount(count: 3, last: Date(timeIntervalSince1970: 1_792_500_000))],
+                                battery: "battery", lowPowerMode: true, backgroundRefresh: "available")
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: AppHeartbeat.encoder.encode(beat)) as? [String: Any])
         // The names the server reads (server/heartbeat.go).
         XCTAssertEqual(Set(json.keys), ["trigger", "app_state", "protected_data", "outcome", "last_error", "pending",
-                                        "uploaded", "seconds", "background_time_left", "process_age", "app_version", "wakes"])
+                                        "uploaded", "seconds", "background_time_left", "process_age", "app_version", "wakes",
+                                        "battery", "low_power_mode", "background_refresh"])
+        XCTAssertEqual(json["low_power_mode"] as? Bool, true)
         let wake = try XCTUnwrap((json["wakes"] as? [String: Any])?["refresh"] as? [String: Any])
         XCTAssertEqual(wake["count"] as? Int, 3)
         XCTAssertEqual(wake["last"] as? String, "2026-10-20T12:40:00Z")
+    }
+
+    func testPowerStateDescription() {
+        XCTAssertEqual(PowerState(battery: "charging", lowPowerMode: false, backgroundRefresh: "available").description, "plugged in")
+        XCTAssertEqual(PowerState(battery: "full", lowPowerMode: false, backgroundRefresh: "available").description, "plugged in")
+        XCTAssertEqual(PowerState(battery: "battery", lowPowerMode: true, backgroundRefresh: "denied").description,
+                       "on battery, low power mode, background app refresh denied")
+        XCTAssertEqual(PowerState.name(UIDevice.BatteryState.unplugged), "battery")
+        XCTAssertEqual(PowerState.name(UIBackgroundRefreshStatus.restricted), "restricted")
     }
 
     func testOutcome() {

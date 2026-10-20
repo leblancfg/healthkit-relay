@@ -327,6 +327,54 @@ struct AppState: Sendable {
     var description: String { "app \(state), protected data \(protectedData ? "available" : "unavailable")" }
 }
 
+/// What iOS weighs before it wakes the app (HealthKit background delivery and the refresh are
+/// both scheduled by the system, which defers them on battery, in Low Power Mode or with
+/// Background App Refresh off), for logs and heartbeats.
+struct PowerState: Sendable, Equatable {
+    /// "charging", "full" (plugged in), "battery" or "unknown".
+    var battery: String
+    var lowPowerMode: Bool
+    /// Background App Refresh for this app: "available", "denied" (turned off) or "restricted".
+    var backgroundRefresh: String
+
+    @MainActor static var now: PowerState {
+        // Battery state reads .unknown until monitoring is on.
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        return PowerState(battery: name(UIDevice.current.batteryState),
+                          lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
+                          backgroundRefresh: name(UIApplication.shared.backgroundRefreshStatus))
+    }
+
+    static func name(_ state: UIDevice.BatteryState) -> String {
+        switch state {
+        case .charging: "charging"
+        case .full: "full"
+        case .unplugged: "battery"
+        case .unknown: "unknown"
+        @unknown default: "unknown"
+        }
+    }
+
+    static func name(_ status: UIBackgroundRefreshStatus) -> String {
+        switch status {
+        case .available: "available"
+        case .denied: "denied"
+        case .restricted: "restricted"
+        @unknown default: "unknown"
+        }
+    }
+
+    var description: String {
+        let power = switch battery {
+        case "charging", "full": "plugged in"
+        case "battery": "on battery"
+        default: "power unknown"
+        }
+        return power + (lowPowerMode ? ", low power mode" : "")
+            + (backgroundRefresh == "available" ? "" : ", background app refresh \(backgroundRefresh)")
+    }
+}
+
 /// One sync at a time for every trigger. Opening the app sets off an unlock, the foreground
 /// sync and HealthKit wakes for a few hundred types within a second or two; each used to run a
 /// sync of its own (one spinner, one heartbeat each). Now they all join one session:
@@ -553,6 +601,10 @@ struct AppHeartbeat: Encodable, Sendable {
     var processAge: Int
     var appVersion: String
     var wakes: [String: WakeCount]
+    /// PowerState (server 0.6.4+; older servers ignore them).
+    var battery: String
+    var lowPowerMode: Bool
+    var backgroundRefresh: String
 
     static let encoder: JSONEncoder = {
         let e = JSONEncoder()

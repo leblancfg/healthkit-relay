@@ -110,6 +110,31 @@ func TestHeartbeat(t *testing.T) {
 	if resp := send(t, http.MethodPost, ts.URL+"/v1/heartbeat", token, "", "{"); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("invalid heartbeat: %d", resp.StatusCode)
 	}
+	if strings.Contains(line, "plugged in") || strings.Contains(line, "on battery") {
+		t.Errorf("a 0.6.2 heartbeat says nothing of power:\n%s", line)
+	}
+}
+
+func TestHeartbeatPower(t *testing.T) {
+	for _, c := range []struct{ body, want string }{
+		{`"battery":"charging","low_power_mode":false,"background_refresh":"available"`, ", plugged in, 0 uploaded"},
+		{`"battery":"full","background_refresh":"available"`, ", plugged in, 0 uploaded"},
+		{`"battery":"battery","low_power_mode":true,"background_refresh":"denied"`,
+			", on battery, low power mode, background app refresh denied, 0 uploaded"},
+		{`"battery":"unknown","background_refresh":"restricted"`, ", power unknown, background app refresh restricted, 0 uploaded"},
+	} {
+		dir := t.TempDir()
+		token, _ := pairedToken(t, dir)
+		ts, _ := newTestServer(t, dir)
+		logs := captureLog(t)
+		body := `{"trigger":"observer","app_state":"background","protected_data":true,"outcome":"ok","app_version":"0.6.4 (11)",` + c.body + `}`
+		if resp := send(t, http.MethodPost, ts.URL+"/v1/heartbeat", token, "", body); resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("heartbeat: %d", resp.StatusCode)
+		}
+		if line := logs.String(); !strings.Contains(line, "outcome ok"+c.want) {
+			t.Errorf("%s: log lacks %q:\n%s", c.body, c.want, line)
+		}
+	}
 }
 
 func TestLastBatchByTrigger(t *testing.T) {

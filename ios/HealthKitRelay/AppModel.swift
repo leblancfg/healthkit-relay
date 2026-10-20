@@ -233,8 +233,9 @@ final class AppModel: ObservableObject {
         await sync()
     }
 
+    /// Syncs, or joins the sync running (a HealthKit wake, an unlock): one sync on screen.
     func sync() async {
-        guard isConfigured, !SyncStatus.shared.running, !askingHealth else { return }
+        guard isConfigured, !askingHealth else { return }
         // A first sync can take long: keep the phone from locking (and HealthKit from
         // becoming unreadable) while the app is open.
         UIApplication.shared.isIdleTimerDisabled = true

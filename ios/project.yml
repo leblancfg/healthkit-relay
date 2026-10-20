@@ -14,8 +14,8 @@ configFiles:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.6.2"
-    CURRENT_PROJECT_VERSION: "9"
+    MARKETING_VERSION: "0.6.3"
+    CURRENT_PROJECT_VERSION: "10"
 targets:
   HealthKitRelay:
     type: application

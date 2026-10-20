@@ -135,8 +135,10 @@ actor SyncEngine {
     /// A full sync still owed, see PendingSync. Also kept here: before the first unlock after
     /// a restart, UserDefaults can neither be read nor written.
     private var pendingInMemory: PendingSync?
-    /// Observer wakes share one sync.
-    nonisolated let observerRuns = Coalescer()
+    /// Every trigger shares one sync at a time; the UI shows it as one.
+    nonisolated let sessions = SyncSessions { active in
+        DispatchQueue.main.async { MainActor.assumeIsolated { SyncStatus.shared.running = active } }
+    }
     private var wakeLoggedAt = Date.distantPast
     private var wakesNotLogged = 0
     /// For heartbeats: this process's wakes by trigger, its start, how the last sync ended and
@@ -590,11 +592,11 @@ actor SyncEngine {
     }
 
     /// HealthKit stops waking an app that leaves its observer calls unanswered, so each is
-    /// answered when the sync it started ends, after 20 s, or when background time runs out
+    /// answered once its type was read after it, after 20 s, or when background time runs out
     /// (backgroundTimeOver), whichever comes first. All wakes share one full incremental sync
-    /// (Coalescer): a burst of a few hundred wakes (every query fires once when it starts)
-    /// costs one sync, not one per type, and any wake reads every type, so a single wake keeps
-    /// everything current.
+    /// (SyncSessions, which waits a moment for the rest of a burst): a burst of a few hundred
+    /// wakes (every query fires once when it starts) costs one sync, not one per type, and any
+    /// wake reads every type, so a single wake keeps everything current.
     func observerFired(_ key: String, done: CompletionOnce) async {
         noteWake(.observer)
         if Date.now.timeIntervalSince(wakeLoggedAt) >= 30 {
@@ -610,11 +612,7 @@ actor SyncEngine {
             try? await Task.sleep(for: .seconds(20))
             done.call()
         }
-        await observerRuns.run {
-            let started = Date.now
-            let uploaded = await self.syncAll(trigger: .observer, allAux: false)
-            await self.report(.observer, uploaded: uploaded, started: started)
-        }
+        await syncAll(trigger: .observer, allAux: false, wake: key, done: done)
         done.call()
     }
 
@@ -623,7 +621,7 @@ actor SyncEngine {
     /// handler: anything later may run only when iOS resumes the app, hours later.
     nonisolated func backgroundTimeOver() {
         let answered = observers.answerAll()
-        let stopped = observerRuns.cancel()
+        let stopped = sessions.cancel()
         if answered > 0 || stopped {
             Log.info("app: background time over: answered \(answered) HealthKit wakes" + (stopped ? ", stopped the sync" : ""))
         }
@@ -694,9 +692,7 @@ actor SyncEngine {
         await startObserving()
         guard let pending else { return false }
         Log.info("sync: making up for a \(pending == .locked ? "skipped (locked)" : "failed") sync")
-        let started = Date.now
-        let uploaded = await syncAll(trigger: pending.trigger(trigger))
-        if trigger != .foreground { await report(trigger, uploaded: uploaded, started: started) }
+        await syncAll(trigger: pending.trigger(trigger))
         return true
     }
 
@@ -714,41 +710,59 @@ actor SyncEngine {
             return true
         }
         await startObserving()
-        let uploaded = await syncAll(trigger: (pending ?? .locked).trigger(.refresh))
-        await report(.refresh, uploaded: uploaded, started: started)
+        await syncAll(trigger: (pending ?? .locked).trigger(.refresh))
         return pending == nil
     }
 
     // MARK: Sync
 
-    /// Syncs everything. Returns the number of records uploaded. `trigger` goes with every
-    /// batch it sends. `allAux` false re-reads what has no anchor only if it is due
-    /// (syncAuxIfDue): observer wakes come often.
-    @discardableResult
-    func syncAll(trigger: SyncTrigger = .foreground, allAux: Bool = true) async -> Int {
-        await SyncTrigger.$current.withValue(trigger) { await self.runAll(allAux: allAux) }
+    /// Syncs everything, or joins the sync running (see SyncSessions); returns when that
+    /// session ends. Every batch carries the trigger of the session's first caller. `allAux`
+    /// false re-reads what has no anchor only if it is due (syncAuxIfDue): observer wakes come
+    /// often. `wake` and `done`: a HealthKit wake for that type, answered once it was read.
+    func syncAll(trigger: SyncTrigger = .foreground, allAux: Bool = true, wake: String? = nil, done: CompletionOnce? = nil) async {
+        await sessions.request(trigger, allAux: allAux, key: wake, done: done,
+                               run: { pass in await self.runPass(pass) },
+                               ended: { summary in await self.sessionEnded(summary) })
     }
 
-    private func runAll(allAux: Bool = true) async -> Int {
-        Log.info("sync: started (\(SyncTrigger.current.rawValue))")
+    private func runPass(_ pass: SyncSessions.Pass) async -> SyncSessions.PassResult {
+        let uploaded = await SyncTrigger.$current.withValue(pass.trigger) {
+            await self.runAll(allAux: pass.allAux, only: pass.only)
+        }
+        return .init(uploaded: uploaded, failed: lastFailure != nil)
+    }
+
+    /// One heartbeat per session that a background trigger joined.
+    private func sessionEnded(_ s: SyncSessions.Summary) async {
+        if s.triggers.count > 1 || s.passes > 1 {
+            Log.info("sync: one sync for \(s.triggers.map(\.rawValue).joined(separator: ", ")), \(s.passes) passes")
+        }
+        if s.triggers.contains(where: { $0 != .foreground }) {
+            await report(s.trigger, uploaded: s.uploaded, started: s.started)
+        }
+    }
+
+    /// One pass: `only` nil reads every type, else just those (new data during the pass before).
+    private func runAll(allAux: Bool = true, only: Set<String>? = nil) async -> Int {
+        Log.info("sync: started (\(SyncTrigger.current.rawValue))" + (only.map { ", again for \($0.count) types" } ?? ""))
         // This sync is the one owed; a lock or failure in it marks one owed again.
         clearPending()
-        await MainActor.run {
-            SyncStatus.shared.running = true
-            SyncStatus.shared.lastError = nil
-        }
+        await MainActor.run { SyncStatus.shared.lastError = nil }
         var total = 0
         var firstError: Error?
-        do {
-            total += allAux ? try await syncAux() : try await syncAuxIfDue()
-        } catch {
-            firstError = error
+        if only == nil {
+            do {
+                total += allAux ? try await syncAux() : try await syncAuxIfDue()
+            } catch {
+                firstError = error
+            }
         }
         let req = await requestedTypes()
         await checkHistoryLimit()
-        let types = HealthTypes.all.filter { $0.sampleType != nil && req.contains($0.key) }
+        let types = HealthTypes.all.filter { $0.sampleType != nil && req.contains($0.key) && only?.contains($0.key) != false }
         Log.info("sync: \(types.count) readable sample types")
-        if types.isEmpty && firstError == nil {
+        if types.isEmpty && firstError == nil && only == nil {
             firstError = SyncError.noAccess
         }
         for (i, synced) in types.enumerated() where !Self.isFatal(firstError) {
@@ -758,13 +772,15 @@ actor SyncEngine {
                 break
             }
             await show(Self.readableName(synced.key), progress: Double(i) / Double(max(1, types.count)))
+            sessions.willSync(synced.key)
             do {
                 total += try await sync(synced)
             } catch SyncError.notAuthorized, SyncError.disallowed {
-                continue  // read through other types, or access not granted: nothing to report
+                // read through other types, or access not granted: nothing to report
             } catch {
                 firstError = firstError ?? error
             }
+            sessions.didSync(synced.key)
         }
         if !Self.isFatal(firstError) {
             do {
@@ -779,7 +795,6 @@ actor SyncEngine {
         if let failure { notePending(failure) } else { Log.info("sync: done, \(uploaded) uploaded") }
         await MainActor.run {
             let status = SyncStatus.shared
-            status.running = false
             status.detail = ""
             status.progress = nil
             if failure is CancellationError {

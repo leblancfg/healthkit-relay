@@ -42,6 +42,33 @@ type AppHeartbeat struct {
 	AppVersion string `json:"app_version"`
 	// Wakes counts this process's wakes by trigger, with the last one's time.
 	Wakes map[string]WakeCount `json:"wakes,omitempty"`
+	// What iOS weighs before it wakes the app (app 0.6.4): Battery is "charging", "full",
+	// "battery" (unplugged) or "unknown"; BackgroundRefresh is "available", "denied" (Background
+	// App Refresh off for the app) or "restricted". Absent from older apps.
+	Battery           string `json:"battery,omitempty"`
+	LowPowerMode      bool   `json:"low_power_mode,omitempty"`
+	BackgroundRefresh string `json:"background_refresh,omitempty"`
+}
+
+// power describes AppHeartbeat's power fields for the log line, "" when the app sent none.
+func (hb AppHeartbeat) power() string {
+	var parts []string
+	switch hb.Battery {
+	case "":
+	case "charging", "full":
+		parts = append(parts, "plugged in")
+	case "battery":
+		parts = append(parts, "on battery")
+	default:
+		parts = append(parts, "power "+clean(hb.Battery, 20))
+	}
+	if hb.LowPowerMode {
+		parts = append(parts, "low power mode")
+	}
+	if hb.BackgroundRefresh != "" && hb.BackgroundRefresh != "available" {
+		parts = append(parts, "background app refresh "+clean(hb.BackgroundRefresh, 20))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // WakeCount is one trigger's line in AppHeartbeat.Wakes.
@@ -101,6 +128,9 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(&b, "heartbeat: %s, app %s, trigger %s, %s, protected data %s, outcome %s",
 		device, clean(hb.AppVersion, 40), trigger, clean(cmpOr(hb.AppState, "unknown"), 20),
 		map[bool]string{true: "available", false: "unavailable"}[hb.ProtectedData], clean(cmpOr(hb.Outcome, "unknown"), 40))
+	if p := hb.power(); p != "" {
+		fmt.Fprintf(&b, ", %s", p)
+	}
 	fmt.Fprintf(&b, ", %d uploaded in %.1fs", hb.Uploaded, hb.Seconds)
 	if hb.BackgroundTimeLeft >= 0 {
 		fmt.Fprintf(&b, ", %.0fs background time left", hb.BackgroundTimeLeft)

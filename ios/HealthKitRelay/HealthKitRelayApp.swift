@@ -21,7 +21,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         #endif
         let info = Bundle.main.infoDictionary
         Log.info("app: \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?")) launched, "
-            + "\(AppState.now.description)")
+            + "\(AppState.now.description), \(PowerState.now.description)")
         // HealthKit background delivery relaunches the app in the background and wants the
         // observer queries set up before launch ends: started here, synchronously, from the
         // types saved when they were asked for. HealthKit's answers are added once it can be
@@ -48,7 +48,20 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         }
         NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
-        ) { _ in RefreshTask.schedule() }
+        ) { _ in
+            Log.info("app: in the background")
+            RefreshTask.schedule()
+        }
+        // When iOS wakes the app depends on these: logged when they change while the app runs,
+        // so the log shows what the phone was doing between wakes.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.protectedDataWillBecomeUnavailableNotification, object: nil, queue: .main
+        ) { _ in Log.info("app: protected data unavailable (locked)") }
+        for name in [UIDevice.batteryStateDidChangeNotification, Notification.Name.NSProcessInfoPowerStateDidChange] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { Log.info("app: power: \(PowerState.now.description)") }
+            }
+        }
         // Woken in the background (HealthKit, refresh) with the phone unlocked since a sync was
         // skipped or failed in an earlier process: make up for it now, not at the next unlock.
         if application.applicationState == .background, application.isProtectedDataAvailable {

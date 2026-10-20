@@ -220,11 +220,15 @@ From app 0.6.2 and server 0.6.2, the app also sends a heartbeat at the end of ea
 wake, even when it could read or send nothing. The server logs one line per heartbeat:
 
 ```text
-heartbeat: device eae02a2e, app 0.6.2 (9), trigger refresh, background, protected data unavailable, outcome locked, 0 uploaded in 0.2s, 28s background time left, owes a sync (locked), process 5h0m0s old; wakes: observer 3 (last 10-20 08:12:40), refresh 5 (last 10-20 13:05:11)
+heartbeat: device eae02a2e, app 0.6.4 (11), trigger refresh, background, protected data unavailable, outcome locked, on battery, 0 uploaded in 0.2s, 28s background time left, owes a sync (locked), process 5h0m0s old; wakes: observer 3 (last 10-20 08:12:40), refresh 5 (last 10-20 13:05:11)
 ```
 
 - `protected data unavailable` and `outcome locked`: the iPhone was locked; the sync waits
   for a wake after an unlock.
+- `plugged in` or `on battery`, then `low power mode` and `background app refresh denied`
+  when they apply (app 0.6.4 and server 0.6.4): what iOS weighs before it wakes the app.
+  Wakes that come only while `plugged in` mean iOS is holding the app's background work for
+  the charger.
 - `outcome upload failed` or `cancelled`, or a `last error`: the app read Health but could
   not send everything in the time iOS gave it. The next wake sends the rest.
 - No heartbeat at all for hours: iOS did not wake the app. See the steps above.

@@ -33,11 +33,17 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         NotificationCenter.default.addObserver(
             forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: .main
         ) { _ in
-            Log.info("app: protected data available (unlocked)")
-            Task {
-                let task = await BackgroundTask.begin("sync after unlock")
-                await SyncEngine.shared.dataBecameAvailable(.unlock)
-                await task.end()
+            MainActor.assumeIsolated {
+                Log.info("app: protected data available (unlocked)")
+                let work = Task { await SyncEngine.shared.dataBecameAvailable(.unlock) }
+                let task = BackgroundTask.begin("sync after unlock") {
+                    work.cancel()
+                    SyncEngine.shared.backgroundTimeOver()
+                }
+                Task {
+                    _ = await work.value
+                    task.end()
+                }
             }
         }
         NotificationCenter.default.addObserver(
@@ -46,9 +52,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // Woken in the background (HealthKit, refresh) with the phone unlocked since a sync was
         // skipped or failed in an earlier process: make up for it now, not at the next unlock.
         if application.applicationState == .background, application.isProtectedDataAvailable {
-            Task {
-                let task = BackgroundTask.begin("owed sync")
+            let work = Task {
                 if await SyncEngine.shared.pending != nil { await SyncEngine.shared.dataBecameAvailable(.unlock) }
+            }
+            let task = BackgroundTask.begin("owed sync") {
+                work.cancel()
+                SyncEngine.shared.backgroundTimeOver()
+            }
+            Task {
+                await work.value
                 task.end()
             }
         }

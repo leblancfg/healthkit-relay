@@ -135,6 +135,16 @@ actor SyncEngine {
     /// A full sync still owed, see PendingSync. Also kept here: before the first unlock after
     /// a restart, UserDefaults can neither be read nor written.
     private var pendingInMemory: PendingSync?
+    /// Observer wakes share one sync.
+    nonisolated let observerRuns = Coalescer()
+    private var wakeLoggedAt = Date.distantPast
+    private var wakesNotLogged = 0
+    /// For heartbeats: this process's wakes by trigger, its start, how the last sync ended and
+    /// the last error not reported yet (a heartbeat that could not be sent).
+    private var wakes: [String: WakeCount] = [:]
+    private let processStart = Date.now
+    private var lastFailure: Error?
+    private var lastError: String?
 
     var pending: PendingSync? { pendingInMemory ?? PendingSync.load() }
 
@@ -579,30 +589,90 @@ actor SyncEngine {
         Log.info("observe: \(observed) types observed, \(delivery) with background delivery, \(req.count) readable")
     }
 
-    /// HealthKit stops waking an app that does not call the observer completion promptly, so it
-    /// is called when the type is synced or after 20 s, whichever comes first; the sync goes on
-    /// for as long as iOS lets the app run.
+    /// HealthKit stops waking an app that leaves its observer calls unanswered, so each is
+    /// answered when the sync it started ends, after 20 s, or when background time runs out
+    /// (backgroundTimeOver), whichever comes first. All wakes share one full incremental sync
+    /// (Coalescer): a burst of a few hundred wakes (every query fires once when it starts)
+    /// costs one sync, not one per type, and any wake reads every type, so a single wake keeps
+    /// everything current.
     func observerFired(_ key: String, done: CompletionOnce) async {
-        let state = await AppState.now
-        Log.info("observe: wake \(Self.shortName(key)), \(state.description)")
+        noteWake(.observer)
+        if Date.now.timeIntervalSince(wakeLoggedAt) >= 30 {
+            let state = await AppState.now
+            Log.info("observe: wake \(Self.shortName(key)), \(state.description)"
+                + (wakesNotLogged > 0 ? " (\(wakesNotLogged) more wakes since the last such line)" : ""))
+            wakeLoggedAt = .now
+            wakesNotLogged = 0
+        } else {
+            wakesNotLogged += 1
+        }
         Task {
             try? await Task.sleep(for: .seconds(20))
             done.call()
         }
-        await SyncTrigger.$current.withValue(.observer) {
-            if let synced = HealthTypes.named(key) {
-                do {
-                    _ = try await self.sync(synced)
-                } catch {
-                    self.notePending(error)
-                }
-            }
-            done.call()
-            do {
-                _ = try await self.syncAuxIfDue()
-            } catch {
-                self.notePending(error)
-            }
+        await observerRuns.run {
+            let started = Date.now
+            let uploaded = await self.syncAll(trigger: .observer, allAux: false)
+            await self.report(.observer, uploaded: uploaded, started: started)
+        }
+        done.call()
+    }
+
+    /// iOS is about to suspend the app: answer HealthKit and stop the observer sync, which
+    /// leaves the rest owed (.failed) for the next wake. Synchronous, from the expiration
+    /// handler: anything later may run only when iOS resumes the app, hours later.
+    nonisolated func backgroundTimeOver() {
+        let answered = observers.answerAll()
+        let stopped = observerRuns.cancel()
+        if answered > 0 || stopped {
+            Log.info("app: background time over: answered \(answered) HealthKit wakes" + (stopped ? ", stopped the sync" : ""))
+        }
+    }
+
+    private func noteWake(_ trigger: SyncTrigger) {
+        var w = wakes[trigger.rawValue] ?? WakeCount(count: 0, last: .now)
+        w.count += 1
+        w.last = .now
+        wakes[trigger.rawValue] = w
+    }
+
+    /// Tells the server what a background run did (POST /v1/heartbeat), also when it could read
+    /// or send nothing, so a sync that stops can be diagnosed from the server alone. One try:
+    /// a failure is logged and goes with the next heartbeat.
+    func report(_ trigger: SyncTrigger, uploaded: Int, started: Date, outcome: String? = nil, error: String? = nil) async {
+        let settings = ServerSettings.load()
+        guard settings.isComplete else { return }
+        let (state, left) = await MainActor.run { (AppState.now, UIApplication.shared.backgroundTimeRemaining) }
+        let info = Bundle.main.infoDictionary
+        let failure = lastFailure
+        let hb = AppHeartbeat(
+            trigger: trigger.rawValue, appState: state.state, protectedData: state.protectedData,
+            outcome: outcome ?? Self.outcome(failure), error: error ?? failure?.localizedDescription,
+            lastError: lastError, pending: pending?.rawValue, uploaded: uploaded,
+            seconds: (Date.now.timeIntervalSince(started) * 10).rounded() / 10,
+            backgroundTimeLeft: left > 1e6 ? -1 : left.rounded(),
+            processAge: Int(Date.now.timeIntervalSince(processStart)),
+            appVersion: "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))",
+            wakes: wakes)
+        do {
+            try await Uploader(settings: settings).heartbeat(hb)
+            lastError = nil
+        } catch {
+            lastError = "heartbeat not sent: \(error.localizedDescription)"
+            Log.info("heartbeat: not sent (\(trigger.rawValue)): \(error.localizedDescription)")
+        }
+    }
+
+    /// A run's outcome, in a word, for heartbeats.
+    static func outcome(_ failure: Error?) -> String {
+        guard let failure else { return "ok" }
+        switch failure {
+        case is CancellationError: return "cancelled"
+        case SyncError.locked: return "locked"
+        case UploadError.failed: return "upload failed"
+        case UploadError.unauthorized: return "unauthorized"
+        case UploadError.notConfigured: return "not configured"
+        default: return "failed"
         }
     }
 
@@ -620,10 +690,13 @@ actor SyncEngine {
     /// Returns whether a sync was owed (and run).
     @discardableResult
     func dataBecameAvailable(_ trigger: SyncTrigger) async -> Bool {
+        if trigger != .foreground { noteWake(trigger) }
         await startObserving()
         guard let pending else { return false }
         Log.info("sync: making up for a \(pending == .locked ? "skipped (locked)" : "failed") sync")
-        await syncAll(trigger: pending.trigger(trigger))
+        let started = Date.now
+        let uploaded = await syncAll(trigger: pending.trigger(trigger))
+        if trigger != .foreground { await report(trigger, uploaded: uploaded, started: started) }
         return true
     }
 
@@ -632,26 +705,31 @@ actor SyncEngine {
     func backgroundRefresh() async -> Bool {
         let state = await AppState.now
         Log.info("refresh: woke, \(state.description)")
+        noteWake(.refresh)
+        let started = Date.now
         guard ServerSettings.load().isComplete else { return true }
         guard state.protectedData else {
             markPending(.locked)
+            await report(.refresh, uploaded: 0, started: started, outcome: "locked", error: "")
             return true
         }
         await startObserving()
-        await syncAll(trigger: (pending ?? .locked).trigger(.refresh))
+        let uploaded = await syncAll(trigger: (pending ?? .locked).trigger(.refresh))
+        await report(.refresh, uploaded: uploaded, started: started)
         return pending == nil
     }
 
     // MARK: Sync
 
     /// Syncs everything. Returns the number of records uploaded. `trigger` goes with every
-    /// batch it sends.
+    /// batch it sends. `allAux` false re-reads what has no anchor only if it is due
+    /// (syncAuxIfDue): observer wakes come often.
     @discardableResult
-    func syncAll(trigger: SyncTrigger = .foreground) async -> Int {
-        await SyncTrigger.$current.withValue(trigger) { await self.runAll() }
+    func syncAll(trigger: SyncTrigger = .foreground, allAux: Bool = true) async -> Int {
+        await SyncTrigger.$current.withValue(trigger) { await self.runAll(allAux: allAux) }
     }
 
-    private func runAll() async -> Int {
+    private func runAll(allAux: Bool = true) async -> Int {
         Log.info("sync: started (\(SyncTrigger.current.rawValue))")
         // This sync is the one owed; a lock or failure in it marks one owed again.
         clearPending()
@@ -662,7 +740,7 @@ actor SyncEngine {
         var total = 0
         var firstError: Error?
         do {
-            total += try await syncAux()
+            total += allAux ? try await syncAux() : try await syncAuxIfDue()
         } catch {
             firstError = error
         }
@@ -697,6 +775,7 @@ actor SyncEngine {
         }
         let uploaded = total
         let failure = firstError
+        lastFailure = failure
         if let failure { notePending(failure) } else { Log.info("sync: done, \(uploaded) uploaded") }
         await MainActor.run {
             let status = SyncStatus.shared
@@ -745,11 +824,13 @@ actor SyncEngine {
         let task = Task {
             await self.acquire()
             defer { self.release() }
+            try Task.checkCancellation()
             return try await body()
         }
         inFlight[key] = task
         defer { inFlight[key] = nil }
-        return try await task.value
+        // Out of background time (the caller is cancelled): stop the query or upload under way.
+        return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
     }
 
     private func acquire() async {
@@ -1175,6 +1256,12 @@ final class CompletionOnce: @unchecked Sendable {
 
     init(_ completion: @escaping () -> Void) { self.completion = completion }
 
+    var isDone: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return completion == nil
+    }
+
     func call() {
         lock.lock()
         let c = completion
@@ -1189,9 +1276,12 @@ final class CompletionOnce: @unchecked Sendable {
 final class BackgroundTask {
     private var id: UIBackgroundTaskIdentifier = .invalid
 
-    static func begin(_ name: String) -> BackgroundTask {
+    /// `onExpire` runs when the extra time is over, just before iOS suspends the app: it must
+    /// stop the work and answer HealthKit then, synchronously (see backgroundTimeOver).
+    static func begin(_ name: String, onExpire: (@Sendable () -> Void)? = nil) -> BackgroundTask {
         let task = BackgroundTask()
         task.id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak task] in
+            onExpire?()
             task?.end()
         }
         return task

@@ -306,6 +306,7 @@ func (s *Server) setupLogin(w http.ResponseWriter, r *http.Request) {
 	if !s.isAdminToken(strings.TrimSpace(r.PostFormValue("token"))) {
 		time.Sleep(500 * time.Millisecond) // slows down guessing; tokens are long anyway
 		s.count("unauthorized")
+		s.logRefusal(r, "setup sign-in with a wrong admin token")
 		s.render(w, http.StatusUnauthorized, setupView{Mode: "login", LoginErr: true,
 			Message: "That is not this server's admin token."})
 		return

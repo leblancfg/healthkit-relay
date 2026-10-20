@@ -90,8 +90,8 @@ gets a message to update it, and nothing changes.
 | `Support/HKRObjC.m` | catches the Objective-C exceptions HealthKit raises for disallowed types |
 | `HealthKitSafe.swift` | every query built and run inside that guard; streams, one-shot results, timeouts |
 | `SyncEngine.swift` | authorization plan, main and per-object requests, anchored queries, activity summaries, characteristics, medications, lock handling |
-| `BackgroundSync.swift` | observer queries and background delivery set up at launch, the hourly background refresh, syncs owed after a lock or failure, sync triggers |
-| `Uploader.swift` | batched POST with retry and exponential backoff |
+| `BackgroundSync.swift` | observer queries and background delivery set up at launch, one sync shared by the wakes that arrive together, the hourly background refresh, syncs owed after a lock or failure, sync triggers, heartbeats |
+| `Uploader.swift` | batched POST with retry and exponential backoff; heartbeats |
 | `WireFormat.swift` | batches (wire format v2), source and device fields |
 | `AnchorStore.swift` | persisted query anchors |
 | `Settings.swift` | server URL and token in the Keychain |

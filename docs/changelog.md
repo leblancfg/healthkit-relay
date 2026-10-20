@@ -5,8 +5,31 @@ server releases and the app are versioned separately.
 
 ## Unreleased
 
+### App 0.6.2
+
+- Background sync that keeps running: every HealthKit wake syncs all types, in one sync
+  shared by all the wakes that arrive together (opening the app or an unlock fires a few
+  hundred), where 0.6.1 started one sync per type. iOS counts each wake against the app's
+  background time, and stops waking an app that does not answer HealthKit.
+- When iOS ends the app's background time, the app answers HealthKit's open wakes and stops
+  the sync, which the next wake finishes. In 0.6.1 a sync cut short waited, unanswered,
+  until iOS ran the app again, which could be hours.
+- HealthKit may wake the app at once for new heart rate, steps, active energy, walking
+  distance and sleep data, so it runs soon after an unlock; other types stay at most hourly.
+- A heartbeat to the server at the end of each background wake, also when the iPhone was
+  locked or the upload failed: what woke the app, whether Health was readable, the outcome,
+  the last error and the background time left. See
+  [No syncs in the background](troubleshooting.md#no-syncs-in-the-background).
+
 ### Server
 
+- `POST /v1/heartbeat` (an upload token): logs the app's heartbeat in one line, and counts
+  it in `healthkit_relay_heartbeats_total{trigger}` and
+  `healthkit_relay_last_heartbeat_timestamp_seconds{trigger}`.
+- `healthkit_relay_last_batch_timestamp_seconds{trigger}`: when the last batch of each
+  trigger arrived.
+- Refused tokens are logged (at most every 10 seconds, with a count of the others): method,
+  path, client address, user agent and a 6-character prefix of the token's SHA-256.
 - Query API, turned on with `-query-duckdb`: read-only endpoints for the type catalog,
   samples and daily or hourly aggregates, with time zones and Apple-style source
   de-duplication. The binary serves an OpenAPI 3.1 document at `/openapi.json` and Swagger UI

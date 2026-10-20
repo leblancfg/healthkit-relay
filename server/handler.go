@@ -31,6 +31,10 @@ type Server struct {
 	mu              sync.Mutex
 	stats           map[string]int64 // counter name -> value, see writeMetrics
 	lastUpload      time.Time
+	lastBatch       map[string]time.Time // trigger -> last accepted batch
+	lastHeartbeat   map[string]time.Time // trigger -> last heartbeat
+	refusalLog      time.Time            // when a refused token was last logged
+	refusalsQuiet   int64                // refused tokens not logged since
 	forwardErrors   int64
 	adminUploadsLog time.Time // when an upload with the admin token was last logged
 }
@@ -71,6 +75,7 @@ func (s *Server) routes() []route {
 		{"GET /healthz", s.healthz},
 		{"GET /metrics", s.metrics},
 		{"POST /v1/samples", s.samples},
+		{"POST /v1/heartbeat", s.heartbeat},
 		{"GET /v1/status", s.statusHandler},
 		{"DELETE /v1/data", s.eraseHandler},
 		{"POST /v1/pair", s.pair},
@@ -220,13 +225,17 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 
 	resp := Response{Received: len(items), Stored: added, Duplicates: len(items) - added, Deletions: len(b.Deletions),
 		Records: len(b.Records), Version: WireVersion}
+	trigger := b.trigger()
 	s.mu.Lock()
 	s.lastUpload = time.Now()
+	if s.lastBatch == nil {
+		s.lastBatch = map[string]time.Time{}
+	}
+	s.lastBatch[trigger] = s.lastUpload
 	s.mu.Unlock()
 	s.count("ok")
 	s.add("stored", int64(added))
 	s.add("duplicates", int64(resp.Duplicates))
-	trigger := b.trigger()
 	s.add("batches_"+trigger, 1)
 	log.Printf("batch v%d: %d samples, %d records, %d deletions, %d stored, %d duplicates, trigger %s, app %s",
 		v, len(b.Samples), len(b.Records), len(b.Deletions), added, resp.Duplicates, trigger, b.appState())
@@ -305,6 +314,21 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "# HELP healthkit_relay_last_upload_timestamp_seconds Unix time of the last accepted batch (0: none since start).")
 	fmt.Fprintln(w, "# TYPE healthkit_relay_last_upload_timestamp_seconds gauge")
 	fmt.Fprintf(w, "healthkit_relay_last_upload_timestamp_seconds %d\n", unixOrZero(s.lastUpload))
+	fmt.Fprintln(w, "# HELP healthkit_relay_last_batch_timestamp_seconds Unix time of the last accepted batch, by what started the app's sync (0: none since start).")
+	fmt.Fprintln(w, "# TYPE healthkit_relay_last_batch_timestamp_seconds gauge")
+	for _, t := range Triggers {
+		fmt.Fprintf(w, "healthkit_relay_last_batch_timestamp_seconds{trigger=%q} %d\n", t, unixOrZero(s.lastBatch[t]))
+	}
+	fmt.Fprintln(w, "# HELP healthkit_relay_heartbeats_total Heartbeats from the app (0.6.2+): one per background run, also when it could not read Health or upload, by what woke it.")
+	fmt.Fprintln(w, "# TYPE healthkit_relay_heartbeats_total counter")
+	for _, t := range Triggers {
+		fmt.Fprintf(w, "healthkit_relay_heartbeats_total{trigger=%q} %d\n", t, s.stats["heartbeats_"+t])
+	}
+	fmt.Fprintln(w, "# HELP healthkit_relay_last_heartbeat_timestamp_seconds Unix time of the app's last heartbeat, by what woke it (0: none since start).")
+	fmt.Fprintln(w, "# TYPE healthkit_relay_last_heartbeat_timestamp_seconds gauge")
+	for _, t := range Triggers {
+		fmt.Fprintf(w, "healthkit_relay_last_heartbeat_timestamp_seconds{trigger=%q} %d\n", t, unixOrZero(s.lastHeartbeat[t]))
+	}
 }
 
 func unixOrZero(t time.Time) int64 {

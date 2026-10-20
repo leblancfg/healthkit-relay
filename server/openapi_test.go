@@ -18,7 +18,7 @@ import (
 // Routes the OpenAPI document leaves out on purpose: the app's upload and pairing API
 // (server/README.md), the setup page, health and metrics, and the docs page itself.
 var undocumented = map[string]bool{
-	"GET /healthz": true, "GET /metrics": true, "POST /v1/samples": true, "GET /v1/status": true,
+	"GET /healthz": true, "GET /metrics": true, "POST /v1/samples": true, "POST /v1/heartbeat": true, "GET /v1/status": true,
 	"DELETE /v1/data": true, "POST /v1/pair": true, "POST /v1/pairing-codes": true,
 	"GET /setup": true, "POST /setup": true, "POST /setup/revoke": true, "POST /setup/tokens": true,
 	"GET /setup/status": true, "GET /{$}": true, "GET /docs": true, "GET /docs/{file}": true,

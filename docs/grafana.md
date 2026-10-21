@@ -146,5 +146,5 @@ Useful alerts:
 Whether the phone syncs in the background at all shows in:
 
 ```promql
-sum by (trigger) (increase(healthkit_relay_batches_total{trigger=~"observer|refresh|unlock|retry"}[1d]))
+sum by (trigger) (increase(healthkit_relay_batches_total{trigger!~"foreground|unknown"}[1d]))
 ```

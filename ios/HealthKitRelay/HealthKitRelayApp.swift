@@ -27,8 +27,28 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // types saved when they were asked for. HealthKit's answers are added once it can be
         // read (the phone may be locked now).
         SyncEngine.shared.observeAtLaunch()
-        RefreshTask.register()
-        RefreshTask.schedule()
+        ScheduledTask.registerAll()
+        ScheduledTask.scheduleAll()
+        // Uploads left under way by an earlier process report to this one.
+        BackgroundUploads.shared.start { moved, items in
+            await MainActor.run {
+                let work = Task { await SyncEngine.shared.uploadsFinished(moved: moved, items: items) }
+                let task = BackgroundTask.begin("sync after uploads") {
+                    work.cancel()
+                    SyncEngine.shared.backgroundTimeOver()
+                }
+                Task {
+                    await work.value
+                    task.end()
+                }
+            }
+        }
+        // Only while the app runs: a network change never wakes it.
+        NetworkStatus.shared.start {
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { Self.networkBack() }
+            }
+        }
         Task { await SyncEngine.shared.startObserving() }
         NotificationCenter.default.addObserver(
             forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: .main
@@ -49,8 +69,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
         ) { _ in
-            Log.info("app: in the background")
-            RefreshTask.schedule()
+            MainActor.assumeIsolated {
+                Log.info("app: in the background")
+                ScheduledTask.scheduleAll()
+                Self.leftApp()
+            }
         }
         // When iOS wakes the app depends on these: logged when they change while the app runs,
         // so the log shows what the phone was doing between wakes.
@@ -78,5 +101,53 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             }
         }
         return true
+    }
+
+    /// The system woke (or kept) the app for the upload session: its uploads finished.
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        guard identifier == BackgroundUploads.identifier else {
+            completionHandler()
+            return
+        }
+        Log.info("app: woken for finished uploads, \(AppState.now.description), \(PowerState.now.description)")
+        BackgroundUploads.shared.relaunched(completionHandler)
+    }
+
+    /// The user left the app: one more sync in the time iOS gives now (about 30 seconds), so
+    /// what came in while it was open is sent; an upload under way when that time ends goes on
+    /// in the system (BackgroundUploads).
+    @MainActor
+    private static func leftApp() {
+        let app = UIApplication.shared
+        guard AppModel.shared.isConfigured, !AppModel.shared.needsHealthAccess, app.isProtectedDataAvailable else { return }
+        let work = Task { await SyncEngine.shared.syncAll(trigger: .backgrounded, allAux: false) }
+        let task = BackgroundTask.begin("sync on leaving") {
+            work.cancel()
+            SyncEngine.shared.backgroundTimeOver()
+        }
+        Task {
+            await work.value
+            task.end()
+        }
+    }
+
+    /// The network came back while the app runs: a sync owed after a failure runs now.
+    @MainActor
+    private static func networkBack() {
+        guard AppModel.shared.isConfigured, UIApplication.shared.isProtectedDataAvailable else { return }
+        let work = Task {
+            guard await SyncEngine.shared.pending == .failed else { return }
+            Log.info("app: network back; syncing what failed")
+            await SyncEngine.shared.dataBecameAvailable(.retry)
+        }
+        let task = BackgroundTask.begin("sync after network change") {
+            work.cancel()
+            SyncEngine.shared.backgroundTimeOver()
+        }
+        Task {
+            await work.value
+            task.end()
+        }
     }
 }

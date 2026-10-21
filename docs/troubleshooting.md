@@ -190,7 +190,10 @@ on that iPhone.
 samples.
 
 **What to do.** Keep the app open and the phone unlocked and charging. If the sync stops, it
-continues where it stopped.
+continues where it stopped. On iOS 26 and later, a first sync, or a **Sync Now** after hours
+without a sync, also goes on when you switch to another app: iOS shows its progress in a Live
+Activity, where you can stop it. Locking the iPhone pauses it, since Health data is locked
+then; it goes on after you unlock.
 
 **Check.** The app shows **Up to date**.
 
@@ -198,11 +201,14 @@ continues where it stopped.
 
 **What you see.** The app syncs when you open it, and at no other time.
 
-**Why.** iOS decides when to wake the app, about hourly at best. Low Power Mode, closing the
-app from the app switcher, and Background App Refresh turned off all stop it. Health data
-can be read only while the iPhone is unlocked: a wake while it is locked sends nothing, and
-the app syncs at its next wake after an unlock. With Tailscale, the iPhone reaches the
-server in the background only with VPN On Demand.
+**Why.** Health Relay syncs in the background several times a day; open the app to sync
+right away. iOS decides when to wake the app: after new Health data arrives, at its
+background app refresh, while the iPhone charges, and for about 30 seconds after you leave
+the app. Low Power Mode, closing the app from the app switcher, and Background App Refresh
+turned off all hold these wakes back. iPhone keeps Health data locked while the phone is
+locked, so a wake while it is locked sends nothing new: it notes a sync as owed, and the
+first wake after an unlock (or opening the app) sends everything since. With Tailscale, the
+iPhone reaches the server in the background only with VPN On Demand.
 
 **What to do.**
 
@@ -223,6 +229,12 @@ wake, even when it could read or send nothing. The server logs one line per hear
 heartbeat: device eae02a2e, app 0.6.4 (11), trigger refresh, background, protected data unavailable, outcome locked, on battery, 0 uploaded in 0.2s, 28s background time left, owes a sync (locked), process 5h0m0s old; wakes: observer 3 (last 10-20 08:12:40), refresh 5 (last 10-20 13:05:11)
 ```
 
+- The trigger says what woke the app: `observer` (new Health data), `refresh` (background
+  app refresh), `processing` (the processing task while charging), `urlsession` (an upload
+  left under way finished, from app 0.7.0), `unlock` (the first unlock after a skipped
+  sync), `backgrounded` (you left the app), `continued` (a sync you started that went on
+  outside the app, iOS 26) and `retry` (after a failure). Server 0.7.0 counts each under
+  its own name; older servers count the new ones as `unknown`.
 - `protected data unavailable` and `outcome locked`: the iPhone was locked; the sync waits
   for a wake after an unlock.
 - `plugged in` or `on battery`, then `low power mode` and `background app refresh denied`

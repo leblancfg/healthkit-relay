@@ -41,9 +41,12 @@ while: keep the app open until it is done.
 - **Records on server** counts the records the server holds.
 - The card with your server address shows **Connected as** and your iPhone's name.
 
-After that, iOS wakes the app in the background as new data arrives, about every hour. Low
-Power Mode, and swiping the app away in the app switcher, pause these background syncs.
-**Sync Now**, or pulling down on the main screen, syncs at once.
+After that, Health Relay syncs in the background several times a day; open the app to sync
+right away. iPhone keeps Health data locked while the phone is locked, so background syncs
+happen after you unlock it. Low Power Mode, and swiping the app away in the app switcher,
+hold them back until you open the app. **Sync Now**, or pulling down on the main screen,
+syncs at once; on iOS 26 and later, a long sync started this way goes on when you leave the
+app, and iOS shows its progress in a Live Activity, where you can also stop it.
 
 ## From the terminal
 

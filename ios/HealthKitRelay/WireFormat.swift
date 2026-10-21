@@ -40,6 +40,26 @@ struct WireBatch {
     var count: Int { items.count }
     var recordCount: Int { items.filter { $0.section == .record }.count }
 
+    /// Cuts `items` into batches, in order, of at most `maxBytes` and `maxItems` each (an item
+    /// larger than `maxBytes` goes alone). Sent in this order, the records encoded before
+    /// their sample reach the server first.
+    static func split(_ items: [WireItem], maxBytes: Int, maxItems: Int) -> [[WireItem]] {
+        var out: [[WireItem]] = []
+        var batch: [WireItem] = []
+        var bytes = 0
+        for item in items {
+            if !batch.isEmpty && (bytes + item.data.count > maxBytes || batch.count >= maxItems) {
+                out.append(batch)
+                batch = []
+                bytes = 0
+            }
+            batch.append(item)
+            bytes += item.data.count + 1
+        }
+        if !batch.isEmpty { out.append(batch) }
+        return out
+    }
+
     /// Assembles the body from pre-encoded items: no second encoding pass.
     func body() throws -> Data {
         var out = Data("{\"version\":\(Wire.version),\"device\":".utf8)

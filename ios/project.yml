@@ -14,8 +14,8 @@ configFiles:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.6.4"
-    CURRENT_PROJECT_VERSION: "11"
+    MARKETING_VERSION: "0.7.0"
+    CURRENT_PROJECT_VERSION: "12"
 targets:
   HealthKitRelay:
     type: application
@@ -49,9 +49,14 @@ targets:
         # local addresses (IPs, .local and single-label names) only.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-        # Background app refresh (RefreshTask), a fallback for HealthKit background delivery.
-        UIBackgroundModes: [fetch]
-        BGTaskSchedulerPermittedIdentifiers: [$(PRODUCT_BUNDLE_IDENTIFIER).refresh]
+        # Background app refresh (fetch) and the catch-up while charging (processing), fallbacks
+        # for HealthKit background delivery (ScheduledTask); continued syncs the user started
+        # (iOS 26, ContinuedSync) use identifiers under .continued.*.
+        UIBackgroundModes: [fetch, processing]
+        BGTaskSchedulerPermittedIdentifiers:
+          - $(PRODUCT_BUNDLE_IDENTIFIER).refresh
+          - $(PRODUCT_BUNDLE_IDENTIFIER).catchup
+          - $(PRODUCT_BUNDLE_IDENTIFIER).continued.*
         UIApplicationSupportsIndirectInputEvents: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSHealthShareUsageDescription: Health Relay reads your Health data and copies it to your own server.

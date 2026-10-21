@@ -3,9 +3,12 @@ import Foundation
 import HealthKit
 import UIKit
 
-// Syncing while the app is closed. Three ways in: HealthKit background delivery (an observer
-// query per type wakes the app when new data is saved), a background app refresh about
-// hourly, and the first unlock after a sync was skipped because the phone was locked.
+// Syncing while the app is closed. Every way iOS offers in: HealthKit background delivery (an
+// observer query per type wakes the app when new data is saved), the background app refresh,
+// a processing task while the iPhone charges, the background URLSession waking the app when an
+// upload left under way finishes, the first unlock after a sync was skipped because the phone
+// was locked, and a sync when the user leaves the app. iOS decides when each runs; Health can be
+// read only while the iPhone is unlocked.
 
 /// What started a sync. Every batch says it ("trigger"), so the server can tell background
 /// syncs from the ones an open app ran.
@@ -20,6 +23,14 @@ enum SyncTrigger: String, Sendable {
     case unlock
     /// A sync again after one failed (server unreachable, out of background time).
     case retry
+    /// The processing task (ScheduledTask.catchUp), while the iPhone charges.
+    case processing
+    /// The system woke the app for uploads that finished after their sync (BackgroundUploads).
+    case urlsession
+    /// The user left the app: a last sync in the time iOS gives then.
+    case backgrounded
+    /// A sync the user started that goes on after they leave the app (ContinuedSync, iOS 26).
+    case continued
 
     /// The trigger of the sync the current task belongs to; tasks a sync starts inherit it.
     @TaskLocal static var current: SyncTrigger = .foreground
@@ -241,51 +252,163 @@ private final class Failures: @unchecked Sendable {
     }
 }
 
-/// The background app refresh: about hourly when iOS allows it, a full incremental sync, a
-/// safety net for when HealthKit does not wake the app.
-enum RefreshTask {
-    static var identifier: String { (Bundle.main.bundleIdentifier ?? "org.example.healthkitrelay") + ".refresh" }
-    static let interval: TimeInterval = 60 * 60
+/// The tasks iOS runs on its own schedule, a safety net for when HealthKit does not wake the
+/// app: the background app refresh (`refresh`: short, asked for 15 minutes ahead, run when iOS
+/// sees fit) and a catch-up (`catchUp`: a processing task, only on external power with a
+/// network, while the iPhone is idle, which usually means locked, so it mostly finds Health
+/// unreadable and leaves the sync owed for the unlock). Each identifier has at most one request
+/// pending; one is asked for at launch, after each sync, when the app goes to the background
+/// and after each run.
+enum ScheduledTask: String, CaseIterable, Sendable {
+    case refresh
+    case catchUp = "catchup"
+
+    var identifier: String { (Bundle.main.bundleIdentifier ?? "org.example.healthkitrelay") + "." + rawValue }
+    var trigger: SyncTrigger { self == .refresh ? .refresh : .processing }
+    var interval: TimeInterval { self == .refresh ? 15 * 60 : 60 * 60 }
+
+    func request() -> BGTaskRequest {
+        let request: BGTaskRequest
+        switch self {
+        case .refresh:
+            request = BGAppRefreshTaskRequest(identifier: identifier)
+        case .catchUp:
+            let r = BGProcessingTaskRequest(identifier: identifier)
+            r.requiresExternalPower = true
+            r.requiresNetworkConnectivity = true
+            request = r
+        }
+        request.earliestBeginDate = Date(timeIntervalSinceNow: interval)
+        return request
+    }
 
     /// Must run before the app finishes launching.
-    static func register() {
-        let ok = BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil) { task in
-            guard let task = task as? BGAppRefreshTask else {
-                task.setTaskCompleted(success: false)
-                return
-            }
-            run(task)
+    static func registerAll() {
+        for kind in allCases {
+            let ok = BGTaskScheduler.shared.register(forTaskWithIdentifier: kind.identifier, using: nil) { task in kind.run(task) }
+            if !ok { Log.error("\(kind.trigger.rawValue): \(kind.identifier) not registered: missing from BGTaskSchedulerPermittedIdentifiers?") }
         }
-        if !ok { Log.error("refresh: \(identifier) not registered: missing from BGTaskSchedulerPermittedIdentifiers?") }
     }
 
-    /// Asks for a run in about an hour, unless one is asked for already (`replacing` asks anew:
-    /// a launch must not keep pushing the next run back).
-    static func schedule(replacing: Bool = false) {
+    /// Asks for a run of each kind not asked for yet; `replacing` asks anew (after its run). A
+    /// request already pending is kept: asking again would push it back.
+    static func scheduleAll(replacing: ScheduledTask? = nil) {
         BGTaskScheduler.shared.getPendingTaskRequests { requests in
-            if !replacing, requests.contains(where: { $0.identifier == identifier }) { return }
-            let request = BGAppRefreshTaskRequest(identifier: identifier)
-            request.earliestBeginDate = Date(timeIntervalSinceNow: interval)
-            do {
-                try BGTaskScheduler.shared.submit(request)
-            } catch {
-                Log.info("refresh: could not schedule: \(error.localizedDescription)")
+            let pending = Set(requests.map(\.identifier))
+            for kind in allCases where kind == replacing || !pending.contains(kind.identifier) {
+                do {
+                    try BGTaskScheduler.shared.submit(kind.request())
+                } catch {
+                    Log.info("\(kind.trigger.rawValue): could not schedule: \(error.localizedDescription)")
+                }
             }
         }
     }
 
-    private static func run(_ task: BGAppRefreshTask) {
-        schedule(replacing: true)
+    private func run(_ task: BGTask) {
+        Self.scheduleAll(replacing: self)
         let finish = RefreshCompletion(task)
-        let work = Task { await SyncEngine.shared.backgroundRefresh() }
+        let trigger = trigger
+        let work = Task { await SyncEngine.shared.backgroundRun(trigger) }
         task.expirationHandler = {
-            Log.info("refresh: out of background time; the rest syncs next time")
+            Log.info("\(trigger.rawValue): out of background time; the rest syncs next time")
             work.cancel()
             SyncEngine.shared.backgroundTimeOver()
             finish.complete(false)
         }
         Task { finish.complete(await work.value) }
     }
+}
+
+/// A sync the user started (the first sync, Sync Now after a while) that may go on after they
+/// leave the app: a BGContinuedProcessingTask (iOS 26), whose progress iOS shows in a Live
+/// Activity, where the user can also stop it. Submitted from the user's tap only, as Apple
+/// asks; iOS may refuse it (system load), and the sync then runs as usual while the app is
+/// open. Health is readable only while the iPhone is unlocked: a lock ends it, owed for the
+/// unlock.
+@available(iOS 26.0, *)
+enum ContinuedSync {
+    /// BGTaskSchedulerPermittedIdentifiers lists the prefix with ".*".
+    static var prefix: String { (Bundle.main.bundleIdentifier ?? "org.example.healthkitrelay") + ".continued." }
+    static let title = "Syncing Health data"
+
+    /// Registers a handler for a new identifier (each is registered once) and submits it.
+    @MainActor
+    static func start() {
+        let id = prefix + "sync-" + UUID().uuidString.prefix(8)
+        let ok = BGTaskScheduler.shared.register(forTaskWithIdentifier: id, using: nil) { task in
+            guard let task = task as? BGContinuedProcessingTask else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            run(task)
+        }
+        guard ok else {
+            Log.error("continued: \(id) not registered: missing from BGTaskSchedulerPermittedIdentifiers?")
+            return
+        }
+        let request = BGContinuedProcessingTaskRequest(identifier: id, title: title, subtitle: "Starting")
+        request.strategy = .fail
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            Log.info("continued: asked iOS to keep the sync going outside the app")
+        } catch {
+            Log.info("continued: iOS will not keep the sync going outside the app now: \(error.localizedDescription)")
+        }
+    }
+
+    private static func run(_ task: BGContinuedProcessingTask) {
+        Log.info("continued: started")
+        let engine = SyncEngine.shared
+        engine.continued.begin()
+        let release = CompletionOnce { engine.continued.end() }
+        let finish = RefreshCompletion(task)
+        let progress = task.progress
+        progress.totalUnitCount = 1000
+        let work = Task {
+            await engine.syncAll(trigger: .continued)
+            return await !engine.lastSyncFailed
+        }
+        // Progress from the sync's, once a second: iOS ends a task that shows none.
+        let ticker = Task { @MainActor in
+            var shown = ""
+            while !Task.isCancelled {
+                let status = SyncStatus.shared
+                progress.completedUnitCount = max(progress.completedUnitCount, Int64((status.progress ?? 0) * 1000))
+                if !status.detail.isEmpty, status.detail != shown {
+                    shown = status.detail
+                    task.updateTitle(title, subtitle: shown)
+                }
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        task.expirationHandler = {
+            Log.info("continued: ended by iOS or the user; the rest syncs next time")
+            ticker.cancel()
+            work.cancel()
+            release.call()
+            engine.backgroundTimeOver(force: true)
+            finish.complete(false)
+        }
+        Task {
+            let ok = await work.value
+            ticker.cancel()
+            progress.completedUnitCount = progress.totalUnitCount
+            release.call()
+            Log.info("continued: done")
+            finish.complete(ok)
+        }
+    }
+}
+
+/// How many of something are running, from any thread.
+final class RunningCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    func begin() { lock.withLock { count += 1 } }
+    func end() { lock.withLock { count = max(0, count - 1) } }
+    var isSet: Bool { lock.withLock { count > 0 } }
 }
 
 /// Completes a background task exactly once: when its work ends or when iOS expires it.

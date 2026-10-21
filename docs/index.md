@@ -46,8 +46,9 @@ flowchart LR
   TSDB --> GRAF[Grafana]
 ```
 
-1. The app watches every HealthKit type and asks iOS to wake it when new data lands, about
-   every hour. Each sync sends only what changed since the last upload the server confirmed.
+1. The app watches every HealthKit type and syncs in the background several times a day, when
+   iOS wakes it; open the app to sync right away. Each sync sends only what changed since the
+   last upload the server confirmed.
 2. The server stores each batch whole and answers once it is on disk. The app moves on only
    then, so a batch sent twice is stored once.
 3. If you set up a time-series database, the server forwards numeric samples to it, such as

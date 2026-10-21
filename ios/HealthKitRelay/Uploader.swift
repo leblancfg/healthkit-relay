@@ -18,36 +18,56 @@ enum UploadError: LocalizedError {
     }
 }
 
-/// Posts batches with retry and exponential backoff.
+/// Posts batches with retry and exponential backoff. Batches go through the background
+/// session (BackgroundUploads), heartbeats through `session`.
 struct Uploader: Sendable {
     var settings: ServerSettings
     var maxAttempts = 5
     var session: URLSession = .shared
+    var transport: UploadTransport = BackgroundUploads.shared
+    /// The first retry's delay; each next one doubles it.
+    var backoff: Double = 1
 
-    func upload(_ batch: WireBatch) async throws {
+    /// Whether an answer confirms a batch with `records` records: 2xx, and a server that knows
+    /// records (a v1 server ignores them silently: never advance past data it dropped).
+    static func confirms(_ code: Int, _ answer: Data, records: Int) -> Bool {
+        guard (200..<300).contains(code) else { return false }
+        guard records > 0 else { return true }
+        let body = try? JSONSerialization.jsonObject(with: answer) as? [String: Any]
+        return body?["records"] != nil
+    }
+
+    /// Sends `batch`. `commit` is the sync position the batch completes, applied by
+    /// BackgroundUploads if the upload finishes after the sync waiting for it is gone.
+    func upload(_ batch: WireBatch, commit: UploadCommit? = nil) async throws {
         guard settings.isComplete, let url = settings.endpoint else { throw UploadError.notConfigured }
         var request = URLRequest(url: url, timeoutInterval: 120)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(settings.token)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try batch.body()
+        let body = try batch.body()
+        let upload = PendingUpload(records: batch.recordCount, items: batch.count, commit: commit)
 
         var lastError = UploadError.failed("no attempt")
+        var direct = false
         for attempt in 0..<maxAttempts {
             if attempt > 0 {
                 // 1, 2, 4, 8 s, plus up to 50% jitter.
-                let delay = pow(2, Double(attempt - 1)) * Double.random(in: 1...1.5)
+                let delay = backoff * pow(2, Double(attempt - 1)) * Double.random(in: 1...1.5)
                 try await Task.sleep(for: .seconds(delay))
             }
             do {
-                let (data, response) = try await session.data(for: request)
-                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                var (code, data) = try await transport.send(request, body: body, upload: upload, direct: direct)
+                if (200..<300).contains(code), data.isEmpty, batch.recordCount > 0, !direct {
+                    // A background session may leave out the answer's body: to know whether the
+                    // server kept the records, the batch goes again through a standard session
+                    // (the server keeps it once).
+                    Log.info("upload: accepted without an answer; sending once more to read it")
+                    direct = true
+                    (code, data) = try await transport.send(request, body: body, upload: upload, direct: true)
+                }
                 if (200..<300).contains(code) {
-                    // A v1 server ignores "records" silently: never advance past data it dropped.
-                    if batch.recordCount > 0 {
-                        let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-                        guard body?["records"] != nil else { throw UploadError.serverTooOld }
-                    }
+                    guard Self.confirms(code, data, records: batch.recordCount) else { throw UploadError.serverTooOld }
                     return
                 }
                 let msg = String(decoding: data.prefix(300), as: UTF8.self)

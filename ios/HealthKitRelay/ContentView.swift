@@ -115,7 +115,7 @@ struct HomeView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                 }
-                Text("Health Relay syncs in the background as new Health data arrives. To sync at once, pull down.")
+                Text("Health Relay syncs in the background several times a day; open the app, or pull down, to sync right away. iPhone keeps Health data locked while the phone is locked, so these syncs happen after you unlock it.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -124,7 +124,7 @@ struct HomeView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
         }
-        .refreshable { await model.sync() }
+        .refreshable { await model.sync(userInitiated: true) }
         .safeAreaInset(edge: .bottom) { syncButton }
     }
 
@@ -234,7 +234,7 @@ struct HomeView: View {
                 .accessibilityIdentifier("health.continue")
             } else {
                 Button {
-                    Task { await model.sync() }
+                    Task { await model.sync(userInitiated: true) }
                 } label: {
                     Label(status.running ? "Syncing…" : "Sync Now", systemImage: "arrow.triangle.2.circlepath")
                         .font(.headline)
@@ -281,7 +281,7 @@ struct WelcomeView: View {
                 VStack(alignment: .leading, spacing: 22) {
                     step(1, "Open your server's setup page", "On a computer, open the server address followed by /setup, for example http://192.168.1.10:8080/setup. Sign in with the admin token.")
                     step(2, "Scan the setup code with the Camera", "Point the iPhone's Camera at the QR code on the page, then tap Open in Health Relay.")
-                    step(3, "Allow Health access", "Health Relay then copies your Health data, and keeps syncing in the background.")
+                    step(3, "Allow Health access", "Health Relay then copies your Health data, and syncs in the background several times a day.")
                 }
                 .padding(22)
                 .frame(maxWidth: .infinity, alignment: .leading)

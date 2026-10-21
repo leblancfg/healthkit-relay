@@ -89,8 +89,12 @@ final class BackgroundUploads: NSObject, UploadTransport, URLSessionDataDelegate
     static let shared = BackgroundUploads()
     static var identifier: String { (Bundle.main.bundleIdentifier ?? "org.example.healthkitrelay") + ".uploads" }
     /// The longest a running sync waits for one upload; then it cancels it and retries. A
-    /// background session waits for a network rather than fail.
+    /// background session waits for a network (or a server that is down) rather than fail.
     static let timeout: Duration = .seconds(150)
+    /// An upload that has sent nothing after this is cancelled, and uploads go through a
+    /// standard session (which fails at once when the server is down) for `directFor`.
+    static let connectTimeout: Duration = .seconds(20)
+    static let directFor: TimeInterval = 10 * 60
     private static let maxAnswer = 64 << 10
 
     let store: UploadStore
@@ -109,6 +113,7 @@ final class BackgroundUploads: NSObject, UploadTransport, URLSessionDataDelegate
     private var relaunchDone: (() -> Void)?
     private var eventsDelivered = false
     private var onRelaunch: (@Sendable (_ moved: Int, _ items: Int) async -> Void)?
+    private var directUntil = Date.distantPast
 
     init(identifier: String = BackgroundUploads.identifier, store: UploadStore = UploadStore(),
          commit: @escaping @Sendable (UploadCommit) async -> Bool = BackgroundUploads.commitInEngine) {
@@ -164,7 +169,8 @@ final class BackgroundUploads: NSObject, UploadTransport, URLSessionDataDelegate
         guard NetworkStatus.shared.isOnline else { throw UploadError.failed("no network connection") }
         let id = try store.save(body, upload)
         let onScreen = await MainActor.run { UIApplication.shared.applicationState == .active }
-        return try await (onScreen && !direct ? inSession(id, request) : now(id, request))
+        let session = onScreen && !direct && lock.withLock { Date.now >= directUntil }
+        return try await (session ? inSession(id, request) : now(id, request))
     }
 
     /// Through a standard session; handed to the background session if cut short.
@@ -202,10 +208,19 @@ final class BackgroundUploads: NSObject, UploadTransport, URLSessionDataDelegate
         let task = urlSession.uploadTask(with: request, fromFile: store.bodyURL(id))
         task.taskDescription = id
         let timer = Task { [weak self, weak task] in
-            try? await Task.sleep(for: Self.timeout)
-            guard !Task.isCancelled, self?.isWaiting(id) == true else { return }
+            try? await Task.sleep(for: Self.connectTimeout)
+            guard !Task.isCancelled, let self, self.isWaiting(id), let task else { return }
+            if task.countOfBytesSent == 0 {
+                Log.info("upload: nothing sent after \(Self.connectTimeout) through the background session; "
+                    + "sending through a standard session for \(Int(Self.directFor / 60)) minutes")
+                self.lock.withLock { self.directUntil = Date.now.addingTimeInterval(Self.directFor) }
+                task.cancel()
+                return
+            }
+            try? await Task.sleep(for: Self.timeout - Self.connectTimeout)
+            guard !Task.isCancelled, self.isWaiting(id) else { return }
             Log.info("upload: no answer after \(Self.timeout), trying again")
-            task?.cancel()
+            task.cancel()
         }
         defer { timer.cancel() }
         return try await withTaskCancellationHandler {

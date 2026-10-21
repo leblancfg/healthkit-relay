@@ -64,7 +64,10 @@ final class SetupFlowUITests: XCTestCase {
             }
             guard confirm.waitForExistence(timeout: 5) else { break }
             var swipes = 0
-            while swipes < 60 && confirm.exists && !confirm.isHittable {
+            // On screen by its frame: isHittable can raise for a button far down Health's list
+            // ("Activation point invalid").
+            let screen = app.windows.firstMatch.frame
+            while swipes < 60 && confirm.exists && !(screen.contains(CGPoint(x: confirm.frame.midX, y: confirm.frame.midY))) {
                 app.swipeUp(velocity: .fast)
                 swipes += 1
             }

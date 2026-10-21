@@ -83,6 +83,9 @@ struct Uploader: Sendable {
                 throw CancellationError()
             } catch {
                 lastError = .failed(error.localizedDescription)
+                // Retries go out at once, through a standard session: a background session
+                // may hold a transfer back.
+                direct = true
             }
         }
         throw lastError

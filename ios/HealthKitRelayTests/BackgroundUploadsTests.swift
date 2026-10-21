@@ -223,6 +223,7 @@ final class BackgroundUploadsTests: XCTestCase {
         XCTAssertEqual(t.sent.count, 3)
         XCTAssertEqual(t.sent.map(\.upload), Array(repeating: PendingUpload(records: 1, items: 2, commit: commit), count: 3))
         XCTAssertEqual(t.sent.first?.body, try b.body())
+        XCTAssertEqual(t.sent.map(\.direct), [false, false, true], "after a failed transfer, retries go out directly")
     }
 
     func testAnswerWithoutBodyIsReadAgainDirectly() async throws {

@@ -119,7 +119,7 @@ final class AppModel: ObservableObject {
         // Health access comes next (one tap on the main screen, which says what to pick);
         // with access already granted, syncing starts now.
         await refreshHealthAccess()
-        if !needsHealthAccess { Task { await self.sync() } }
+        if !needsHealthAccess { Task { await self.sync(userInitiated: true) } }
     }
 
     private func pairAndSave(url: String, host: String, token: String?,
@@ -211,6 +211,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// A sync likely to take minutes: the first, one after the positions were reset, or one
+    /// after `Self.longAfter` without a sync.
+    static let longAfter: TimeInterval = 6 * 60 * 60
+
+    private func isLongSync() async -> Bool {
+        guard let last = SyncStatus.shared.lastSuccess, await SyncEngine.shared.hasHistory else { return true }
+        return Date.now.timeIntervalSince(last) > Self.longAfter
+    }
+
     func refreshHealthAccess() async {
         guard SyncEngine.isAvailable else { return }
         needsHealthAccess = await SyncEngine.shared.needsAuthorization()
@@ -230,16 +239,20 @@ final class AppModel: ObservableObject {
         }
         askingHealth = false
         await refreshHealthAccess()
-        await sync()
+        await sync(userInitiated: true)
     }
 
     /// Syncs, or joins the sync running (a HealthKit wake, an unlock): one sync on screen.
-    func sync() async {
+    /// `userInitiated`: a tap (Sync Now, pulling down, Allow Health access). A long sync the
+    /// user started may go on after they leave the app (iOS 26, see ContinuedSync).
+    func sync(userInitiated: Bool = false) async {
         guard isConfigured, !askingHealth else { return }
         // A first sync can take long: keep the phone from locking (and HealthKit from
         // becoming unreadable) while the app is open.
         UIApplication.shared.isIdleTimerDisabled = true
-        await SyncEngine.shared.syncAll()
+        let work = Task { await SyncEngine.shared.syncAll() }
+        if userInitiated, #available(iOS 26.0, *), await isLongSync() { ContinuedSync.start() }
+        await work.value
         UIApplication.shared.isIdleTimerDisabled = false
         if SyncStatus.shared.lastError == UploadError.unauthorized.errorDescription { revoked = true }
         await refreshServer()
@@ -269,7 +282,7 @@ final class AppModel: ObservableObject {
         erasing = false
         Log.info("erase: sync positions reset, sending all history")
         await refreshServer()
-        if let thenSync { await thenSync() } else { await sync() }
+        if let thenSync { await thenSync() } else { await sync(userInitiated: true) }
     }
 
     func refreshServer() async {

@@ -180,8 +180,9 @@ while: keep the app open until it is done.
 - The server log shows a line starting with `batch` for each batch it stores. To follow it,
   run `docker compose logs -f relay`, and press Ctrl+C to stop.
 
-After the first sync, iOS wakes the app in the background as new data arrives, about every
-hour. **Sync Now**, at the bottom of the app, syncs at once.
+After the first sync, Health Relay syncs in the background several times a day; open the app
+to sync right away. iPhone keeps Health data locked while the phone is locked, so background
+syncs happen after you unlock it. **Sync Now**, at the bottom of the app, syncs at once.
 
 ## 6. Next steps
 

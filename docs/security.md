@@ -27,6 +27,9 @@ your iPhone to your server, and only there. Words such as *server address*, *adm
   them out.
 - **Wait for the unlock.** While the phone is locked, iOS keeps HealthKit data encrypted; the
   app syncs after the next unlock.
+- **Hand an upload to iOS.** Each batch is written to a file in the app's own storage
+  (readable after the first unlock since the iPhone started) and sent from there, so iOS can
+  finish an upload after it suspends the app. The file is deleted once the upload is over.
 
 ## Credentials
 

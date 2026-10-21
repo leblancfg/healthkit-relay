@@ -135,10 +135,16 @@ actor SyncEngine {
     /// A full sync still owed, see PendingSync. Also kept here: before the first unlock after
     /// a restart, UserDefaults can neither be read nor written.
     private var pendingInMemory: PendingSync?
+    /// A continued sync (iOS 26) runs: ending background time does not stop the sync.
+    nonisolated let continued = RunningCount()
     /// Every trigger shares one sync at a time; the UI shows it as one.
     nonisolated let sessions = SyncSessions { active in
         DispatchQueue.main.async { MainActor.assumeIsolated { SyncStatus.shared.running = active } }
     }
+    /// The share of the sync's progress the type being read has: each page sent moves the
+    /// progress within it, so a long type still shows progress (a continued sync that shows
+    /// none is ended by iOS).
+    private var progressSpan: (start: Double, width: Double)?
     private var wakeLoggedAt = Date.distantPast
     private var wakesNotLogged = 0
     /// For heartbeats: this process's wakes by trigger, its start, how the last sync ended and
@@ -618,10 +624,12 @@ actor SyncEngine {
 
     /// iOS is about to suspend the app: answer HealthKit and stop the observer sync, which
     /// leaves the rest owed (.failed) for the next wake. Synchronous, from the expiration
-    /// handler: anything later may run only when iOS resumes the app, hours later.
-    nonisolated func backgroundTimeOver() {
+    /// handler: anything later may run only when iOS resumes the app, hours later. While a
+    /// continued sync runs (ContinuedSync), iOS keeps the app running for it: the sync goes on
+    /// unless `force` (that task itself ends).
+    nonisolated func backgroundTimeOver(force: Bool = false) {
         let answered = observers.answerAll()
-        let stopped = sessions.cancel()
+        let stopped = (force || !continued.isSet) && sessions.cancel()
         if answered > 0 || stopped {
             Log.info("app: background time over: answered \(answered) HealthKit wakes" + (stopped ? ", stopped the sync" : ""))
         }
@@ -697,23 +705,31 @@ actor SyncEngine {
         return true
     }
 
-    /// The background app refresh: a full incremental sync if HealthKit can be read, else
-    /// one owed for the next unlock. Returns whether nothing is left owed.
-    func backgroundRefresh() async -> Bool {
+    /// A task iOS ran on its schedule (`refresh` or `processing`, see ScheduledTask): a full
+    /// incremental sync if HealthKit can be read, else one owed for the next unlock. Returns
+    /// whether nothing is left owed.
+    func backgroundRun(_ trigger: SyncTrigger) async -> Bool {
         let (state, power) = await MainActor.run { (AppState.now, PowerState.now) }
-        Log.info("refresh: woke, \(state.description), \(power.description)")
-        noteWake(.refresh)
+        Log.info("\(trigger.rawValue): woke, \(state.description), \(power.description)")
+        noteWake(trigger)
         let started = Date.now
         guard ServerSettings.load().isComplete else { return true }
         guard state.protectedData else {
             markPending(.locked)
-            await report(.refresh, uploaded: 0, started: started, outcome: "locked", error: "")
+            await report(trigger, uploaded: 0, started: started, outcome: "locked", error: "")
             return true
         }
         await startObserving()
-        await syncAll(trigger: (pending ?? .locked).trigger(.refresh))
+        await syncAll(trigger: (pending ?? .locked).trigger(trigger))
         return pending == nil
     }
+
+    /// Whether the last sync pass ended with an error.
+    var lastSyncFailed: Bool { lastFailure != nil }
+
+    /// Whether any sync position is saved: false before the first sync, and after the
+    /// positions were reset (a new server, Erase and Start Over).
+    var hasHistory: Bool { !anchors.isEmpty }
 
     // MARK: Sync
 
@@ -736,6 +752,7 @@ actor SyncEngine {
 
     /// One heartbeat per session that a background trigger joined.
     private func sessionEnded(_ s: SyncSessions.Summary) async {
+        ScheduledTask.scheduleAll()
         if s.triggers.count > 1 || s.passes > 1 {
             Log.info("sync: one sync for \(s.triggers.map(\.rawValue).joined(separator: ", ")), \(s.passes) passes")
         }
@@ -772,7 +789,9 @@ actor SyncEngine {
                 firstError = CancellationError()
                 break
             }
-            await show(Self.readableName(synced.key), progress: Double(i) / Double(max(1, types.count)))
+            let share = 1 / Double(max(1, types.count))
+            progressSpan = (Double(i) * share, share)
+            await show(Self.readableName(synced.key), progress: Double(i) * share)
             sessions.willSync(synced.key)
             do {
                 total += try await sync(synced)
@@ -783,6 +802,7 @@ actor SyncEngine {
             }
             sessions.didSync(synced.key)
         }
+        progressSpan = nil
         if !Self.isFatal(firstError) {
             do {
                 total += try await exclusive("effort") { try await self.syncEffortRelationships() }
@@ -922,10 +942,12 @@ actor SyncEngine {
         let encoder = SampleEncoder(store: store, units: units)
         let key = type.identifier
         var total = 0
+        var pages = 0
 
         while true {
             try Task.checkCancellation()
-            let previous = anchors.anchor(for: key)
+            let stored = anchors.raw(key, "anchor")
+            let previous = stored.flatMap(AnchorStore.unarchive)
             let page = try await anchoredPage(type, anchor: previous, limit: pageLimit(type))
             if page.samples.isEmpty && page.deleted.isEmpty {
                 // Never anchor a type that has returned nothing yet: if its read access was
@@ -942,12 +964,17 @@ actor SyncEngine {
             for d in page.deleted {
                 items.append(try WireItem(.deletion, WireEncoder.deletion(d, type: type)))
             }
-            try await upload(items, ctx)
-            try anchors.save(page.anchor, for: key)
+            let commit = try anchors.commit(page.anchor, for: key, from: stored)
+            try await upload(items, ctx, commit: commit)
+            // Not moved: an upload a cut-short sync left moved it meanwhile (same page). The
+            // next page starts from there.
+            try anchors.apply(commit)
 
             total += items.count
+            pages += 1
             let shown = total
-            await show("\(Self.readableName(key)) · \(shown.formatted()) sent")
+            await show("\(Self.readableName(key)) · \(shown.formatted()) sent",
+                       progress: progressSpan.map { $0.start + $0.width * (1 - pow(0.9, Double(pages))) })
         }
     }
 
@@ -983,23 +1010,44 @@ actor SyncEngine {
         }
     }
 
-    /// Posts items in order, cut into batches by size. Records come before the sample they
-    /// belong to, so an archived sample always has its series and files.
-    private func upload(_ items: [WireItem], _ ctx: Context) async throws {
-        var batch = WireBatch(device: ctx.device, items: [], trigger: ctx.trigger.rawValue, appState: ctx.appState)
-        var bytes = 0
-        for item in items {
-            if !batch.items.isEmpty && (bytes + item.data.count > maxBatchBytes || batch.count >= maxBatchItems) {
-                try await ctx.uploader.upload(batch)
-                batch.items.removeAll(keepingCapacity: true)
-                bytes = 0
-            }
-            batch.items.append(item)
-            bytes += item.data.count + 1
+    /// Posts items in order, cut into batches by size, one at a time. Records come before the
+    /// sample they belong to, so an archived sample always has its series and files. The last
+    /// batch carries `commit`: if the sync is cut short while it is under way, the upload goes
+    /// on and moves the position once confirmed (see BackgroundUploads); the caller applies it
+    /// when the upload returns.
+    private func upload(_ items: [WireItem], _ ctx: Context, commit: UploadCommit? = nil) async throws {
+        let batches = WireBatch.split(items, maxBytes: maxBatchBytes, maxItems: maxBatchItems)
+        for (i, items) in batches.enumerated() {
+            let batch = WireBatch(device: ctx.device, items: items, trigger: ctx.trigger.rawValue, appState: ctx.appState)
+            try await ctx.uploader.upload(batch, commit: i == batches.count - 1 ? commit : nil)
         }
-        if !batch.items.isEmpty {
-            try await ctx.uploader.upload(batch)
+    }
+
+    /// An upload finished after its sync was gone, confirmed by the server: moves the position
+    /// it carries, unless a later sync moved it already.
+    func commitFinishedUpload(_ commit: UploadCommit) -> Bool {
+        do {
+            let moved = try anchors.apply(commit)
+            if !moved { Log.info("upload: \(Self.shortName(commit.key)) moved on meanwhile; kept") }
+            return moved
+        } catch {
+            Log.error("upload: could not save the position of \(Self.shortName(commit.key)): \(error.localizedDescription)")
+            return false
         }
+    }
+
+    /// The system woke the app for uploads that finished after their sync was cut short: sync
+    /// on from there when Health can be read, else tell the server.
+    func uploadsFinished(moved: Int, items: Int) async {
+        noteWake(.urlsession)
+        let started = Date.now
+        guard ServerSettings.load().isComplete else { return }
+        let state = await MainActor.run { AppState.now }
+        guard state.protectedData else {
+            await report(.urlsession, uploaded: items, started: started, outcome: "locked", error: "")
+            return
+        }
+        await syncAll(trigger: .urlsession, allAux: false)
     }
 
     // MARK: Characteristics, activity summaries, medications, effort relationships
@@ -1121,11 +1169,12 @@ actor SyncEngine {
                 }
             }
             let items = try summaries.map { try WireItem(.record, activitySummary($0, calendar: cal)) }
-            try await upload(items, ctx)
+            let commit = anchors.commit(value: Self.day.string(from: end), for: positionKey)
+            try await upload(items, ctx, commit: commit)
             total += items.count
             // Only move on once something was found: with no access yet, retry from the start.
             if total > 0 || anchors.value(for: positionKey) != nil {
-                try anchors.setValue(Self.day.string(from: end), for: positionKey)
+                try anchors.apply(commit)
             }
             start = cal.date(byAdding: .day, value: 1, to: end) ?? .distantFuture
         }
@@ -1174,7 +1223,8 @@ actor SyncEngine {
         guard req.contains(HKWorkoutTypeIdentifier) else { return 0 }
         let ctx = try await context()
         let key = "effort-relationships"
-        let previous = anchors.anchor(for: key)
+        let stored = anchors.raw(key, "anchor")
+        let previous = stored.flatMap(AnchorStore.unarchive)
         let (relationships, anchor): ([HKWorkoutEffortRelationship], HKQueryAnchor?) = try await withCheckedThrowingContinuation { cont in
             let once = ResumeOnceThrowing(cont)
             let box = QueryBox()
@@ -1197,8 +1247,9 @@ actor SyncEngine {
             o.put("activity_uuid", JSON(r.activity?.uuid.uuidString))
             return try WireItem(.record, .object(o))
         }
-        try await upload(items, ctx)
-        if let anchor, !(previous == nil && items.isEmpty) { try anchors.save(anchor, for: key) }
+        let commit = try anchor.map { try anchors.commit($0, for: key, from: stored) }
+        try await upload(items, ctx, commit: commit)
+        if let commit, !(previous == nil && items.isEmpty) { try anchors.apply(commit) }
         return items.count
     }
 

@@ -22,8 +22,9 @@ every run. That history lives in the Health app on your iPhone. Health Relay cop
 server.
 
 Install the iPhone app and pair it with your server once. From then on, the app sends new
-health data to your server in the background, about every hour. Your whole history, years
-of it, sits in plain files that you can keep, chart, query or delete.
+health data to your server: it syncs in the background several times a day; open the app to
+sync right away. Your whole history, years of it, sits in plain files that you can keep,
+chart, query or delete.
 
 - **Your data stays with you.** It travels from your iPhone straight to your server, and
   stays there.
@@ -60,8 +61,9 @@ sync.
   and food correlations, State of Mind, GAD-7/PHQ-9, medications, vision prescriptions,
   clinical records (FHIR), activity rings and characteristics. Building with a newer Xcode
   adds the types of that iOS version.
-- **Continuous and incremental.** The first sync uploads your whole history. After that, iOS
-  wakes the app in the background when new data lands, about every hour. Deletions sync too.
+- **Continuous and incremental.** The first sync uploads your whole history. After that, the
+  app syncs in the background several times a day; open the app to sync right away.
+  Deletions sync too.
 - **Lossless.** Every sample is stored exactly as sent, with its source, device and metadata,
   plus Apple's own serialized copy (`NSKeyedArchiver`) for most kinds of data.
 - **Each record stored once.** The server stores a batch whole or not at all and skips
@@ -107,11 +109,13 @@ flowchart LR
 ```
 
 1. The app registers a HealthKit observer per data type and asks iOS for background
-   delivery. An anchored query returns what changed since the last confirmed upload: new
-   samples and deletions.
+   delivery, a background app refresh and a processing task while the iPhone charges, and
+   syncs once more when you leave it. iOS picks the moments. An anchored query returns what
+   changed since the last confirmed upload: new samples and deletions.
 2. The app posts batches, retrying with backoff. It moves its position forward only when the
    server confirms the batch is safely on disk, so an interrupted first upload resumes where
-   it stopped.
+   it stopped. An upload still under way when iOS suspends the app finishes in the
+   background, and iOS wakes the app when it is done.
 3. The server skips records it already has, stages the rest and writes them to the archive,
    then forwards numeric samples to your time-series database if you set one up. The
    archive is the source of truth; the time-series database holds a copy of the numbers for
@@ -185,6 +189,19 @@ More in [Security & privacy](https://leblancfg.com/healthkit-relay/security/).
 The built-in export makes one zip of a large XML file, by hand, each time you want new data.
 Health Relay syncs on its own, in the background, a little at a time, deletions included, and
 stores the data by type, ready to query.
+</details>
+
+<details>
+<summary><b>How often does it sync?</b></summary>
+
+Health Relay syncs in the background several times a day; open the app to sync right away.
+iOS picks the moments: soon after new Health data arrives (heart rate, steps, sleep), at its
+background app refresh, while the iPhone charges, and for about 30 seconds after you leave
+the app. iPhone keeps Health data locked while the phone is locked, so these syncs happen
+after you unlock it: a wake while it is locked notes that a sync is owed, and the first one
+after an unlock sends everything since. Low Power Mode, Background App Refresh turned off,
+and swiping the app away in the app switcher hold background syncs back until you open the
+app again.
 </details>
 
 <details>

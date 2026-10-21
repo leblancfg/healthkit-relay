@@ -5,6 +5,32 @@ server releases and the app are versioned separately.
 
 ## Unreleased
 
+### App 0.7.0
+
+- Every background mechanism iOS offers, layered: HealthKit background delivery, the
+  background app refresh (now asked for 15 minutes ahead, and again at launch, after each
+  sync, when the app goes to the background and after each run), and a new processing task
+  that iOS may run while the iPhone charges and has a network. iOS decides when each runs.
+  The processing task usually runs while the iPhone is locked, when Health data is locked
+  too: it then notes a sync as owed for the unlock.
+- Uploads that outlive the app's background time. Each batch is written to a file. With the
+  app on screen it goes through a background URLSession, which iOS finishes even if you
+  leave the app; in the background it goes out at once through a standard session, and the
+  upload under way when the background time ends moves to the background session. When such
+  an upload finishes, iOS wakes the app: the anchor that upload confirms is saved (only if
+  no later sync moved it meanwhile, so positions advance only past data the server
+  confirmed), and the app syncs on if the iPhone is unlocked.
+- Leaving the app runs one more sync, in the time iOS gives then (about 30 seconds).
+- iOS 26 and later: a first sync, or a **Sync Now** after 6 hours without a sync, goes on
+  when you switch to another app. iOS shows its progress in a Live Activity, where you can
+  stop it. Progress moves with every page sent, also within one long data type.
+- While the app runs, a sync that failed runs again as soon as the network comes back.
+- Heartbeats and batches name the new triggers: `processing`, `urlsession`, `backgrounded`
+  and `continued`.
+- The app, README and docs say how often it syncs: in the background several times a day;
+  open the app to sync right away. iPhone keeps Health data locked while the phone is
+  locked, so background syncs happen after an unlock.
+
 ### App 0.6.4
 
 - Heartbeats say whether the iPhone was plugged in or on battery, in Low Power Mode, and
@@ -42,6 +68,10 @@ server releases and the app are versioned separately.
 
 ### Server
 
+- Counts app 0.7.0's triggers under their own names in `healthkit_relay_batches_total`,
+  `healthkit_relay_heartbeats_total` and the last-batch and last-heartbeat timestamps:
+  `processing`, `urlsession`, `backgrounded` and `continued`. Older apps are unaffected; an
+  older server counts these as `unknown`.
 - The heartbeat line says `plugged in` or `on battery`, `low power mode` and `background app
   refresh denied` or `restricted`, from app 0.6.4's heartbeats; older apps' lines are
   unchanged.

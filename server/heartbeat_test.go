@@ -201,3 +201,38 @@ func TestRefusalLogSumsUpQuietOnes(t *testing.T) {
 		t.Errorf("unexpected:\n%s", out)
 	}
 }
+
+// App 0.7.0's triggers are counted under their own names; an older server counted them as
+// "unknown", and older apps send none of them.
+func TestHeartbeatNewTriggers(t *testing.T) {
+	dir := t.TempDir()
+	token, _ := pairedToken(t, dir)
+	ts, _ := newTestServer(t, dir)
+	logs := captureLog(t)
+	for _, trigger := range []string{"processing", "urlsession", "backgrounded", "continued"} {
+		body := `{"trigger":"` + trigger + `","app_state":"background","protected_data":true,"outcome":"ok","app_version":"0.7.0 (12)"}`
+		if resp := send(t, http.MethodPost, ts.URL+"/v1/heartbeat", token, "", body); resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("%s heartbeat: %d", trigger, resp.StatusCode)
+		}
+		if resp, _ := post(t, ts.URL, token, `{"version":2,"trigger":"`+trigger+`","app_state":"background","samples":[]}`); resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s batch: %d", trigger, resp.StatusCode)
+		}
+		if !strings.Contains(logs.String(), "trigger "+trigger+", background") {
+			t.Errorf("log lacks trigger %s:\n%s", trigger, logs.String())
+		}
+	}
+	m := metricsText(t, ts.URL)
+	for _, trigger := range []string{"processing", "urlsession", "backgrounded", "continued"} {
+		for _, want := range []string{
+			`healthkit_relay_heartbeats_total{trigger="` + trigger + `"} 1`,
+			`healthkit_relay_batches_total{trigger="` + trigger + `"} 1`,
+		} {
+			if !strings.Contains(m, want) {
+				t.Errorf("metrics lack %s", want)
+			}
+		}
+	}
+	if !strings.Contains(m, `healthkit_relay_heartbeats_total{trigger="unknown"} 0`) {
+		t.Errorf("new triggers counted as unknown:\n%s", m)
+	}
+}

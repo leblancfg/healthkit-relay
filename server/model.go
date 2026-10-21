@@ -35,10 +35,14 @@ type Batch struct {
 	AppState string `json:"app_state,omitempty"`
 }
 
-// Triggers are the values of Batch.Trigger the server counts. "unknown" counts batches
-// without one (apps before 0.6.1) or with a value not listed here, which keeps the metric's
-// label set fixed.
-var Triggers = []string{"foreground", "observer", "refresh", "unlock", "retry", "unknown"}
+// Triggers are the values of Batch.Trigger (and AppHeartbeat.Trigger) the server counts.
+// "unknown" counts batches without one (apps before 0.6.1) or with a value not listed here,
+// which keeps the metric's label set fixed. App 0.7.0 adds "processing" (the processing task
+// iOS runs while the iPhone charges), "urlsession" (iOS woke the app for uploads that finished
+// after their sync), "backgrounded" (the user left the app) and "continued" (a sync the user
+// started that goes on outside the app, iOS 26).
+var Triggers = []string{"foreground", "observer", "refresh", "unlock", "retry",
+	"processing", "urlsession", "backgrounded", "continued", "unknown"}
 
 func (b *Batch) trigger() string {
 	return knownTrigger(b.Trigger)

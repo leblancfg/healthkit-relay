@@ -29,13 +29,50 @@ struct AnchorStore: Sendable {
     }
 
     func anchor(for key: String) -> HKQueryAnchor? {
-        guard let data = try? Data(contentsOf: file(key, "anchor")) else { return nil }
-        return try? NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: data)
+        raw(key, "anchor").flatMap(Self.unarchive)
+    }
+
+    static func unarchive(_ data: Data) -> HKQueryAnchor? {
+        try? NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: data)
+    }
+
+    static func archive(_ anchor: HKQueryAnchor) throws -> Data {
+        try NSKeyedArchiver.archivedData(withRootObject: anchor, requiringSecureCoding: true)
     }
 
     func save(_ anchor: HKQueryAnchor, for key: String) throws {
-        let data = try NSKeyedArchiver.archivedData(withRootObject: anchor, requiringSecureCoding: true)
-        try data.write(to: file(key, "anchor"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try write(Self.archive(anchor), key, "anchor")
+    }
+
+    /// A position's file as stored, nil when there is none.
+    func raw(_ key: String, _ ext: String) -> Data? {
+        try? Data(contentsOf: file(key, ext))
+    }
+
+    private func write(_ data: Data, _ key: String, _ ext: String) throws {
+        try data.write(to: file(key, ext), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    /// Moving `key` from the anchor it had when the page was read (`previous`, its file) to
+    /// `anchor`, once the server confirmed the page.
+    func commit(_ anchor: HKQueryAnchor, for key: String, from previous: Data?) throws -> UploadCommit {
+        UploadCommit(key: key, ext: "anchor", from: previous, to: try Self.archive(anchor))
+    }
+
+    /// Moving the position `key` (a value, see setValue) from what it is now to `value`.
+    func commit(value: String, for key: String) -> UploadCommit {
+        UploadCommit(key: key, ext: "txt", from: raw(key, "txt"), to: Data(value.utf8))
+    }
+
+    /// Applies `commit` if the position is still the one it started from; returns whether it
+    /// did. An upload that finished after its sync was cut short (see BackgroundUploads) moves
+    /// a position only if no later sync moved it meanwhile: positions never go back past data
+    /// the server confirmed, and never forward past data it did not.
+    @discardableResult
+    func apply(_ commit: UploadCommit) throws -> Bool {
+        guard raw(commit.key, commit.ext) == commit.from else { return false }
+        try write(commit.to, commit.key, commit.ext)
+        return true
     }
 
     func hasAnchor(for key: String) -> Bool {
@@ -47,7 +84,12 @@ struct AnchorStore: Sendable {
     }
 
     func setValue(_ value: String, for key: String) throws {
-        try Data(value.utf8).write(to: file(key, "txt"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try write(Data(value.utf8), key, "txt")
+    }
+
+    /// No position saved yet.
+    var isEmpty: Bool {
+        ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []).isEmpty
     }
 
     /// Forget everything: the next sync re-uploads all history (the server de-duplicates).
@@ -55,4 +97,14 @@ struct AnchorStore: Sendable {
         try? FileManager.default.removeItem(at: directory)
         create()
     }
+}
+
+/// A sync position to move once an upload is confirmed: `key`'s file goes from `from` (nil:
+/// none yet) to `to`. Saved with an upload that may finish in a later process.
+struct UploadCommit: Codable, Equatable, Sendable {
+    var key: String
+    /// "anchor" (an HKQueryAnchor) or "txt" (a value).
+    var ext: String
+    var from: Data?
+    var to: Data
 }

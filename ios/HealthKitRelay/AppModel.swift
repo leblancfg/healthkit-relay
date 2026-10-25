@@ -69,7 +69,7 @@ final class AppModel: ObservableObject {
 
     /// A setup code as shown on the setup page (24 characters of A-Z and 2-7, dashes and spaces
     /// aside); admin tokens are longer and use other characters.
-    static func isSetupCode(_ text: String) -> Bool {
+    nonisolated static func isSetupCode(_ text: String) -> Bool {
         let code = text.uppercased().filter { $0 != "-" && !$0.isWhitespace }
         return (16...32).contains(code.count) && code.allSatisfy { ("A"..."Z").contains($0) || ("2"..."7").contains($0) }
     }

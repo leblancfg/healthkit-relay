@@ -84,6 +84,8 @@ nav:
   - Grafana: grafana.md
   - Backups: backups.md
   - Security & privacy: security.md
+  - Privacy policy: privacy.md
+  - Help and support: support.md
   - Troubleshooting: troubleshooting.md
   - Contributing: contributing.md
   - Changelog: changelog.md

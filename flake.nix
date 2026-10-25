@@ -15,7 +15,7 @@
           pname = "healthkit-relay";
           inherit version;
           src = ./server;
-          vendorHash = "sha256-clzZpw5SIupsHOJ4FctXy8GwnLXTs2JzsDguSqTYFu8="; # update when go.sum changes
+          vendorHash = "sha256-EdKBWy5RU7kOJN3f5U88W/DHETXsulB7ToO8vqD2RHU="; # update when go.sum changes
           env.CGO_ENABLED = 0; # pure Go SQLite (modernc.org/sqlite): a static binary
           checkFlags = [ "-short" ]; # skip the memory test, which writes a few hundred MB
           nativeCheckInputs = [ pkgs.duckdb ]; # the query API tests run real queries

@@ -10,7 +10,7 @@ The settings are the same on every NAS. Replace `192.168.1.10` with the NAS's IP
 
 | Setting | Value |
 |---|---|
-| Image | `ghcr.io/leblancfg/healthkit-relay:latest`, or a version tag, e.g. `0.6.0` |
+| Image | `ghcr.io/leblancfg/healthkit-relay:latest`, or a version tag, e.g. `0.7.0` |
 | Port | container `8080` → host `8080` (or another free port) |
 | Folder | a shared folder for the archive, e.g. `/volume1/docker/healthkit-relay/data` → `/data` |
 | `HKR_PUBLIC_URL` | the server address, e.g. `http://192.168.1.10:8080`, or your HTTPS address |

@@ -41,7 +41,12 @@ server releases and the app are versioned separately.
 - Info.plist: the local network permission explains itself, export compliance is declared
   (HTTPS only), and the app requires HealthKit.
 
-### Server
+## 0.7.0 (2026-10-25)
+
+The first server release on GitHub Releases: binaries for Linux, macOS and FreeBSD (amd64
+and arm64) with the systemd unit, and `checksums.txt`.
+
+### Server 0.7.0
 
 - A server ID per archive (`server.json`) and the preferred address in `GET /v1/status` and
   in the answer to each heartbeat (now `200` with JSON); `GET /v1/server` answers the ID
@@ -61,6 +66,62 @@ server releases and the app are versioned separately.
   revocation survives a power loss. Erasing a device with nothing stored returns at once.
   Setup page forms without Fetch Metadata must carry the page's own Origin.
 - Docker Compose: Grafana listens on this computer only unless `GRAFANA_BIND` says otherwise.
+
+- Counts app 0.7.0's triggers under their own names in `healthkit_relay_batches_total`,
+  `healthkit_relay_heartbeats_total` and the last-batch and last-heartbeat timestamps:
+  `processing`, `urlsession`, `backgrounded` and `continued`. Older apps are unaffected; an
+  older server counts these as `unknown`.
+- The heartbeat line says `plugged in` or `on battery`, `low power mode` and `background app
+  refresh denied` or `restricted`, from app 0.6.4's heartbeats; older apps' lines are
+  unchanged.
+- `POST /v1/heartbeat` (an upload token): logs the app's heartbeat in one line, and counts
+  it in `healthkit_relay_heartbeats_total{trigger}` and
+  `healthkit_relay_last_heartbeat_timestamp_seconds{trigger}`.
+- `healthkit_relay_last_batch_timestamp_seconds{trigger}`: when the last batch of each
+  trigger arrived.
+- Refused tokens are logged (at most every 10 seconds, with a count of the others): method,
+  path, client address, user agent and a 6-character prefix of the token's SHA-256.
+- Query API, turned on with `-query-duckdb`: read-only endpoints for the type catalog,
+  samples and daily or hourly aggregates, with time zones and Apple-style source
+  de-duplication. The binary serves an OpenAPI 3.1 document at `/openapi.json` and Swagger UI
+  at `/docs`. Each query runs in a locked-down `duckdb` process. See
+  [Query API](query-api.md).
+- The OpenAPI document describes `type` as a string with a pattern and examples, in place of
+  an enum of every HealthKit identifier; `GET /v1/types` lists the valid values. An unknown
+  type answers `400` with the closest names: `unknown type HKQuantityTypeIdentifierSteps; did
+  you mean HKQuantityTypeIdentifierStepCount?`. Kinds stay an enum, each described in one
+  line. `GET /v1/kinds` is removed: `GET /v1/types?kind=category` lists the types of one
+  kind. The served document goes from 67 kB to 54 kB.
+- Token scopes: a read token (from the setup page, `healthkit-relay token create` or
+  `POST /v1/tokens`) queries and does nothing else; a paired device's token uploads and gets
+  `403` on queries. Existing `devices.json` files keep working as they are.
+- The admin token (formerly the server token): the server generates it on first start, 256
+  random bits, and prints it once to its log with the setup page's address
+  (`docker compose logs relay`, `journalctl -u healthkit-relay`). `<archive-dir>/admin.json`
+  holds its SHA-256.
+- `healthkit-relay admin reset` prints a new admin token; the running server switches to it
+  at once and signs out browsers signed in with the old one.
+- `pair`, `devices`, `revoke`, `token create` and `admin reset` work on the state files in
+  the archive directory (`-archive-dir`), with file locks, while the server runs; this
+  replaces their `-token-file` and `-server` flags. Run them as the server's user or as root,
+  e.g. `docker compose exec relay healthkit-relay pair`.
+- Setup codes are kept as SHA-256 in `codes.json` and last across a restart until they
+  expire.
+- `-token-file` (`HKR_TOKEN_FILE`) is optional and deprecated: at start, the server imports
+  an existing server token file into `admin.json` and logs a warning; then delete the file
+  and the flag. The Compose file mounts no token file; the image still imports
+  `/run/secrets/hkr_token` when an earlier install mounts one.
+- Uploads and status requests with the admin token are deprecated: still accepted, logged at
+  most hourly and counted in `healthkit_relay_admin_token_uploads_total`. Pair such apps
+  again from the setup page.
+- Setup page: **Sign in** with the admin token, with where to find it; **Pair your iPhone**,
+  **Paired devices** and **Read tokens**; copy buttons for a new read token and the setup
+  code's link.
+- Reworded output: the first-start log says `Setup page:` (formerly `Sign in at:`), and the
+  `devices` column `PAIRED` is now `CREATED`.
+- NixOS: `healthkit-relay-ctl` runs any command with the service's settings
+  (`sudo healthkit-relay-ctl pair`, `admin reset`, ...). `tokenFile` is deprecated; the
+  module imports a `/var/lib/healthkit-relay/token` from its earlier versions once.
 
 ### App 0.7.0
 
@@ -122,64 +183,6 @@ server releases and the app are versioned separately.
   locked or the upload failed: what woke the app, whether Health was readable, the outcome,
   the last error and the background time left. See
   [No syncs in the background](troubleshooting.md#no-syncs-in-the-background).
-
-### Server
-
-- Counts app 0.7.0's triggers under their own names in `healthkit_relay_batches_total`,
-  `healthkit_relay_heartbeats_total` and the last-batch and last-heartbeat timestamps:
-  `processing`, `urlsession`, `backgrounded` and `continued`. Older apps are unaffected; an
-  older server counts these as `unknown`.
-- The heartbeat line says `plugged in` or `on battery`, `low power mode` and `background app
-  refresh denied` or `restricted`, from app 0.6.4's heartbeats; older apps' lines are
-  unchanged.
-- `POST /v1/heartbeat` (an upload token): logs the app's heartbeat in one line, and counts
-  it in `healthkit_relay_heartbeats_total{trigger}` and
-  `healthkit_relay_last_heartbeat_timestamp_seconds{trigger}`.
-- `healthkit_relay_last_batch_timestamp_seconds{trigger}`: when the last batch of each
-  trigger arrived.
-- Refused tokens are logged (at most every 10 seconds, with a count of the others): method,
-  path, client address, user agent and a 6-character prefix of the token's SHA-256.
-- Query API, turned on with `-query-duckdb`: read-only endpoints for the type catalog,
-  samples and daily or hourly aggregates, with time zones and Apple-style source
-  de-duplication. The binary serves an OpenAPI 3.1 document at `/openapi.json` and Swagger UI
-  at `/docs`. Each query runs in a locked-down `duckdb` process. See
-  [Query API](query-api.md).
-- The OpenAPI document describes `type` as a string with a pattern and examples, in place of
-  an enum of every HealthKit identifier; `GET /v1/types` lists the valid values. An unknown
-  type answers `400` with the closest names: `unknown type HKQuantityTypeIdentifierSteps; did
-  you mean HKQuantityTypeIdentifierStepCount?`. Kinds stay an enum, each described in one
-  line. `GET /v1/kinds` is removed: `GET /v1/types?kind=category` lists the types of one
-  kind. The served document goes from 67 kB to 54 kB.
-- Token scopes: a read token (from the setup page, `healthkit-relay token create` or
-  `POST /v1/tokens`) queries and does nothing else; a paired device's token uploads and gets
-  `403` on queries. Existing `devices.json` files keep working as they are.
-- The admin token (formerly the server token): the server generates it on first start, 256
-  random bits, and prints it once to its log with the setup page's address
-  (`docker compose logs relay`, `journalctl -u healthkit-relay`). `<archive-dir>/admin.json`
-  holds its SHA-256.
-- `healthkit-relay admin reset` prints a new admin token; the running server switches to it
-  at once and signs out browsers signed in with the old one.
-- `pair`, `devices`, `revoke`, `token create` and `admin reset` work on the state files in
-  the archive directory (`-archive-dir`), with file locks, while the server runs; this
-  replaces their `-token-file` and `-server` flags. Run them as the server's user or as root,
-  e.g. `docker compose exec relay healthkit-relay pair`.
-- Setup codes are kept as SHA-256 in `codes.json` and last across a restart until they
-  expire.
-- `-token-file` (`HKR_TOKEN_FILE`) is optional and deprecated: at start, the server imports
-  an existing server token file into `admin.json` and logs a warning; then delete the file
-  and the flag. The Compose file mounts no token file; the image still imports
-  `/run/secrets/hkr_token` when an earlier install mounts one.
-- Uploads and status requests with the admin token are deprecated: still accepted, logged at
-  most hourly and counted in `healthkit_relay_admin_token_uploads_total`. Pair such apps
-  again from the setup page.
-- Setup page: **Sign in** with the admin token, with where to find it; **Pair your iPhone**,
-  **Paired devices** and **Read tokens**; copy buttons for a new read token and the setup
-  code's link.
-- Reworded output: the first-start log says `Setup page:` (formerly `Sign in at:`), and the
-  `devices` column `PAIRED` is now `CREATED`.
-- NixOS: `healthkit-relay-ctl` runs any command with the service's settings
-  (`sudo healthkit-relay-ctl pair`, `admin reset`, ...). `tokenFile` is deprecated; the
-  module imports a `/var/lib/healthkit-relay/token` from its earlier versions once.
 
 ### App
 

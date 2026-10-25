@@ -26,7 +26,7 @@ ipconfig getifaddr en0    # e.g. 192.168.1.10
     healthkit-relay -version
     ```
 
-    The last command prints the version, e.g. `0.6.0`.
+    The last command prints the version, e.g. `0.7.0`.
 
 With Nix, `nix profile install github:leblancfg/healthkit-relay` installs it instead.
 

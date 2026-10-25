@@ -21,7 +21,7 @@ SHA-256 checksums. The Linux archive holds the server, the systemd unit
    the newest version on the releases page:
 
     ```sh
-    VERSION=0.6.0
+    VERSION=0.7.0
     ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
     cd "$(mktemp -d)"
     curl -fLO "https://github.com/leblancfg/healthkit-relay/releases/download/v${VERSION}/healthkit-relay_${VERSION}_linux_${ARCH}.tar.gz"
@@ -33,7 +33,7 @@ SHA-256 checksums. The Linux archive holds the server, the systemd unit
     ```
 
     `sha256sum` prints `OK` after the archive's name, and the last command prints the
-    version, e.g. `0.6.0`.
+    version, e.g. `0.7.0`.
 
 To build from source instead, with Go: `make server-build` writes `bin/healthkit-relay`, and
 the unit is in the repository's `packaging/` folder.

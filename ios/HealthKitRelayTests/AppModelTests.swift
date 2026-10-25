@@ -245,8 +245,15 @@ final class AppModelTests: XCTestCase {
     /// address waits for confirmation, whatever that address answers.
     func testLinkToTheServersPreferredAddressKeepsTheDevice() async throws {
         let model = try await erasable()
+        // Named by another connection's server: does not count.
         KnownServer.preferredURL = "https://stub.test:8443"
+        KnownServer.preferredFor = "https://elsewhere.test"
         defer { KnownServer.forget() }
+        await model.open(URL(string: "healthrelay://pair?server=https%3A%2F%2Fstub.test%3A8443&code=NOTYET")!)
+        XCTAssertNotNil(model.pendingLink, "a preferred address noted for another connection skipped the question")
+        model.pendingLink = nil
+        // Named by this server, reached at the current address.
+        KnownServer.preferredFor = "https://stub.test"
         await model.open(URL(string: "healthrelay://pair?server=https%3A%2F%2Fstub.test%3A8443&code=MOVE")!)
         XCTAssertNil(model.pendingLink, "asked to confirm the same server")
         let pair = try XCTUnwrap(StubServer.pairs.last)
@@ -276,6 +283,36 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(ServerSettings.load().url, "", "a setup queued before the disconnect connected")
         XCTAssertFalse(model.isConfigured)
         XCTAssertFalse(StubServer.pairs.contains { $0.code == "TWO" }, "the queued setup still paired")
+    }
+
+    /// A setup link opened while Erase Server Data and Disconnect runs pairs nothing, and the
+    /// erase still disconnects.
+    func testSetupDuringEraseIsRefused() async throws {
+        let model = try await erasable()
+        let erase = Task { try await model.eraseServerDataAndDisconnect() }
+        try await Task.sleep(for: .milliseconds(50))
+        await model.open(URL(string: "healthrelay://pair?server=https%3A%2F%2Fstub.test&code=DURING")!)
+        try await erase.value
+        XCTAssertFalse(StubServer.pairs.contains { $0.code == "DURING" }, "paired during the erase")
+        XCTAssertNotNil(model.setupError)
+        XCTAssertFalse(model.isConfigured)
+        XCTAssertEqual(ServerSettings.load().url, "")
+    }
+
+    /// While a pairing awaits its answer (the server may already have rotated the token), the
+    /// app neither moves to a preferred address nor notes one.
+    func testNoAddressMoveWhileASetupRuns() async throws {
+        let model = try await erasable()
+        let old = model.settings
+        async let setup: Void = model.open(URL(string: "healthrelay://pair?server=https%3A%2F%2Fstub.test&code=ROTATE")!)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertFalse(model.adoptAddress(ServerSettings(url: "https://stub.test:8443", token: old.token), from: old))
+        XCTAssertFalse(model.noteHandoff(Handoff(serverID: "x", preferredURL: "https://other.test"), from: old))
+        await setup
+        XCTAssertNil(KnownServer.preferredURL.flatMap { $0 == "https://other.test" ? $0 : nil })
+        XCTAssertEqual(model.settings.url, "https://stub.test")
+        XCTAssertEqual(model.settings.token, StubServer.pairs.last?.token)
+        XCTAssertEqual(ServerSettings.load(), model.settings)
     }
 
     func testEraseAndDisconnect() async throws {

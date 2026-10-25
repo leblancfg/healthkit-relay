@@ -125,6 +125,15 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer done()
+	uploader := ""
+	if c.Device != nil {
+		uploader = c.Device.ID
+	}
+	// Noted before the body is read: an erase that finishes meanwhile voids this upload.
+	var admitted uint64
+	if s.Archive != nil {
+		admitted = s.Archive.EraseGeneration(uploader)
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, s.MaxBodyBytes)
 	var b Batch
 	dec := json.NewDecoder(r.Body)
@@ -189,16 +198,17 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uploader := ""
-	if c.Device != nil {
-		uploader = c.Device.ID
-	}
 	var outcomes []Outcome
 	var err error
 	if s.Demo != nil {
 		outcomes = s.Demo.discard(len(items)) // validated, then dropped (demo.go)
 	} else {
-		outcomes, err = s.Archive.Ingest(uploader, items)
+		outcomes, err = s.Archive.IngestAdmitted(uploader, admitted, items)
+	}
+	if errors.Is(err, ErrErasedMeanwhile) {
+		s.count("erased_meanwhile")
+		httpError(w, http.StatusConflict, err.Error())
+		return
 	}
 	if err != nil {
 		log.Printf("archive: %v", err)

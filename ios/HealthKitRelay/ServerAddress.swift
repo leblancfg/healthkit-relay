@@ -15,10 +15,11 @@ struct Handoff: Codable, Equatable, Sendable {
 
 /// What the paired server said about itself in its last authenticated answer (status, pairing,
 /// heartbeat): its server ID and its preferred https address. A setup link for that address
-/// is a link for this same server.
+/// is a link for this same server, while the app is still connected where the server said it.
 enum KnownServer {
     static let idKey = "serverID"
     static let preferredKey = "serverPreferredURL"
+    static let preferredForKey = "serverPreferredFor"
 
     static var id: String? {
         get { UserDefaults.standard.string(forKey: idKey) }
@@ -30,23 +31,39 @@ enum KnownServer {
         set { UserDefaults.standard.set(newValue, forKey: preferredKey) }
     }
 
-    static func note(_ handoff: Handoff) {
+    /// The address the app was connected at when the server named `preferredURL`.
+    static var preferredFor: String? {
+        get { UserDefaults.standard.string(forKey: preferredForKey) }
+        set { UserDefaults.standard.set(newValue, forKey: preferredForKey) }
+    }
+
+    /// Notes what the server reached at `settings` answered. On the main actor only, after
+    /// checking `settings` are still the app's (AppModel.noteHandoff, pairing, status), like
+    /// every change of who the app is paired with: it decides which links pair without asking.
+    @MainActor
+    static func note(_ handoff: Handoff, at settings: ServerSettings) {
         if let id = handoff.serverID, !id.isEmpty { Self.id = id }
-        if let url = handoff.preferredURL, url.lowercased().hasPrefix("https://") { preferredURL = url }
+        if let url = handoff.preferredURL, url.lowercased().hasPrefix("https://") {
+            preferredURL = url
+            preferredFor = settings.url
+        }
     }
 
     static func forget() {
         id = nil
         preferredURL = nil
+        preferredFor = nil
     }
 
     /// Whether `url` reaches the server this app is paired with: its current address, or the
-    /// preferred address the server itself named. Anything else is another server, whatever it
+    /// preferred address the server itself named while the app was connected at its current
+    /// address (or already at the preferred one). Anything else is another server, whatever it
     /// answers: the server ID is public, so only the paired server's own word counts.
     static func isCurrent(_ url: URL, settings: ServerSettings) -> Bool {
         guard settings.isComplete else { return false }
         if settings.sameServer(as: url.absoluteString) { return true }
-        guard let preferredURL else { return false }
+        guard let preferredURL, let preferredFor,
+              settings.sameServer(as: preferredFor) || settings.sameServer(as: preferredURL) else { return false }
         return ServerSettings(url: preferredURL, token: "x").sameServer(as: url.absoluteString)
     }
 }
@@ -66,13 +83,13 @@ enum AddressHandoff {
     }
 
     /// The settings to move to when the preferred address answered as this server, nil when the
-    /// app stays. Saves nothing: AppModel.adoptAddress does, on the main actor.
+    /// app stays. Changes nothing the app trusts (settings, KnownServer): AppModel.noteHandoff
+    /// and AppModel.adoptAddress do, on the main actor.
     static func follow(_ handoff: Handoff, from settings: ServerSettings, device: String?,
                        session: URLSession = noRedirects, defaults: UserDefaults = .standard,
                        now: Date = .now) async -> ServerSettings? {
         // Only the answer of the server the app is still paired with counts.
         guard ServerSettings.load() == settings else { return nil }
-        KnownServer.note(handoff)
         guard let id = handoff.serverID, !id.isEmpty, let preferred = handoff.preferredURL,
               settings.isComplete, !settings.sameServer(as: preferred) else { return nil }
         var tried = defaults.dictionary(forKey: triedKey) as? [String: Date] ?? [:]

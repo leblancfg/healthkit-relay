@@ -244,7 +244,17 @@ final class BackgroundUploads: NSObject, UploadTransport, URLSessionDataDelegate
     private func isWaiting(_ id: String) -> Bool { lock.withLock { waiting[id] != nil } }
 
     /// Disconnect: every upload under way in the system stops, and none moves a sync position.
-    func cancelAll() {
+    func cancelAll() { cancelAll(then: nil) }
+
+    /// cancelAll, returning once the system's uploads are cancelled: an erase is asked for
+    /// only after that (the server also refuses uploads admitted before an erase ended).
+    func cancelAllAndWait() async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            cancelAll { cont.resume() }
+        }
+    }
+
+    private func cancelAll(then done: (@Sendable () -> Void)?) {
         let waiters = lock.withLock {
             let w = waiting
             waiting = [:]
@@ -255,6 +265,7 @@ final class BackgroundUploads: NSObject, UploadTransport, URLSessionDataDelegate
             for task in tasks { task.cancel() }
             for id in self.store.ids() { self.store.remove(id) }
             if !tasks.isEmpty { Log.info("upload: disconnected, \(tasks.count) uploads under way stopped") }
+            done?()
         }
     }
 

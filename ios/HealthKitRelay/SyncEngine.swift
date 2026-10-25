@@ -668,7 +668,8 @@ actor SyncEngine {
         do {
             let handoff = try await Uploader(settings: settings).heartbeat(hb)
             lastError = nil
-            if let handoff, let moved = await AddressHandoff.follow(handoff, from: settings, device: PairedDevice.load()?.id) {
+            if let handoff, await AppModel.shared.noteHandoff(handoff, from: settings),
+               let moved = await AddressHandoff.follow(handoff, from: settings, device: PairedDevice.load()?.id) {
                 await AppModel.shared.adoptAddress(moved, from: settings)
             }
         } catch {

@@ -125,8 +125,13 @@ final class AppModel: ObservableObject {
     /// and the upgrade both paired, and the device the overwritten token belonged to stayed
     /// on the server with a token nobody had.
     private var setupChain: Task<Void, Never>?
+    /// Setups running or waiting their turn. Erasing, and moving to the server's preferred
+    /// address, wait until there are none: a pairing may have rotated the token on the server.
+    private var setupsRunning = 0
 
     private func exclusively(_ body: @escaping @MainActor () async -> Void) async {
+        setupsRunning += 1
+        defer { setupsRunning -= 1 }
         let previous = setupChain
         let task = Task { @MainActor in
             await previous?.value
@@ -138,6 +143,13 @@ final class AppModel: ObservableObject {
 
     private func connect(to url: String, host: String, token: String?,
                          pair: @escaping (String?) async throws -> ServerClient.Paired?) async {
+        // An erase and a setup never overlap: the erase would disconnect the new pairing, or
+        // the pairing undo the disconnect the erase promised.
+        guard !erasing else {
+            Log.info("setup: \(host) asked for while erasing; not connected")
+            setupError = "Health Relay is erasing this iPhone's data on the server. Open the setup link again once that is done."
+            return
+        }
         connecting = host
         setupError = nil
         defer { connecting = nil }
@@ -155,8 +167,8 @@ final class AppModel: ObservableObject {
 
     private func pairAndSave(url: String, host: String, token: String?, accepted: Int,
                              pair: (String?) async throws -> ServerClient.Paired?) async -> Bool {
-        guard lifecycle == accepted else {
-            Log.info("setup: \(host) was asked for before a disconnect; not connected")
+        guard lifecycle == accepted, !erasing else {
+            Log.info("setup: \(host) was asked for before a disconnect or an erase; not connected")
             return false
         }
         let sameServer = URL(string: url).map { KnownServer.isCurrent($0, settings: settings) } ?? false
@@ -190,7 +202,7 @@ final class AppModel: ObservableObject {
             PairedDevice.save(paired?.device)
             server = paired?.server
             if !sameServer { KnownServer.forget() }
-            if let status = paired?.server { KnownServer.note(status.handoff) }
+            if let status = paired?.server { KnownServer.note(status.handoff, at: new) }
             reachable = true
             revoked = false
             SyncStatus.shared.lastError = nil
@@ -207,13 +219,31 @@ final class AppModel: ObservableObject {
     /// status check or a heartbeat): the app moves there, history and sync positions kept.
     /// One step on the main actor, like disconnect and pairing: it saves only if the app is
     /// still connected with `old`, as the app and as stored.
+    /// Not while a setup or an erase runs: a pairing may have rotated the token `old` holds.
     @discardableResult
     func adoptAddress(_ new: ServerSettings, from old: ServerSettings) -> Bool {
-        guard settings == old, ServerSettings.load() == old, (try? new.save()) != nil else { return false }
+        guard setupsRunning == 0, !erasing, settings == old, ServerSettings.load() == old,
+              (try? new.save()) != nil else { return false }
         generation += 1
         settings = new
         Log.info("server address: moved from \(old.host) to \(new.host), as the server asked")
         return true
+    }
+
+    /// What the paired server, reached with `old`, said about itself (a heartbeat or status
+    /// answer): noted if the app is still connected with `old` and no setup or erase runs.
+    /// Returns whether it was, and the preferred address may be followed.
+    func noteHandoff(_ handoff: Handoff, from old: ServerSettings) -> Bool {
+        guard setupsRunning == 0, !erasing, settings == old, ServerSettings.load() == old else { return false }
+        KnownServer.note(handoff, at: old)
+        return true
+    }
+
+    /// Refused while a setup runs or waits (see `setupsRunning`).
+    private func checkNoSetup() throws {
+        guard setupsRunning == 0, connecting == nil else {
+            throw ServerError.notAllowed("A setup is running: erase once it is done.")
+        }
     }
 
     /// Has the server permanently delete everything this iPhone uploaded, then disconnects:
@@ -222,6 +252,7 @@ final class AppModel: ObservableObject {
     func eraseServerDataAndDisconnect() async throws {
         guard !erasing else { return }
         guard isConfigured, let base = settings.baseURL else { throw UploadError.notConfigured }
+        try checkNoSetup()
         let kept = settings
         erasing = true
         defer { erasing = false }
@@ -231,7 +262,7 @@ final class AppModel: ObservableObject {
         Log.info("erase: stopping, then asking \(kept.host) to delete this iPhone's data")
         ServerSettings.clear()
         SyncEngine.shared.backgroundTimeOver(force: true)
-        BackgroundUploads.shared.cancelAll()
+        await BackgroundUploads.shared.cancelAllAndWait()
         do {
             let erased = try await ServerClient(base: base).erase(token: kept.token)
             Log.info("erase: server deleted \(erased.erased) items; disconnecting")
@@ -350,7 +381,7 @@ final class AppModel: ObservableObject {
     /// `userInitiated`: a tap (Sync Now, pulling down, Allow Health access). A long sync the
     /// user started may go on after they leave the app (iOS 26, see ContinuedSync).
     func sync(userInitiated: Bool = false) async {
-        guard isConfigured, !askingHealth else { return }
+        guard isConfigured, !askingHealth, !erasing else { return }
         // A first sync can take long: keep the phone from locking (and HealthKit from
         // becoming unreadable) while the app is open.
         UIApplication.shared.isIdleTimerDisabled = true
@@ -370,8 +401,12 @@ final class AppModel: ObservableObject {
         guard !erasing else { return }
         guard isConfigured, let base = settings.baseURL else { throw UploadError.notConfigured }
         guard !SyncStatus.shared.running else { throw ServerError.notAllowed("A sync is running: erase once it is done.") }
+        try checkNoSetup()
         erasing = true
+        let accepted = lifecycle
         let token = settings.token
+        // Uploads the system still carries could reach the server after the erase.
+        await BackgroundUploads.shared.cancelAllAndWait()
         Log.info("erase: asking \(settings.host) to delete this iPhone's data")
         do {
             try await SyncEngine.shared.resetAnchors {
@@ -384,6 +419,8 @@ final class AppModel: ObservableObject {
             throw error
         }
         erasing = false
+        // Disconnected meanwhile: nothing is sent again.
+        guard lifecycle == accepted, isConfigured else { return }
         Log.info("erase: sync positions reset, sending all history")
         await refreshServer()
         if let thenSync { await thenSync() } else { await sync(userInitiated: true) }
@@ -397,10 +434,10 @@ final class AppModel: ObservableObject {
             // A setup or disconnect while the answer was on its way: it is not this server's.
             guard settings == asked else { return }
             server = status
-            KnownServer.note(status.handoff)
             reachable = true
             revoked = false
-            if connecting == nil, let moved = await AddressHandoff.follow(status.handoff, from: asked, device: device?.id) {
+            if noteHandoff(status.handoff, from: asked),
+               let moved = await AddressHandoff.follow(status.handoff, from: asked, device: device?.id) {
                 adoptAddress(moved, from: asked)
             }
         } catch ServerError.unauthorized {

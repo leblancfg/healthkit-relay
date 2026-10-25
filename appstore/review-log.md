@@ -1,7 +1,7 @@
 # Adversarial review log
 
-Two rounds of a strict App Review and security review (a separate model, maximum
-reasoning) before the first submission. Each finding, and what was done.
+Rounds of a strict App Review and security review (a separate model, maximum reasoning)
+before the first submission. Each finding, and what was done.
 
 ## Round 1 (on 18900c3)
 
@@ -67,3 +67,21 @@ Round 3's #2 and #4 fixed; #1 and #3 partly. Prior accepted items stay accepted.
 | 2 | Blocking | The address handoff's last check and save could straddle a Disconnect | The handoff only verifies; AppModel.adoptAddress checks and saves in one main-actor step, the actor Disconnect runs on |
 | 3 | Major | Empty pages, activity summaries, effort relationships, app 0.7 orphan commits and same-server erases could still move a reset position | Every position change goes through one owner check: the connection and a sync epoch that every reset renews; commits without an owner move nothing (the page is sent again, the server keeps one copy) |
 | 4 | Blocking | The Funnel demo address was unreachable from the internet | It was being retired: by owner decision (11:45) the demo moved to a Cloudflare Worker at https://health-relay-demo.leblancfg.com (another session; homelab ed102a7), which answers; the notes and listing move to it with that work |
+
+## Round 5 (on 24dd293)
+
+Round 4's lifecycle epoch, main-actor adoption and position owner checks verified at every
+write site; no new HealthKit, background-mode, privacy-manifest or export-compliance defect;
+the demo Worker keeps aggregate counters only, with request logs off. Prior accepted items stay
+accepted.
+
+| # | Sev. | Finding | Done |
+|---|---|---|---|
+| 1 | Blocking | Address and token were two Keychain items: a background heartbeat could read one server's address and another's token | One Keychain item holds both, read and replaced in one step (update in place); the two items of earlier apps are read until the next save |
+| 2 | Blocking | The address handoff noted the preferred address off the main actor, where it could outlive a new pairing and let a link skip the question | The handoff changes nothing the app trusts; AppModel.noteHandoff notes it on the main actor if the connection is unchanged and no setup or erase runs; a preferred address counts only while the app is connected where the server named it |
+| 3 | Blocking | A setup link opened during Erase Server Data and Disconnect paired again, and the erase then skipped the disconnect | Erase and setup exclude each other in the model: setups are refused while erasing, erases while a setup runs or waits; syncs wait for the erase; Erase and Start Over sends nothing again after a disconnect and cancels the system's uploads first |
+| 4 | Major | An upload admitted before an erase could store its batch after it | The server counts erases per device; an upload notes the count when admitted and is refused (409) if an erase finished since; the app waits until its uploads are cancelled before asking for the erase |
+| 5 | Major | A handoff answer arriving during a re-pairing could save the old token and discard the rotated one | No move to a preferred address while a setup runs or waits, or while erasing |
+| 6 | Major | A unit test still expected the uploader to add the connection to a commit | The test gives the commit its owner and checks it is carried unchanged through every retry |
+| 7 | Minor | Concurrent demo uploads each read the same remaining quota | Kept: the overshoot is bounded (4 uploads at once, each capped to the body limit), the quota guards the free Cloudflare plan, not privacy, and nothing is stored |
+| 8 | Minor | The demo setup page said uploads were erased hourly | It says uploads are checked and dropped at once, and only hourly counts are kept (Worker and Go demo mode) |

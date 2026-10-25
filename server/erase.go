@@ -27,6 +27,9 @@ func (s *Store) Erase(ctx context.Context, uploader string) (int64, error) {
 	defer s.ingest.Unlock()
 	s.maint.Lock()
 	defer s.maint.Unlock()
+	// Uploads admitted before the erase ends are refused (IngestAdmitted), also when it fails:
+	// the app sends them again.
+	defer s.erased(uploader)
 	if _, err := s.db.Exec(`INSERT OR IGNORE INTO pending_erase (uploader) VALUES (?)`, uploader); err != nil {
 		return 0, err
 	}

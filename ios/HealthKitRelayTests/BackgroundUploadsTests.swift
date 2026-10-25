@@ -218,13 +218,14 @@ final class BackgroundUploadsTests: XCTestCase {
 
     func testUploadRetriesThenCarriesItsCommit() async throws {
         let t = ScriptedTransport([.success((503, Data("busy".utf8))), .failure(URLError(.timedOut)), .success((200, records))])
-        let commit = UploadCommit(key: "k", ext: "txt", from: nil, to: Data("v".utf8))
+        // The sync names the commit's owner (connection and reset epoch); the uploader carries
+        // it unchanged through every retry.
+        let commit = UploadCommit(key: "k", ext: "txt", from: nil, to: Data("v".utf8),
+                                  connection: settings.connectionKey + ":epoch1")
         let b = try batch(records: 1)
         try await uploader(t).upload(b, commit: commit)
         XCTAssertEqual(t.sent.count, 3)
-        var sentCommit = commit
-        sentCommit.connection = settings.connectionKey // the connection it went to
-        XCTAssertEqual(t.sent.map(\.upload), Array(repeating: PendingUpload(records: 1, items: 2, commit: sentCommit), count: 3))
+        XCTAssertEqual(t.sent.map(\.upload), Array(repeating: PendingUpload(records: 1, items: 2, commit: commit), count: 3))
         XCTAssertEqual(t.sent.first?.body, try b.body())
         XCTAssertEqual(t.sent.map(\.direct), [false, false, true], "after a failed transfer, retries go out directly")
     }

@@ -5,7 +5,7 @@ server releases and the app are versioned separately.
 
 ## Unreleased
 
-### App 1.0.0 (13), for the App Store
+### App 1.0.0 (14), for the App Store
 
 - The server's address follows the server: when a paired server names a preferred https
   address (its `-public-url`), the app checks that the address answers as the same server
@@ -37,6 +37,10 @@ server releases and the app are versioned separately.
   disconnect and pairing. Every sync position (pages, empty pages, activity summaries, effort
   relationships, uploads finishing later) moves only for its own connection and set of
   positions, which every reset renews.
+- The server address and token are one Keychain item, read and written in one step. Erasing
+  and setting up never overlap: a setup link opened during an erase is refused, and an erase
+  waits for a setup. The app moves to the server's preferred address only when no setup or
+  erase runs, and a preferred address counts only for the connection whose server named it.
 - A new install starts unpaired: a server address and token an earlier install left in the
   Keychain are cleared on first start.
 - Privacy manifest (`PrivacyInfo.xcprivacy`): no tracking, no collected data, the reasons for
@@ -48,11 +52,13 @@ server releases and the app are versioned separately.
 
 ### Server
 
+- An upload already under way when an erase of its device finishes is refused (`409`)
+  instead of bringing data back.
 - A server ID per archive (`server.json`) and the preferred address in `GET /v1/status` and
   in the answer to each heartbeat (now `200` with JSON); `GET /v1/server` answers the ID
   without a token. Phones move to `-public-url` on their own.
 - Demo mode (`-demo-code-file`, `-demo-reset`, `-demo-quota`): a shared setup code that pairs
-  any number of iPhones, every record erased every hour, an upload quota between erases.
+  any number of iPhones and an hourly upload quota.
 - Requests through Tailscale Funnel count as public for `-setup-from private`, and
   `/metrics` answers private networks only.
 - The demo server stores nothing about its users: batches are checked, answered and dropped;

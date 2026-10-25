@@ -18,7 +18,7 @@ function formEncode(s) {
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&#34;", "'": "&#39;" })[c]);
 // jsString is a JavaScript string literal safe inside <script>, like html/template's.
-const jsString = (s) => JSON.stringify(s).replace(/[<>&  ]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+const jsString = (s) => JSON.stringify(s).replace(/[<>&\u2028\u2029]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 
 const style = `
 <style>

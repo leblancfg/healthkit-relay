@@ -12,7 +12,7 @@ open-source healthkit-relay program on a home computer, NAS or cloud server). It
 account; data goes only to the user's server. For this review we run a demo server.
 
 DEMO SERVER
-Address: https://health-demo.tail3f3b8.ts.net
+Address: https://health-relay-demo.leblancfg.com
 Setup code: {{DEMO_CODE}}
 The code pairs many devices. The demo server stores nothing about its users: it checks each
 batch, answers it and drops it, counting records only (all devices together, reset hourly),
@@ -21,10 +21,10 @@ and keeps no device list.
 STEPS (about 2 minutes)
 1. Open Health Relay. The welcome screen explains that it works with your own server.
 2. Tap "Enter Server Details Instead" at the bottom.
-3. Server address: https://health-demo.tail3f3b8.ts.net
+3. Server address: https://health-relay-demo.leblancfg.com
    Setup code: {{DEMO_CODE}}
    Tap Connect.
-   (Alternative: open https://health-demo.tail3f3b8.ts.net/setup?code={{DEMO_CODE}} in Safari
+   (Alternative: open https://health-relay-demo.leblancfg.com/setup?code={{DEMO_CODE}} in Safari
    on the device and tap "Open in Health Relay", then Connect.)
 4. The app says what to pick in Health's sheet; tap Continue. In Apple Health's permission
    sheet, turn on all categories (or the ones you like) and tap Allow.

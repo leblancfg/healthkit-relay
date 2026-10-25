@@ -381,6 +381,10 @@ healthkit-relay -archive-dir /var/lib/healthkit-relay-demo -public-url https://d
 
 Run it with an archive of its own, never one holding real data.
 
+The public demo server, https://health-relay-demo.leblancfg.com (the one App Review uses),
+is this demo mode written again as a Cloudflare Worker, [demo/worker](../demo/worker/README.md).
+`demo_contract_test.go` runs the same requests against both, so they answer alike.
+
 ## Archive
 
 Everything lives in `-archive-dir`:

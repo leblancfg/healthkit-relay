@@ -1,0 +1,39 @@
+# The Health Relay demo server on Cloudflare Workers (src/index.js); README.md says how to
+# deploy it. Free plan: one Worker and one SQLite-backed Durable Object.
+name = "health-relay-demo"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+account_id = "64fa33dce7ea4a1c80534b988e5bf4d3"
+workers_dev = false
+preview_urls = false
+
+routes = [
+  { pattern = "health-relay-demo.leblancfg.com", custom_domain = true },
+  { pattern = "health-relay.leblancfg.com", custom_domain = true },
+]
+
+# No request logs: the demo keeps nothing about who uses it.
+[observability]
+enabled = false
+
+[vars]
+PUBLIC_URL = "https://health-relay-demo.leblancfg.com"
+# The server ID (identity.go): made once, kept, so a paired app knows it is the same server.
+SERVER_ID = "de677581e675d23bf281c611eec92b05"
+VERSION = "0.7.0+worker"
+# Upload bytes accepted per hour (-demo-quota) and the largest body (-max-body-bytes).
+DEMO_QUOTA = "268435456"
+MAX_BODY_BYTES = "33554432"
+PRODUCT_HOST = "health-relay.leblancfg.com"
+PRODUCT_URL = "https://leblancfg.com/healthkit-relay/"
+# Secrets (wrangler secret put): DEMO_CODE, the shared setup code (16+ characters of A-Z and
+# 2-7, in the App Review notes), and DEMO_KEY, 32 random bytes in hex that sign the tokens
+# (replacing it signs out every demo device).
+
+[[durable_objects.bindings]]
+name = "DEMO_STATE"
+class_name = "DemoState"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DemoState"]

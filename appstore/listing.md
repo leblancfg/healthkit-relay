@@ -108,7 +108,7 @@ Capabilities: Unrestricted Web Access **No** (links open Safari), User-Generated
   to it, and the app has no analytics, crash reporting, advertising or third-party SDK.
   The developer's demo server for App Review stores no Health data either: it validates each
   batch, answers and drops it (counts only), so nothing is retained beyond servicing the
-  request.
+  request. It runs on Cloudflare Workers with request logs off.
 - Result on the product page: **Data Not Collected**.
 - Tracking: **No** (`NSPrivacyTracking` false in the privacy manifest; no tracking domains).
 
@@ -121,7 +121,7 @@ build.
 ## Other App Store Connect answers
 
 - **Sign-in required:** Yes. App Review Information › Sign-in information: User name
-  `https://health-demo.tail3f3b8.ts.net` (the server address), Password: the demo setup
+  `https://health-relay-demo.leblancfg.com` (the server address), Password: the demo setup
   code. The app has no account; the setup code is what pairs it with a server.
 - **Contains, displays or accesses third-party content:** No.
 - **Advertising identifier (IDFA):** No.

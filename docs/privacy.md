@@ -61,7 +61,9 @@ demonstration server, reachable with a setup code given to App Review. It stores
 about the people who use it: it checks each batch it receives, answers it and drops it,
 keeping only the total number of records received in the last hour, all devices together.
 Devices paired with it get a signed token that the server checks without keeping a list of
-devices, names or addresses. It is not part of the app's normal use.
+devices, names or addresses. It runs on Cloudflare Workers, at
+health-relay-demo.leblancfg.com, with request logs turned off; Cloudflare carries its
+traffic, as a hosting provider does. It is not part of the app's normal use.
 
 ## Keeping and deleting your data
 

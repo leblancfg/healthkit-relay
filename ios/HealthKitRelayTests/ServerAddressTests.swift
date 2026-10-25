@@ -69,7 +69,8 @@ final class ServerAddressTests: XCTestCase {
     }
 
     func testMovesToThePreferredAddress() async throws {
-        let moved = try XCTUnwrap(await follow())
+        let result = await follow()
+        let moved = try XCTUnwrap(result)
         XCTAssertEqual(moved.url, "https://health.example.ts.net")
         XCTAssertEqual(moved.token, current.token)
         XCTAssertEqual(ServerSettings.load(), moved)
@@ -78,39 +79,46 @@ final class ServerAddressTests: XCTestCase {
         XCTAssertEqual(first.url?.path, "/v1/server")
         XCTAssertNil(first.value(forHTTPHeaderField: "Authorization"))
         // Once there, nothing more to do.
-        XCTAssertNil(await AddressHandoff.follow(handoff, from: moved, device: "dev1", session: session, defaults: defaults))
+        let r1 = await AddressHandoff.follow(handoff, from: moved, device: "dev1", session: session, defaults: defaults)
+        XCTAssertNil(r1)
     }
 
     func testStaysWhenAnotherServerAnswers() async {
         HandoffStub.answers["health.example.ts.net/v1/server"] = (200, #"{"server_id":"0000000000000000ffffffffffffffff"}"#)
-        XCTAssertNil(await follow())
+        let r2 = await follow()
+        XCTAssertNil(r2)
         XCTAssertEqual(ServerSettings.load(), current)
         XCTAssertFalse(tokenSentToNewAddress)
     }
 
     func testStaysWhenTheTokenIsAnotherDevices() async {
         HandoffStub.answers["health.example.ts.net/v1/status"] = (200, #"{"version":"1.0.0","wire_version":2,"records":7,"device":{"id":"dev2","name":"iPhone"},"server_id":"\#(id)"}"#)
-        XCTAssertNil(await follow())
+        let r3 = await follow()
+        XCTAssertNil(r3)
         XCTAssertEqual(ServerSettings.load(), current)
     }
 
     func testStaysWhenTheTokenIsRefused() async {
         HandoffStub.answers["health.example.ts.net/v1/status"] = (401, #"{"error":"unauthorized"}"#)
-        XCTAssertNil(await follow())
+        let r4 = await follow()
+        XCTAssertNil(r4)
         XCTAssertEqual(ServerSettings.load(), current)
     }
 
     func testOnlyHTTPS() async {
-        XCTAssertNil(await follow(Handoff(serverID: id, preferredURL: "http://192.168.1.10:8080")))
+        let r5 = await follow(Handoff(serverID: id, preferredURL: "http://192.168.1.10:8080"))
+        XCTAssertNil(r5)
         XCTAssertTrue(HandoffStub.requests.isEmpty)
-        XCTAssertNil(await follow(Handoff(serverID: nil, preferredURL: "https://health.example.ts.net")))
+        let r6 = await follow(Handoff(serverID: nil, preferredURL: "https://health.example.ts.net"))
+        XCTAssertNil(r6)
         XCTAssertTrue(HandoffStub.requests.isEmpty)
     }
 
     func testRedirectsAreNotFollowed() async {
         HandoffStub.answers["health.example.ts.net/v1/server"] = (302, "https://elsewhere.example/v1/server")
         HandoffStub.answers["elsewhere.example/v1/server"] = (200, #"{"server_id":"\#(id)"}"#)
-        XCTAssertNil(await follow())
+        let r7 = await follow()
+        XCTAssertNil(r7)
         XCTAssertFalse(HandoffStub.requests.contains { $0.url?.host == "elsewhere.example" })
         XCTAssertEqual(ServerSettings.load(), current)
     }
@@ -118,18 +126,22 @@ final class ServerAddressTests: XCTestCase {
     func testFailedAddressIsTriedAgainLater() async {
         HandoffStub.answers["health.example.ts.net/v1/server"] = (502, "bad gateway")
         let start = Date.now
-        XCTAssertNil(await follow(now: start))
+        let r8 = await follow(now: start)
+        XCTAssertNil(r8)
         let tries = HandoffStub.requests.count
-        XCTAssertNil(await follow(now: start.addingTimeInterval(60)))
+        let r9 = await follow(now: start.addingTimeInterval(60))
+        XCTAssertNil(r9)
         XCTAssertEqual(HandoffStub.requests.count, tries, "tried again within the hour")
         HandoffStub.answers["health.example.ts.net/v1/server"] = (200, #"{"server_id":"\#(id)"}"#)
-        XCTAssertNotNil(await follow(now: start.addingTimeInterval(AddressHandoff.retryAfter + 1)))
+        let r10 = await follow(now: start.addingTimeInterval(AddressHandoff.retryAfter + 1))
+        XCTAssertNotNil(r10)
     }
 
     func testANewSetupMeanwhileWins() async throws {
         // Another pairing saved new settings while the check ran: the handoff gives up.
         try ServerSettings(url: "https://other.example", token: "t2").save()
-        XCTAssertNil(await follow())
+        let r11 = await follow()
+        XCTAssertNil(r11)
         XCTAssertEqual(ServerSettings.load().url, "https://other.example")
     }
 

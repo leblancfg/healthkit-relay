@@ -9,7 +9,6 @@ preview_urls = false
 
 routes = [
   { pattern = "health-relay-demo.leblancfg.com", custom_domain = true },
-  { pattern = "health-relay.leblancfg.com", custom_domain = true },
 ]
 
 # No request logs: the demo keeps nothing about who uses it.
@@ -24,8 +23,6 @@ VERSION = "0.7.0+worker"
 # Upload bytes accepted per hour (-demo-quota) and the largest body (-max-body-bytes).
 DEMO_QUOTA = "268435456"
 MAX_BODY_BYTES = "33554432"
-PRODUCT_HOST = "health-relay.leblancfg.com"
-PRODUCT_URL = "https://leblancfg.com/healthkit-relay/"
 # Secrets (wrangler secret put): DEMO_CODE, the shared setup code (16+ characters of A-Z and
 # 2-7, in the App Review notes), and DEMO_KEY, 32 random bytes in hex that sign the tokens
 # (replacing it signs out every demo device).

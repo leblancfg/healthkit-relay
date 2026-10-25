@@ -1,3 +1,8 @@
+---
+description: >-
+  How Health Relay keeps Apple Health data private: where your data goes, what the app can do, tokens, the threat model and a hardening checklist.
+---
+
 # Security & privacy
 
 Health data is among the most sensitive data there is. With Health Relay, your data goes from

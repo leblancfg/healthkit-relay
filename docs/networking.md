@@ -1,3 +1,8 @@
+---
+description: >-
+  Reach your Health Relay server from your iPhone: on your home network only, from anywhere with Tailscale, or behind Caddy with HTTPS.
+---
+
 # Networking & HTTPS
 
 Your iPhone reaches the server at the server address, e.g. `http://192.168.1.10:8080` at

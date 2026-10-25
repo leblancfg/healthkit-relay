@@ -1,3 +1,8 @@
+---
+description: >-
+  The words the Health Relay docs use (server address, setup page, admin token, paired device, archive), each explained with an example.
+---
+
 # Glossary
 
 These are the words this guide uses. Each one names one thing, and every page uses the same

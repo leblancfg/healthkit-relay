@@ -1,0 +1,55 @@
+{#- Search and sharing: page titles, Open Graph and Twitter cards, and the app's structured
+    data. A page sets `seo_title` in its front matter for a full title of its own, and
+    `description` for its search snippet and card text. -#}
+{% extends "base.html" %}
+
+{% block htmltitle %}
+  {% if page.meta and page.meta.seo_title %}
+    <title>{{ page.meta.seo_title }}</title>
+  {% else %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}
+
+{% block extrahead %}
+  {% set title = page.meta.seo_title if page.meta and page.meta.seo_title
+       else (config.site_name if page.is_homepage
+       else (page.meta.title if page.meta and page.meta.title else page.title | striptags) ~ " - " ~ config.site_name) %}
+  {% set description = page.meta.description if page.meta and page.meta.description
+       else config.site_description %}
+  {% set image = config.site_url ~ "assets/social.png" %}
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ config.site_name }}">
+  <meta property="og:title" content="{{ title }}">
+  <meta property="og:description" content="{{ description }}">
+  <meta property="og:url" content="{{ page.canonical_url }}">
+  <meta property="og:image" content="{{ image }}">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Health Relay: your Apple Health data, on a server you own">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ title }}">
+  <meta name="twitter:description" content="{{ description }}">
+  <meta name="twitter:image" content="{{ image }}">
+  {% if page.is_homepage %}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Health Relay",
+    "description": {{ config.site_description | tojson }},
+    "url": "{{ config.site_url }}",
+    "image": "{{ image }}",
+    "operatingSystem": "iOS 17 or later",
+    "applicationCategory": "HealthApplication",
+    "softwareHelp": "{{ config.site_url }}support/",
+    "license": "https://opensource.org/licenses/MIT",
+    "isAccessibleForFree": true,
+    "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+    "author": {"@type": "Person", "name": "François Leblanc", "url": "https://leblancfg.com/"},
+    "sameAs": ["{{ config.repo_url }}"]
+  }
+  </script>
+  {% endif %}
+{% endblock %}

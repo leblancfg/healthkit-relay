@@ -1,3 +1,8 @@
+---
+description: >-
+  Pick a setup guide for the Health Relay server: Docker and Compose, Linux with systemd, NixOS, macOS, Synology, Unraid, TrueNAS or Raspberry Pi.
+---
+
 # Setup guides
 
 The server is the `healthkit-relay` program. It runs on a computer you keep on and receives

@@ -1,3 +1,8 @@
+---
+description: >-
+  Fix common Health Relay problems: the admin token, pairing errors, background sync on the iPhone, missing data types, Grafana and the query API.
+---
+
 # Troubleshooting
 
 Each problem below says what you see, why it happens, what to do, and how to check it worked.

@@ -15,8 +15,6 @@
 //
 // The contract test (server/demo_contract_test.go) runs the same requests against this and
 // against the Go server's demo mode.
-//
-// Requests for PRODUCT_HOST (the product's address) are sent to the documentation.
 
 import { BadRequest, checkBatch, fields, heartbeatSchema, pairSchema, WireVersion } from "./batch.js";
 import { loginPage, pairPage } from "./setup.js";
@@ -30,11 +28,6 @@ const badCodeMessage = "This setup code expired or was already used. Get a new o
 
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url);
-    if (env.PRODUCT_HOST && url.hostname === env.PRODUCT_HOST) {
-      return new Response(null, { status: 301, headers: {
-        Location: env.PRODUCT_URL + url.pathname.replace(/^\//, "") + url.search, "Strict-Transport-Security": "max-age=31536000" } });
-    }
     const stub = env.DEMO_STATE.get(env.DEMO_STATE.idFromName("demo"));
     return stub.fetch(request);
   },

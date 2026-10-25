@@ -1,3 +1,8 @@
+---
+description: >-
+  What Health Relay stores from Apple Health and HealthKit, the Parquet archive layout, and how to query heart rate, sleep, workouts and routes with DuckDB.
+---
+
 # Data model & querying
 
 The server keeps your data in the **archive**: the folder given by `-archive-dir`

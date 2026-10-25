@@ -1,3 +1,8 @@
+---
+description: >-
+  Run the Health Relay server with Docker or Docker Compose: the image, the settings, pairing an iPhone, VictoriaMetrics and Grafana, and updates.
+---
+
 # Docker & Compose
 
 Docker runs the server in a *container*: a packaged program with everything it needs. Docker
@@ -13,12 +18,12 @@ its archive in `/data`.
 | Tag | What |
 |---|---|
 | `latest` | the latest release |
-| `X.Y.Z`, e.g. `0.6.0` | one release |
-| `X.Y`, e.g. `0.6` | the latest patch release of that minor line |
+| `X.Y.Z`, e.g. `0.7.0` | one release |
+| `X.Y`, e.g. `0.7` | the latest patch release of that minor line |
 | `X` | the latest release of that major line (from 1.0 on) |
 | `edge`, `sha-<commit>` | the main branch, between releases |
 
-To choose when you update, pin a version: `HKR_VERSION=0.6.0` in `.env` (see below).
+To choose when you update, pin a version: `HKR_VERSION=0.7.0` in `.env` (see below).
 
 The image sets `HKR_LISTEN=:8080` and `HKR_ARCHIVE_DIR=/data`, so you mount the archive at
 `/data` and set the server address. Every other [flag](index.md#configuration) can be set
@@ -100,7 +105,7 @@ The service is called `relay`. It reads these settings from `.env`:
 |---|---|
 | `HKR_USER` | required: the `uid:gid` (user and group IDs) the server runs as. Use your own, so that `./data` stays yours and is backed up with the folder |
 | `HKR_PUBLIC_URL` | required: the server address, put in setup codes, e.g. `http://192.168.1.10:8080` or `https://health.example.com` |
-| `HKR_VERSION` | image tag, default `latest`; e.g. `HKR_VERSION=0.6.0` to pin |
+| `HKR_VERSION` | image tag, default `latest`; e.g. `HKR_VERSION=0.7.0` to pin |
 | `HKR_PORT` | port on the host, default `8080` |
 | `HKR_FORWARD_URL` | optional: forward numeric samples to a metrics database (below) |
 

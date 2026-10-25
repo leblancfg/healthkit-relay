@@ -1,3 +1,8 @@
+---
+description: >-
+  Run the Health Relay server on a Mac that stays on, Apple silicon or Intel, as a launchd service that starts at login.
+---
+
 # macOS (launchd)
 
 A Mac mini, or any Mac that stays on, can run the server, on Apple silicon or Intel. launchd,
@@ -26,7 +31,7 @@ ipconfig getifaddr en0    # e.g. 192.168.1.10
     healthkit-relay -version
     ```
 
-    The last command prints the version, e.g. `0.6.0`.
+    The last command prints the version, e.g. `0.7.0`.
 
 With Nix, `nix profile install github:leblancfg/healthkit-relay` installs it instead.
 

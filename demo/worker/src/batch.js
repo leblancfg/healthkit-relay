@@ -9,7 +9,7 @@ export const MaxBatchPartitions = 2000;
 const kindRE = /^[a-z][a-z0-9_]{0,63}$/;
 const typeRE = /^HK[A-Za-z0-9]{1,120}$/;
 const uuidRE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-const rfc3339RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?(Z|([+-])(\d{2}):(\d{2}))$/;
+const rfc3339RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{1,2}):(\d{2}):(\d{2})(?:[.,](\d+))?(Z|([+-])(\d{2}):(\d{2}))$/;
 const utf8 = new TextEncoder();
 
 export class BadRequest extends Error {}
@@ -83,7 +83,8 @@ function jsonKind(v) {
 // quote is Go's %q for the strings these messages carry.
 const quote = (s) => JSON.stringify(s);
 
-// parseTime parses an RFC 3339 time like Go's time.Parse(time.RFC3339Nano, s): it returns
+// parseTime parses an RFC 3339 time like Go's time.Parse(time.RFC3339Nano, s), which also
+// takes a one-digit hour, a comma before the fraction and offsets up to 24:60: it returns
 // nanoseconds since the Unix epoch (a BigInt), or null.
 export function parseTime(s) {
   const m = rfc3339RE.exec(s);
@@ -93,7 +94,7 @@ export function parseTime(s) {
   let offset = 0;
   if (m[8] !== "Z") {
     const oh = Number(m[10]), om = Number(m[11]);
-    if (oh > 23 || om > 59) return null;
+    if (oh > 24 || om > 60) return null; // Go's ranges
     offset = (oh * 60 + om) * 60 * (m[9] === "-" ? -1 : 1);
   }
   const frac = BigInt(((m[7] || "") + "000000000").slice(0, 9));
@@ -183,7 +184,12 @@ function parseDeletion(raw) {
 // checkBatch validates an upload's decoded body like the Go server and returns the answer to
 // send; it throws BadRequest with the Go server's message otherwise.
 export function checkBatch(body) {
-  const b = fields(body, batchSchema);
+  let b;
+  try {
+    b = fields(body, batchSchema);
+  } catch (e) {
+    throw new BadRequest("invalid JSON: " + e.message);
+  }
   const samples = b.samples ?? [], records = b.records ?? [], deletions = b.deletions ?? [];
   const parts = new Set();
   samples.forEach((raw, i) => {

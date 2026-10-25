@@ -58,6 +58,41 @@ jobs:
         working-directory: docker/healthcheck
         run: go vet ./... && go build -o /dev/null .
 
+  demo:
+    name: Demo server (Worker, contract test)
+    # The public demo server is a Cloudflare Worker (demo/worker). The contract test runs the
+    # same requests against the Go server's demo mode (the job above) and against the Worker,
+    # here under wrangler dev, so the two cannot drift apart.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CGO_ENABLED: "0"
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache-dependency-path: server/go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: demo/worker/package-lock.json
+      - name: npm ci, Worker tests
+        working-directory: demo/worker
+        run: npm ci --no-audit --no-fund && npm test
+      - name: Contract test against the Worker
+        working-directory: demo/worker
+        run: |
+          printf 'DEMO_CODE=ABCD-EFGH-JKLM-NPQR\nDEMO_KEY=%s\n' "$(openssl rand -hex 32)" > .dev.vars
+          npx wrangler dev --port 8787 --ip 127.0.0.1 --var DEMO_QUOTA:1048576 --var MAX_BODY_BYTES:131072 > "$RUNNER_TEMP/wrangler.log" 2>&1 &
+          for _ in $(seq 90); do curl -sf http://127.0.0.1:8787/healthz >/dev/null && break; sleep 1; done
+          cd ../../server
+          HKR_DEMO_URL=http://127.0.0.1:8787 HKR_DEMO_CODE=ABCD-EFGH-JKLM-NPQR HKR_DEMO_PUBLIC_URL=https://health-relay-demo.leblancfg.com \
+            HKR_DEMO_QUOTA=1048576 HKR_DEMO_MAX_BODY=131072 go test -count=1 -v -run TestDemoContract . ||
+            { tail -50 "$RUNNER_TEMP/wrangler.log"; exit 1; }
+
   scripts:
     name: Shell, workflows
     runs-on: ubuntu-24.04

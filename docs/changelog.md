@@ -53,6 +53,10 @@ server releases and the app are versioned separately.
 - The demo server stores nothing about its users: batches are checked, answered and dropped;
   devices get signed tokens (30 days) instead of entries in `devices.json`; no per-request
   log lines; upload bytes, concurrent uploads and pairings are capped per hour.
+- The public demo server moved to https://health-relay-demo.leblancfg.com: the demo mode as
+  a Cloudflare Worker (demo/worker), checked against the Go server's by one request suite
+  (`demo_contract_test.go`, in CI under `wrangler dev`). https://health-relay.leblancfg.com
+  leads to this documentation.
 - Metrics forwarding refuses redirects. State files are synced with their directory, so a
   revocation survives a power loss. Erasing a device with nothing stored returns at once.
   Setup page forms without Fetch Metadata must carry the page's own Origin.

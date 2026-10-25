@@ -106,3 +106,10 @@ unchanged.
 |---|---|---|---|
 | 1 | Major | An upload checked before the revoke but noting the erase count after the erase could still be stored | The upload notes the count before its token is checked: an erase finishing after that voids it (409), and one finishing before it revoked the token (401). The count is server-wide: an erase voids every upload under way, which the app sends again |
 | 2 | Major | The app took an erase without revocation (a server before 1.0, the admin token) as a disconnect | The answer says `"disconnected": true` when nothing more sent with the token is stored (revoked, or a demo server); otherwise the app still disconnects (the data is erased) and says to revoke the iPhone, or change the admin token, on the server |
+
+## Round 8 (on a0d81ea)
+
+No findings. Round 7's fixes verified: the upload notes the erase count before its token is
+checked, and the count moves before the erase releases its locks; no upload path skips the
+check; the Go and Worker demo answers agree; the app's erase answer handling checked in
+Swift 5 mode against stubs. Nothing Blocking or Major remains.

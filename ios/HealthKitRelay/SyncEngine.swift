@@ -971,10 +971,12 @@ actor SyncEngine {
             for d in page.deleted {
                 items.append(try WireItem(.deletion, WireEncoder.deletion(d, type: type)))
             }
-            let commit = try anchors.commit(page.anchor, for: key, from: stored)
+            var commit = try anchors.commit(page.anchor, for: key, from: stored)
+            commit.connection = ctx.uploader.settings.connectionKey
             try await upload(items, ctx, commit: commit)
             // Not moved: an upload a cut-short sync left moved it meanwhile (same page). The
             // next page starts from there.
+            guard Self.isCurrent(commit) else { throw UploadError.notConfigured }
             try anchors.apply(commit)
 
             total += items.count
@@ -1030,9 +1032,19 @@ actor SyncEngine {
         }
     }
 
+    /// Whether a position an upload carries belongs to the connection in use now (one saved by
+    /// app 0.7, with no connection, does).
+    static func isCurrent(_ commit: UploadCommit) -> Bool {
+        commit.connection == nil || commit.connection == ServerSettings.load().connectionKey
+    }
+
     /// An upload finished after its sync was gone, confirmed by the server: moves the position
     /// it carries, unless a later sync moved it already.
     func commitFinishedUpload(_ commit: UploadCommit) -> Bool {
+        guard Self.isCurrent(commit) else {
+            Log.info("upload: \(Self.shortName(commit.key)) was sent on an earlier connection; its position is not moved")
+            return false
+        }
         do {
             let moved = try anchors.apply(commit)
             if !moved { Log.info("upload: \(Self.shortName(commit.key)) moved on meanwhile; kept") }

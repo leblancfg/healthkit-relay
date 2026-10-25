@@ -44,3 +44,15 @@ reasoning) before the first submission. Each finding, and what was done.
 | 26 | Minor | "Private network" trusts a local proxy's X-Forwarded-For | Documented; Funnel requests are recognised by their header |
 | 27 | Minor | Review notes promised a video; "Sign-in required" said No | The screenshot run records the video; sign-in information carries the address and code |
 | 28 | Minor | Demo mode did not refuse a real archive | The demo no longer writes or erases the archive |
+
+## Round 3 (on 5a4e13d)
+
+Round 2's fixes verified; "Data Not Collected" holds for the stateless demo; the accepted
+items' justifications hold.
+
+| # | Sev. | Finding | Done |
+|---|---|---|---|
+| 1 | Blocking | A late erase failure restored the old credentials after a Disconnect or a new pairing | A connection generation changes at every connect, disconnect and erase; an awaited setup, token upgrade or erase saves or restores only if it did not change; Disconnect and Connect wait while an erase runs |
+| 2 | Major | `010.010.010.010` passed the local-address check (Darwin reads it as 8.8.8.8) | IPv4 only in plain form: four decimal numbers without leading zeros |
+| 3 | Major | A late first-page confirmation from the old server could move the new server's reset positions | Each position an upload carries names its connection; it moves only on that connection, checked after the answer and before applying; a new pairing stops the old work before resetting |
+| 4 | Minor | A late status error could mark the new server revoked or unreachable | The error paths check the connection too |

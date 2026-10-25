@@ -49,6 +49,8 @@ struct Uploader: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(settings.token)", forHTTPHeaderField: "Authorization")
         let body = try batch.body()
+        var commit = commit
+        commit?.connection = settings.connectionKey
         let upload = PendingUpload(records: batch.recordCount, items: batch.count, commit: commit)
 
         var lastError = UploadError.failed("no attempt")
@@ -73,6 +75,9 @@ struct Uploader: Sendable {
                 }
                 if (200..<300).contains(code) {
                     guard Self.confirms(code, data, records: batch.recordCount) else { throw UploadError.serverTooOld }
+                    // Disconnected or paired elsewhere while it was on its way: this sync's
+                    // positions belong to the old connection and must not move.
+                    guard stillConnected(settings) else { throw UploadError.notConfigured }
                     return
                 }
                 let msg = String(decoding: data.prefix(300), as: UTF8.self)

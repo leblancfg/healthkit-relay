@@ -105,4 +105,6 @@ struct UploadCommit: Codable, Equatable, Sendable {
     var ext: String
     var from: Data?
     var to: Data
+    /// The connection (ServerSettings.connectionKey) the upload went to; nil from app 0.7.
+    var connection: String?
 }

@@ -262,6 +262,32 @@ final class AppModelTests: XCTestCase {
         model.pendingLink = nil
     }
 
+    /// Erase Server Data and Disconnect: stops, erases, disconnects. When the erase fails, the
+    /// connection stays; when the user disconnected meanwhile, a late failure reconnects nothing.
+    func testEraseAndDisconnect() async throws {
+        var model = try await erasable()
+        try await model.eraseServerDataAndDisconnect()
+        XCTAssertFalse(model.isConfigured)
+        XCTAssertEqual(ServerSettings.load().url, "")
+        XCTAssertEqual(eraseRequests.count, 1)
+
+        model = try await erasable()
+        StubServer.eraseAnswer = (500, #"{"error":"disk full"}"#)
+        do {
+            try await model.eraseServerDataAndDisconnect()
+            XCTFail("erase succeeded")
+        } catch {}
+        XCTAssertEqual(ServerSettings.load().url, "https://stub.test", "a failed erase keeps the connection")
+
+        // The answer (200 ms away) comes after a disconnect: nothing is restored.
+        let erase = Task { try await model.eraseServerDataAndDisconnect() }
+        try await Task.sleep(for: .milliseconds(50))
+        model.disconnect()
+        _ = try? await erase.value
+        XCTAssertEqual(ServerSettings.load().url, "", "a late erase failure reconnected the server")
+        XCTAssertFalse(model.isConfigured)
+    }
+
     func testUnencryptedLinkIsFlagged() {
         XCTAssertTrue(PairingLink(URL(string: "healthrelay://pair?server=http%3A%2F%2F192.168.1.20%3A8080&code=C")!)!.isUnencrypted)
         XCTAssertFalse(PairingLink(URL(string: "healthrelay://pair?server=https%3A%2F%2Fh.example&code=C")!)!.isUnencrypted)

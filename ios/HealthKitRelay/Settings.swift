@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Security
 
@@ -25,8 +26,12 @@ struct ServerSettings: Equatable, Sendable {
     static func isLocal(_ host: String) -> Bool {
         let h = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         if h.hasSuffix(".local") { return true }
-        let v4 = h.split(separator: ".").compactMap { UInt8($0) }
-        if v4.count == 4, h.split(separator: ".").count == 4 {
+        // Digits and dots only: an IPv4 address, taken only in its plain form (four decimal
+        // numbers without leading zeros). Networking reads 010.010.010.010 as 8.8.8.8.
+        if h.allSatisfy({ $0.isASCII && ($0.isNumber || $0 == ".") }) {
+            let parts = h.split(separator: ".", omittingEmptySubsequences: false)
+            let v4 = parts.compactMap { p -> UInt8? in p.count > 1 && p.hasPrefix("0") ? nil : UInt8(p) }
+            guard parts.count == 4, v4.count == 4 else { return false }
             switch (v4[0], v4[1]) {
             case (10, _), (127, _), (192, 168), (169, 254): return true
             case (172, 16...31), (100, 64...127): return true
@@ -50,6 +55,12 @@ struct ServerSettings: Equatable, Sendable {
     var host: String {
         guard let c = baseURL.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }), let host = c.host else { return url }
         return c.port.map { "\(host):\($0)" } ?? host
+    }
+
+    /// Names this connection (address and token) without revealing the token: sync positions
+    /// an upload carries apply only to the connection it was sent on.
+    var connectionKey: String {
+        SHA256.hash(data: Data((url + "\n" + token).utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Whether both point to the same server (case, default ports and a trailing slash aside).

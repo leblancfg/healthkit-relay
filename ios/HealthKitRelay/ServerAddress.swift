@@ -13,6 +13,30 @@ struct Handoff: Codable, Equatable, Sendable {
     }
 }
 
+/// The ID of the server this app is paired with, from its last answer that named one (status,
+/// pairing, heartbeat). Lets the app recognize its server at another address.
+enum KnownServer {
+    static let key = "serverID"
+
+    static var id: String? {
+        get { UserDefaults.standard.string(forKey: key) }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+
+    static func note(_ id: String?) {
+        if let id, !id.isEmpty, id != Self.id { Self.id = id }
+    }
+
+    /// Whether `url` reaches the server this app is paired with: the same address, or, over
+    /// HTTPS, an address answering GET /v1/server with the known server ID (no token sent).
+    static func isCurrent(_ url: URL, settings: ServerSettings, session: URLSession = AddressHandoff.noRedirects) async -> Bool {
+        if settings.sameServer(as: url.absoluteString) { return true }
+        guard settings.isComplete, let id, url.scheme?.lowercased() == "https" else { return false }
+        let answer = try? await ServerClient(base: url, session: session).serverInfo()
+        return answer?.serverID == id
+    }
+}
+
 /// Moves the app to the server's preferred address on its own. The server, reached at the
 /// current address with this iPhone's token, names its preferred address and its server ID;
 /// the app switches once that address answers over HTTPS with the same server ID (GET
@@ -31,6 +55,7 @@ enum AddressHandoff {
     static func follow(_ handoff: Handoff, from settings: ServerSettings, device: String?,
                        session: URLSession = noRedirects, defaults: UserDefaults = .standard,
                        now: Date = .now) async -> ServerSettings? {
+        KnownServer.note(handoff.serverID)
         guard let id = handoff.serverID, !id.isEmpty, let preferred = handoff.preferredURL,
               settings.isComplete, !settings.sameServer(as: preferred) else { return nil }
         var tried = defaults.dictionary(forKey: triedKey) as? [String: Date] ?? [:]

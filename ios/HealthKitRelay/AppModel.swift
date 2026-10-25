@@ -30,6 +30,12 @@ final class AppModel: ObservableObject {
     /// a server the user left.
     private var generation = 0
 
+    /// Changes only at a disconnect or an erase. A setup accepted before it (waiting in
+    /// `setupChain`, or awaiting an answer) does nothing after it. Unlike `generation`, a
+    /// pairing does not change it: the setup queued after a pairing still runs, with the
+    /// token that pairing left.
+    private var lifecycle = 0
+
     /// A foreground sync runs on opening if the last one is older than this.
     static let syncAfter: TimeInterval = 15 * 60
 
@@ -136,7 +142,10 @@ final class AppModel: ObservableObject {
         setupError = nil
         defer { connecting = nil }
         var connected = false
-        await exclusively { connected = await self.pairAndSave(url: url, host: host, token: token, pair: pair) }
+        let accepted = lifecycle
+        await exclusively {
+            connected = await self.pairAndSave(url: url, host: host, token: token, accepted: accepted, pair: pair)
+        }
         guard connected else { return }
         // Health access comes next (one tap on the main screen, which says what to pick);
         // with access already granted, syncing starts now.
@@ -144,13 +153,17 @@ final class AppModel: ObservableObject {
         if !needsHealthAccess { Task { await self.sync(userInitiated: true) } }
     }
 
-    private func pairAndSave(url: String, host: String, token: String?,
+    private func pairAndSave(url: String, host: String, token: String?, accepted: Int,
                              pair: (String?) async throws -> ServerClient.Paired?) async -> Bool {
+        guard lifecycle == accepted else {
+            Log.info("setup: \(host) was asked for before a disconnect; not connected")
+            return false
+        }
         let sameServer = URL(string: url).map { KnownServer.isCurrent($0, settings: settings) } ?? false
         let started = generation
         do {
             let paired = try await pair(sameServer ? settings.token : nil)
-            guard generation == started else {
+            guard generation == started, lifecycle == accepted else {
                 Log.info("setup: \(host) answered after a disconnect or another setup; not connected")
                 return false
             }
@@ -162,12 +175,15 @@ final class AppModel: ObservableObject {
                 BackgroundUploads.shared.cancelAll()
             }
             generation += 1
+            let mine = generation
             try new.save()
             if !sameServer {
                 // Another server (or a new pairing after a disconnect) has none of this
                 // iPhone's history yet.
                 await SyncEngine.shared.resetAnchors()
                 Log.info("setup: new server, history will be sent again")
+                // A disconnect during the reset cleared the settings: this setup is over.
+                guard generation == mine, lifecycle == accepted else { return false }
             }
             settings = new
             device = paired?.device
@@ -187,11 +203,17 @@ final class AppModel: ObservableObject {
         return true
     }
 
-    /// The server's preferred address answered as the same server (AddressHandoff), from a
-    /// status check or a heartbeat: settings already saved, history and sync positions kept.
-    func serverMoved(to new: ServerSettings) {
-        guard ServerSettings.load() == new else { return }
+    /// The server's preferred address answered as the same server (AddressHandoff, from a
+    /// status check or a heartbeat): the app moves there, history and sync positions kept.
+    /// One step on the main actor, like disconnect and pairing: it saves only if the app is
+    /// still connected with `old`, as the app and as stored.
+    @discardableResult
+    func adoptAddress(_ new: ServerSettings, from old: ServerSettings) -> Bool {
+        guard settings == old, ServerSettings.load() == old, (try? new.save()) != nil else { return false }
+        generation += 1
         settings = new
+        Log.info("server address: moved from \(old.host) to \(new.host), as the server asked")
+        return true
     }
 
     /// Has the server permanently delete everything this iPhone uploaded, then disconnects:
@@ -204,6 +226,7 @@ final class AppModel: ObservableObject {
         erasing = true
         defer { erasing = false }
         generation += 1
+        lifecycle += 1
         let started = generation
         Log.info("erase: stopping, then asking \(kept.host) to delete this iPhone's data")
         ServerSettings.clear()
@@ -226,6 +249,7 @@ final class AppModel: ObservableObject {
     /// what was under way: the running sync and the uploads the system carries on.
     func disconnect() {
         generation += 1
+        lifecycle += 1
         Log.info("setup: disconnected from \(settings.host)")
         ServerSettings.clear()
         SyncEngine.shared.backgroundTimeOver(force: true)
@@ -243,7 +267,8 @@ final class AppModel: ObservableObject {
     /// An app set up by hand before pairing existed holds the admin token: swap it for a
     /// device token of its own, once, without asking anything.
     private func upgradeServerToken() async {
-        await exclusively { await self.upgradeServerTokenNow() }
+        let accepted = lifecycle
+        await exclusively { if self.lifecycle == accepted { await self.upgradeServerTokenNow() } }
     }
 
     private func upgradeServerTokenNow() async {
@@ -376,7 +401,7 @@ final class AppModel: ObservableObject {
             reachable = true
             revoked = false
             if connecting == nil, let moved = await AddressHandoff.follow(status.handoff, from: asked, device: device?.id) {
-                serverMoved(to: moved)
+                adoptAddress(moved, from: asked)
             }
         } catch ServerError.unauthorized {
             guard settings == asked else { return }

@@ -49,8 +49,6 @@ struct Uploader: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(settings.token)", forHTTPHeaderField: "Authorization")
         let body = try batch.body()
-        var commit = commit
-        commit?.connection = settings.connectionKey
         let upload = PendingUpload(records: batch.recordCount, items: batch.count, commit: commit)
 
         var lastError = UploadError.failed("no attempt")

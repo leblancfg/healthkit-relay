@@ -32,6 +32,11 @@ server releases and the app are versioned separately.
 - Each step that waits on the network (pairing, token upgrade, erase, status) changes the
   connection only if the user did not disconnect or set up another server meanwhile; sync
   positions move only on the connection their upload went to.
+- A setup accepted before a disconnect or an erase does nothing after it, even when it was
+  waiting behind another setup; the address handoff moves the app in one step with
+  disconnect and pairing. Every sync position (pages, empty pages, activity summaries, effort
+  relationships, uploads finishing later) moves only for its own connection and set of
+  positions, which every reset renews.
 - A new install starts unpaired: a server address and token an earlier install left in the
   Keychain are cleared on first start.
 - Privacy manifest (`PrivacyInfo.xcprivacy`): no tracking, no collected data, the reasons for

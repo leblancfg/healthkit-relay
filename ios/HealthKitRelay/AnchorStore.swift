@@ -85,6 +85,16 @@ struct AnchorStore: Sendable {
         try write(Data(value.utf8), key, "txt")
     }
 
+    /// Names this set of positions; a reset starts a new one. Kept next to the directory, so
+    /// that a store without positions still has one.
+    var epoch: String {
+        let url = directory.appendingPathExtension("epoch")
+        if let id = try? String(contentsOf: url, encoding: .utf8), !id.isEmpty { return id }
+        let id = UUID().uuidString
+        try? Data(id.utf8).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        return id
+    }
+
     /// No position saved yet.
     var isEmpty: Bool {
         ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []).isEmpty
@@ -93,6 +103,7 @@ struct AnchorStore: Sendable {
     /// Forget everything: the next sync re-uploads all history (the server de-duplicates).
     func reset() {
         try? FileManager.default.removeItem(at: directory)
+        try? FileManager.default.removeItem(at: directory.appendingPathExtension("epoch"))
         create()
     }
 }
@@ -105,6 +116,8 @@ struct UploadCommit: Codable, Equatable, Sendable {
     var ext: String
     var from: Data?
     var to: Data
-    /// The connection (ServerSettings.connectionKey) the upload went to; nil from app 0.7.
+    /// The connection and set of positions it belongs to (SyncEngine.owner): it moves a
+    /// position only while both are still current. Nil (app 0.7): moves nothing; the page is
+    /// sent again and the server keeps one copy.
     var connection: String?
 }

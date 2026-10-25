@@ -65,7 +65,8 @@ enum AddressHandoff {
         case notHTTPS, differentServer, differentDevice, settingsChanged, redirected
     }
 
-    /// The settings to use from now on when the app moved (already saved), nil when it stays.
+    /// The settings to move to when the preferred address answered as this server, nil when the
+    /// app stays. Saves nothing: AppModel.adoptAddress does, on the main actor.
     static func follow(_ handoff: Handoff, from settings: ServerSettings, device: String?,
                        session: URLSession = noRedirects, defaults: UserDefaults = .standard,
                        now: Date = .now) async -> ServerSettings? {
@@ -91,12 +92,8 @@ enum AddressHandoff {
             let status = try await client.status(token: settings.token)
             guard status.serverID == id else { throw Refusal.differentServer }
             if let device, status.device?.id != device { throw Refusal.differentDevice }
-            // A setup that ran meanwhile (a new link) wins.
-            guard ServerSettings.load() == settings else { throw Refusal.settingsChanged }
-            try candidate.save()
             tried[preferred] = nil
             defaults.set(tried, forKey: triedKey)
-            Log.info("server address: moved from \(settings.host) to \(candidate.host), as the server asked")
             return candidate
         } catch {
             Log.info("server address: staying at \(settings.host), \(candidate.host) did not answer as this server: \(error)")

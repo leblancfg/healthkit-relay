@@ -669,7 +669,7 @@ actor SyncEngine {
             let handoff = try await Uploader(settings: settings).heartbeat(hb)
             lastError = nil
             if let handoff, let moved = await AddressHandoff.follow(handoff, from: settings, device: PairedDevice.load()?.id) {
-                await AppModel.shared.serverMoved(to: moved)
+                await AppModel.shared.adoptAddress(moved, from: settings)
             }
         } catch {
             lastError = "heartbeat not sent: \(error.localizedDescription)"
@@ -909,6 +909,8 @@ actor SyncEngine {
     }
 
     private struct Context {
+        /// The connection and set of positions this run works for (`owner`).
+        let owner: String
         let uploader: Uploader
         let device: JSON
         let trigger: SyncTrigger
@@ -923,7 +925,7 @@ actor SyncEngine {
             markPending(.locked)
             throw SyncError.locked
         }
-        return Context(uploader: Uploader(settings: settings), device: await Self.deviceInfo(),
+        return Context(owner: owner(settings), uploader: Uploader(settings: settings), device: await Self.deviceInfo(),
                        trigger: SyncTrigger.current, appState: state.state)
     }
 
@@ -959,7 +961,10 @@ actor SyncEngine {
             if page.samples.isEmpty && page.deleted.isEmpty {
                 // Never anchor a type that has returned nothing yet: if its read access was
                 // missing, history must still come when access is granted.
-                if previous != nil { try anchors.save(page.anchor, for: key) }
+                if previous != nil {
+                    guard owns(ctx.owner) else { throw UploadError.notConfigured }
+                    try anchors.save(page.anchor, for: key)
+                }
                 return total
             }
             var items: [WireItem] = []
@@ -972,11 +977,11 @@ actor SyncEngine {
                 items.append(try WireItem(.deletion, WireEncoder.deletion(d, type: type)))
             }
             var commit = try anchors.commit(page.anchor, for: key, from: stored)
-            commit.connection = ctx.uploader.settings.connectionKey
+            commit.connection = ctx.owner
             try await upload(items, ctx, commit: commit)
             // Not moved: an upload a cut-short sync left moved it meanwhile (same page). The
             // next page starts from there.
-            guard Self.isCurrent(commit) else { throw UploadError.notConfigured }
+            guard owns(ctx.owner) else { throw UploadError.notConfigured }
             try anchors.apply(commit)
 
             total += items.count
@@ -1032,16 +1037,19 @@ actor SyncEngine {
         }
     }
 
-    /// Whether a position an upload carries belongs to the connection in use now (one saved by
-    /// app 0.7, with no connection, does).
-    static func isCurrent(_ commit: UploadCommit) -> Bool {
-        commit.connection == nil || commit.connection == ServerSettings.load().connectionKey
+    /// Names a connection (server address and token) together with the set of sync positions
+    /// in use (reset on a new server and by an erase). Every position moves only while its
+    /// run's or upload's owner is still the current one.
+    func owner(_ settings: ServerSettings = ServerSettings.load()) -> String {
+        settings.connectionKey + ":" + anchors.epoch
     }
+
+    func owns(_ owner: String?) -> Bool { owner != nil && owner == self.owner() }
 
     /// An upload finished after its sync was gone, confirmed by the server: moves the position
     /// it carries, unless a later sync moved it already.
     func commitFinishedUpload(_ commit: UploadCommit) -> Bool {
-        guard Self.isCurrent(commit) else {
+        guard owns(commit.connection) else {
             Log.info("upload: \(Self.shortName(commit.key)) was sent on an earlier connection; its position is not moved")
             return false
         }
@@ -1188,11 +1196,13 @@ actor SyncEngine {
                 }
             }
             let items = try summaries.map { try WireItem(.record, activitySummary($0, calendar: cal)) }
-            let commit = anchors.commit(value: Self.day.string(from: end), for: positionKey)
+            var commit = anchors.commit(value: Self.day.string(from: end), for: positionKey)
+            commit.connection = ctx.owner
             try await upload(items, ctx, commit: commit)
             total += items.count
             // Only move on once something was found: with no access yet, retry from the start.
             if total > 0 || anchors.value(for: positionKey) != nil {
+                guard owns(ctx.owner) else { throw UploadError.notConfigured }
                 try anchors.apply(commit)
             }
             start = cal.date(byAdding: .day, value: 1, to: end) ?? .distantFuture
@@ -1266,9 +1276,13 @@ actor SyncEngine {
             o.put("activity_uuid", JSON(r.activity?.uuid.uuidString))
             return try WireItem(.record, .object(o))
         }
-        let commit = try anchor.map { try anchors.commit($0, for: key, from: stored) }
+        var commit = try anchor.map { try anchors.commit($0, for: key, from: stored) }
+        commit?.connection = ctx.owner
         try await upload(items, ctx, commit: commit)
-        if let commit, !(previous == nil && items.isEmpty) { try anchors.apply(commit) }
+        if let commit, !(previous == nil && items.isEmpty) {
+            guard owns(ctx.owner) else { throw UploadError.notConfigured }
+            try anchors.apply(commit)
+        }
         return items.count
     }
 

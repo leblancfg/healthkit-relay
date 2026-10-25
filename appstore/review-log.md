@@ -56,3 +56,14 @@ items' justifications hold.
 | 2 | Major | `010.010.010.010` passed the local-address check (Darwin reads it as 8.8.8.8) | IPv4 only in plain form: four decimal numbers without leading zeros |
 | 3 | Major | A late first-page confirmation from the old server could move the new server's reset positions | Each position an upload carries names its connection; it moves only on that connection, checked after the answer and before applying; a new pairing stops the old work before resetting |
 | 4 | Minor | A late status error could mark the new server revoked or unreachable | The error paths check the connection too |
+
+## Round 4 (on 23ca6cc)
+
+Round 3's #2 and #4 fixed; #1 and #3 partly. Prior accepted items stay accepted.
+
+| # | Sev. | Finding | Done |
+|---|---|---|---|
+| 1 | Blocking | A setup queued behind another before a Disconnect connected afterwards; a Disconnect during the position reset left the screen connected | A lifecycle epoch, changed only by Disconnect and erase, is taken when a setup is accepted and checked before it pairs, after every answer and after the reset; Disconnect and Connect wait while a setup runs |
+| 2 | Blocking | The address handoff's last check and save could straddle a Disconnect | The handoff only verifies; AppModel.adoptAddress checks and saves in one main-actor step, the actor Disconnect runs on |
+| 3 | Major | Empty pages, activity summaries, effort relationships, app 0.7 orphan commits and same-server erases could still move a reset position | Every position change goes through one owner check: the connection and a sync epoch that every reset renews; commits without an owner move nothing (the page is sent again, the server keeps one copy) |
+| 4 | Blocking | The Funnel demo address was unreachable from the internet | It was being retired: by owner decision (11:45) the demo moved to a Cloudflare Worker at https://health-relay-demo.leblancfg.com (another session; homelab ed102a7), which answers; the notes and listing move to it with that work |

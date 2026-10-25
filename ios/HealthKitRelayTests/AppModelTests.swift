@@ -264,6 +264,20 @@ final class AppModelTests: XCTestCase {
 
     /// Erase Server Data and Disconnect: stops, erases, disconnects. When the erase fails, the
     /// connection stays; when the user disconnected meanwhile, a late failure reconnects nothing.
+    /// Two setups for the paired server, the second waiting behind the first, then a
+    /// disconnect while the first awaits its answer: neither connects afterwards.
+    func testDisconnectCancelsQueuedSetups() async throws {
+        let model = try await erasable()
+        async let first: Void = model.open(URL(string: "healthrelay://pair?server=https%3A%2F%2Fstub.test&code=ONE")!)
+        async let second: Void = model.open(URL(string: "healthrelay://pair?server=https%3A%2F%2Fstub.test&code=TWO")!)
+        try await Task.sleep(for: .milliseconds(60))
+        model.disconnect()
+        _ = await (first, second)
+        XCTAssertEqual(ServerSettings.load().url, "", "a setup queued before the disconnect connected")
+        XCTAssertFalse(model.isConfigured)
+        XCTAssertFalse(StubServer.pairs.contains { $0.code == "TWO" }, "the queued setup still paired")
+    }
+
     func testEraseAndDisconnect() async throws {
         var model = try await erasable()
         try await model.eraseServerDataAndDisconnect()

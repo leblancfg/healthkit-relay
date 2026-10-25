@@ -73,6 +73,12 @@ final class ServerAddressTests: XCTestCase {
         let moved = try XCTUnwrap(result)
         XCTAssertEqual(moved.url, "https://health.example.ts.net")
         XCTAssertEqual(moved.token, current.token)
+        XCTAssertEqual(ServerSettings.load(), current, "follow saves nothing")
+        let adopted = await MainActor.run { () -> Bool in
+            AppModel.shared.reloadForTesting()
+            return AppModel.shared.adoptAddress(moved, from: current)
+        }
+        XCTAssertTrue(adopted)
         XCTAssertEqual(ServerSettings.load(), moved)
         // The identity check goes first, without the token.
         let first = try XCTUnwrap(HandoffStub.requests.first)
@@ -81,6 +87,19 @@ final class ServerAddressTests: XCTestCase {
         // Once there, nothing more to do.
         let r1 = await AddressHandoff.follow(handoff, from: moved, device: "dev1", session: session, defaults: defaults)
         XCTAssertNil(r1)
+    }
+
+    /// Disconnected between the checks and the move: nothing is written back.
+    func testDisconnectBeforeTheMoveWins() async throws {
+        let result = await follow()
+        let moved = try XCTUnwrap(result)
+        let adopted = await MainActor.run { () -> Bool in
+            AppModel.shared.reloadForTesting()
+            AppModel.shared.disconnect()
+            return AppModel.shared.adoptAddress(moved, from: current)
+        }
+        XCTAssertFalse(adopted)
+        XCTAssertEqual(ServerSettings.load().url, "")
     }
 
     func testStaysWhenAnotherServerAnswers() async {

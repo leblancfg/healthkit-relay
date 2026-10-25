@@ -29,6 +29,9 @@ server releases and the app are versioned separately.
   refused, and an upload iOS's background session redirected elsewhere counts as not sent.
 - Plain HTTP only to addresses on the local network (private, link-local and Tailscale IPs,
   `.local` and single-label names); every other server takes HTTPS.
+- Each step that waits on the network (pairing, token upgrade, erase, status) changes the
+  connection only if the user did not disconnect or set up another server meanwhile; sync
+  positions move only on the connection their upload went to.
 - A new install starts unpaired: a server address and token an earlier install left in the
   Keychain are cleared on first start.
 - Privacy manifest (`PrivacyInfo.xcprivacy`): no tracking, no collected data, the reasons for

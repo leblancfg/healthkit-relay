@@ -222,7 +222,9 @@ final class BackgroundUploadsTests: XCTestCase {
         let b = try batch(records: 1)
         try await uploader(t).upload(b, commit: commit)
         XCTAssertEqual(t.sent.count, 3)
-        XCTAssertEqual(t.sent.map(\.upload), Array(repeating: PendingUpload(records: 1, items: 2, commit: commit), count: 3))
+        var sentCommit = commit
+        sentCommit.connection = settings.connectionKey // the connection it went to
+        XCTAssertEqual(t.sent.map(\.upload), Array(repeating: PendingUpload(records: 1, items: 2, commit: sentCommit), count: 3))
         XCTAssertEqual(t.sent.first?.body, try b.body())
         XCTAssertEqual(t.sent.map(\.direct), [false, false, true], "after a failed transfer, retries go out directly")
     }
@@ -306,5 +308,20 @@ final class BackgroundUploadsTests: XCTestCase {
             try await u.upload(try batch(records: 1))
             XCTFail("uploaded after a disconnect")
         } catch UploadError.notConfigured {}
+    }
+
+    /// A position an upload of an earlier connection carries never moves the current one's.
+    func testCommitsBelongToTheirConnection() throws {
+        let saved = ServerSettings.load()
+        defer { if saved.url.isEmpty { ServerSettings.clear() } else { try? saved.save() } }
+        let a = ServerSettings(url: "https://a.example", token: "ta"), b = ServerSettings(url: "https://b.example", token: "tb")
+        XCTAssertNotEqual(a.connectionKey, b.connectionKey)
+        try b.save()
+        var commit = UploadCommit(key: "k", ext: "txt", from: nil, to: Data("v".utf8))
+        XCTAssertTrue(SyncEngine.isCurrent(commit), "from app 0.7: no connection")
+        commit.connection = a.connectionKey
+        XCTAssertFalse(SyncEngine.isCurrent(commit))
+        commit.connection = b.connectionKey
+        XCTAssertTrue(SyncEngine.isCurrent(commit))
     }
 }

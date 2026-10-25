@@ -25,6 +25,11 @@ final class AppModel: ObservableObject {
 
     var isConfigured: Bool { settings.isComplete }
 
+    /// Changes at every connect, disconnect and erase. An operation that awaited saves or
+    /// restores settings only if it did not change meanwhile: a late answer never reconnects
+    /// a server the user left.
+    private var generation = 0
+
     /// A foreground sync runs on opening if the last one is older than this.
     static let syncAfter: TimeInterval = 15 * 60
 
@@ -142,10 +147,21 @@ final class AppModel: ObservableObject {
     private func pairAndSave(url: String, host: String, token: String?,
                              pair: (String?) async throws -> ServerClient.Paired?) async -> Bool {
         let sameServer = URL(string: url).map { KnownServer.isCurrent($0, settings: settings) } ?? false
+        let started = generation
         do {
             let paired = try await pair(sameServer ? settings.token : nil)
+            guard generation == started else {
+                Log.info("setup: \(host) answered after a disconnect or another setup; not connected")
+                return false
+            }
             guard let newToken = paired?.token ?? token else { throw ServerError.tooOld }
             let new = ServerSettings(url: url, token: newToken)
+            if !sameServer {
+                // What still runs for the old connection stops before its positions are reset.
+                SyncEngine.shared.backgroundTimeOver(force: true)
+                BackgroundUploads.shared.cancelAll()
+            }
+            generation += 1
             try new.save()
             if !sameServer {
                 // Another server (or a new pairing after a disconnect) has none of this
@@ -187,6 +203,8 @@ final class AppModel: ObservableObject {
         let kept = settings
         erasing = true
         defer { erasing = false }
+        generation += 1
+        let started = generation
         Log.info("erase: stopping, then asking \(kept.host) to delete this iPhone's data")
         ServerSettings.clear()
         SyncEngine.shared.backgroundTimeOver(force: true)
@@ -195,16 +213,19 @@ final class AppModel: ObservableObject {
             let erased = try await ServerClient(base: base).erase(token: kept.token)
             Log.info("erase: server deleted \(erased.erased) items; disconnecting")
         } catch {
-            try? kept.save()
-            Log.error("erase: \(error.localizedDescription); still connected")
+            // Still connected as before, unless the user disconnected or set up another
+            // server while the erase was on its way.
+            if generation == started { try? kept.save() }
+            Log.error("erase: \(error.localizedDescription)" + (generation == started ? "; still connected" : ""))
             throw error
         }
-        disconnect()
+        if generation == started { disconnect() }
     }
 
     /// Forgets the server (the token stays valid on the server until revoked there) and stops
     /// what was under way: the running sync and the uploads the system carries on.
     func disconnect() {
+        generation += 1
         Log.info("setup: disconnected from \(settings.host)")
         ServerSettings.clear()
         SyncEngine.shared.backgroundTimeOver(force: true)
@@ -229,8 +250,11 @@ final class AppModel: ObservableObject {
         // Checked once it is this change's turn: a link handled meanwhile already paired.
         guard isConfigured, device == nil, let base = settings.baseURL,
               !UserDefaults.standard.bool(forKey: "tokenUpgradeTried") else { return }
+        let started = generation
         do {
             let paired = try await ServerClient(base: base).pair(serverToken: settings.token, replacing: nil)
+            guard generation == started else { return }
+            generation += 1
             let new = ServerSettings(url: settings.url, token: paired.token)
             try new.save()
             settings = new
@@ -355,11 +379,14 @@ final class AppModel: ObservableObject {
                 serverMoved(to: moved)
             }
         } catch ServerError.unauthorized {
+            guard settings == asked else { return }
             reachable = true
             revoked = true
         } catch ServerError.tooOld {
+            guard settings == asked else { return }
             reachable = true
         } catch {
+            guard settings == asked else { return }
             reachable = false
         }
     }

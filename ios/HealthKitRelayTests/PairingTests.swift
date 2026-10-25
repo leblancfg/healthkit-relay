@@ -30,7 +30,8 @@ final class PairingTests: XCTestCase {
             XCTAssertTrue(ServerSettings(url: local, token: "t").isComplete, local)
         }
         for remote in ["http://203.0.113.9:8080", "http://health.example.com", "http://8.8.8.8", "http://172.32.0.1",
-                       "http://3232235777", "http://0x7f000001", "http://[2001:db8::1]"] {
+                       "http://3232235777", "http://0x7f000001", "http://[2001:db8::1]", "http://010.010.010.010",
+                       "http://0172.16.0.1", "http://192.168.1", "http://192.168.1.10.", "http://10.0.0.256"] {
             XCTAssertFalse(ServerSettings(url: remote, token: "t").isComplete, remote)
             XCTAssertTrue(ServerSettings(url: remote.replacingOccurrences(of: "http://", with: "https://"), token: "t").isComplete, remote)
         }

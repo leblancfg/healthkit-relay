@@ -40,6 +40,17 @@ func (s *Store) erase(ctx context.Context, uploader string) (int64, error) {
 		(SELECT count(*) FROM deleted WHERE uploader = ? AND reason = 'deleted')`, uploader, uploader).Scan(&erased); err != nil {
 		return 0, err
 	}
+	// Nothing of this uploader anywhere: no file to scan, no lock to hold for long.
+	var other int64
+	if err := s.db.QueryRow(`SELECT (SELECT count(*) FROM staged WHERE uploader = ?) +
+		(SELECT count(*) FROM deleted WHERE uploader = ?) + (SELECT count(*) FROM parents WHERE uploader = ?)`,
+		uploader, uploader, uploader).Scan(&other); err != nil {
+		return 0, err
+	}
+	if erased == 0 && other == 0 {
+		_, err := s.db.Exec(`DELETE FROM pending_erase WHERE uploader = ?`, uploader)
+		return 0, err
+	}
 
 	removed, rewritten := 0, 0
 	for _, dataset := range datasets {
@@ -194,7 +205,7 @@ func (s *Server) eraseHandler(w http.ResponseWriter, r *http.Request) {
 	var n int64
 	var err error
 	if s.Demo != nil {
-		n = s.Demo.forget(uploader)
+		n = 0 // a demo server stores no records
 	} else {
 		n, err = s.Archive.Erase(context.WithoutCancel(r.Context()), uploader)
 	}

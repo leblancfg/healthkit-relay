@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-hkr-reset-state") { AppModel.resetForTesting() }
         #endif
+        ServerSettings.clearIfReinstalled(dataReadable: application.isProtectedDataAvailable)
         let info = Bundle.main.infoDictionary
         Log.info("app: \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?")) launched, "
             + "\(AppState.now.description), \(PowerState.now.description)")

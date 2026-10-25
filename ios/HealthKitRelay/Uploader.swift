@@ -52,6 +52,8 @@ struct Uploader: Sendable {
         var lastError = UploadError.failed("no attempt")
         var direct = false
         for attempt in 0..<maxAttempts {
+            // Disconnected, or set up with another server meanwhile: nothing more goes out.
+            guard ServerSettings.load() == settings else { throw UploadError.notConfigured }
             if attempt > 0 {
                 // 1, 2, 4, 8 s, plus up to 50% jitter.
                 let delay = backoff * pow(2, Double(attempt - 1)) * Double.random(in: 1...1.5)

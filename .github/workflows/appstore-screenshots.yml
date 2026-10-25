@@ -2,7 +2,8 @@
 # app is set up by hand with the demo server's address and setup code (repository secrets
 # HKR_DEMO_SERVER and HKR_DEMO_CODE, docs/appstore/review-notes.md), allowed to read Health
 # and syncs. Screenshots come from the largest iPhone simulator (6.9-inch, 1320 x 2868), with
-# a clean status bar, and are uploaded as the "appstore-screenshots" artifact.
+# a clean status bar, and are uploaded as the "appstore-screenshots" artifact, with a screen
+# recording of the run (review-demo.mp4) for the App Review notes.
 name: App Store screenshots
 
 on:
@@ -44,7 +45,11 @@ jobs:
           TEST_RUNNER_HKR_DEMO_SERVER: ${{ secrets.HKR_DEMO_SERVER }}
           TEST_RUNNER_HKR_DEMO_CODE: ${{ secrets.HKR_DEMO_CODE }}
         run: |
-          mkdir -p build
+          mkdir -p build/appstore-screenshots
+          # The App Review video: this same run, recorded (it shows the demo code: for Apple only).
+          xcrun simctl io "${{ steps.sim.outputs.udid }}" recordVideo --codec=h264 --force build/review-demo.mp4 &
+          rec=$!
+          trap 'kill -INT $rec 2>/dev/null; wait $rec 2>/dev/null || true' EXIT
           xcodebuild test -project HealthKitRelay.xcodeproj -scheme HealthKitRelay \
             -destination "id=${{ steps.sim.outputs.udid }}" -derivedDataPath build \
             -resultBundlePath build/screenshots.xcresult \
@@ -65,5 +70,6 @@ jobs:
           name: appstore-screenshots
           path: |
             ios/build/appstore-screenshots
+            ios/build/review-demo.mp4
             ios/build/screenshots.log
           retention-days: 30

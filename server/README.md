@@ -367,14 +367,17 @@ healthkit-relay -archive-dir /var/lib/healthkit-relay-demo -public-url https://d
   -setup-from any -demo-code-file /etc/healthkit-relay-demo-code
 ```
 
-- The shared code pairs any number of iPhones, each with a token of its own. In the app:
-  **Enter Server Details Instead**, the server address and the code. Or open
-  `https://demo.example.com/setup?code=ABCD-EFGH-JKLM-NPQR` on the iPhone and tap **Open in
-  Health Relay**.
-- Every `-demo-reset` (an hour by default) the server erases every record, and revokes
-  devices unseen for a week.
-- Between two erases it accepts `-demo-quota` bytes of uploads (256 MB by default) and 200
-  pairings; beyond that, uploads and pairings get `429`, and the app tries again later.
+- The shared code pairs iPhones (500 an hour at most), each with a signed token valid for 30
+  days; the server keeps no device list. In the app: **Enter Server Details Instead**, the
+  server address and the code. Or open `https://demo.example.com/setup?code=ABCD-EFGH-JKLM-NPQR`
+  on the iPhone and tap **Open in Health Relay**.
+- It keeps no Health data: each batch is checked like on any server, answered and dropped.
+  It counts the records received, all devices together, and resets the count every
+  `-demo-reset` (an hour by default). It logs an hourly summary of counts and nothing per
+  request.
+- It reads at most 4 uploads at once and `-demo-quota` bytes per period (256 MB by default);
+  beyond that, uploads get `429` with `Retry-After`, and the app tries again later.
+- `<archive-dir>/demo-key` signs the tokens: replacing it signs out every demo device.
 
 Run it with an archive of its own, never one holding real data.
 

@@ -40,7 +40,9 @@ services:
     image: grafana/grafana-oss:latest
     restart: unless-stopped
     ports:
-      - ${GRAFANA_PORT:-3000}:3000
+      # This computer only: Grafana's first login is admin/admin. To open it from other
+      # computers, set a strong admin password first, then GRAFANA_BIND=0.0.0.0 in .env.
+      - ${GRAFANA_BIND:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000
     configs:
       - source: grafana-datasource
         target: /etc/grafana/provisioning/datasources/victoriametrics.yml

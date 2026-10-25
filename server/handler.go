@@ -120,9 +120,11 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.adminUpload(c, r)
-	if !s.demoAdmit(w, r) {
+	done, ok := s.demoAdmit(w, r)
+	if !ok {
 		return
 	}
+	defer done()
 	r.Body = http.MaxBytesReader(w, r.Body, s.MaxBodyBytes)
 	var b Batch
 	dec := json.NewDecoder(r.Body)
@@ -194,7 +196,7 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 	var outcomes []Outcome
 	var err error
 	if s.Demo != nil {
-		outcomes = s.Demo.discard(uploader, len(items)) // validated, then dropped (demo.go)
+		outcomes = s.Demo.discard(len(items)) // validated, then dropped (demo.go)
 	} else {
 		outcomes, err = s.Archive.Ingest(uploader, items)
 	}
@@ -249,8 +251,10 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 	s.add("stored", int64(added))
 	s.add("duplicates", int64(resp.Duplicates))
 	s.add("batches_"+trigger, 1)
-	log.Printf("batch v%d: %d samples, %d records, %d deletions, %d stored, %d duplicates, trigger %s, app %s",
-		v, len(b.Samples), len(b.Records), len(b.Deletions), added, resp.Duplicates, trigger, b.appState())
+	if s.Demo == nil {
+		log.Printf("batch v%d: %d samples, %d records, %d deletions, %d stored, %d duplicates, trigger %s, app %s",
+			v, len(b.Samples), len(b.Records), len(b.Deletions), added, resp.Duplicates, trigger, b.appState())
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
@@ -265,7 +269,9 @@ func httpError(w http.ResponseWriter, code int, msg string) {
 // and it names fields and keys, not health values.
 func (s *Server) badRequest(w http.ResponseWriter, msg string) {
 	s.count("bad_request")
-	log.Printf("rejected batch: %s", msg)
+	if s.Demo == nil { // a demo server logs no part of what it was sent
+		log.Printf("rejected batch: %s", msg)
+	}
 	httpError(w, http.StatusBadRequest, msg)
 }
 

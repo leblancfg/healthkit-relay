@@ -69,6 +69,8 @@ enum AddressHandoff {
     static func follow(_ handoff: Handoff, from settings: ServerSettings, device: String?,
                        session: URLSession = noRedirects, defaults: UserDefaults = .standard,
                        now: Date = .now) async -> ServerSettings? {
+        // Only the answer of the server the app is still paired with counts.
+        guard ServerSettings.load() == settings else { return nil }
         KnownServer.note(handoff)
         guard let id = handoff.serverID, !id.isEmpty, let preferred = handoff.preferredURL,
               settings.isComplete, !settings.sameServer(as: preferred) else { return nil }
@@ -85,6 +87,7 @@ enum AddressHandoff {
             }
             let client = ServerClient(base: base, session: session)
             guard try await client.serverInfo().serverID == id else { throw Refusal.differentServer }
+            guard ServerSettings.load() == settings else { throw Refusal.settingsChanged }
             let status = try await client.status(token: settings.token)
             guard status.serverID == id else { throw Refusal.differentServer }
             if let device, status.device?.id != device { throw Refusal.differentDevice }

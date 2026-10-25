@@ -287,7 +287,8 @@ install).
 **What you see.** A type you have in Apple Health is not on the server.
 
 **Why.** Health access is granted type by type. Some types are granted item by item
-(vision prescriptions, medications, clinical documents, Health Records). Types your iOS
+(vision prescriptions, medications; in builds of your own, clinical documents and Health
+Records). Types your iOS
 version does not have are skipped.
 
 **What to do.**

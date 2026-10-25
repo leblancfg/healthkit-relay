@@ -549,6 +549,12 @@ func (s *Server) caller(r *http.Request) (Caller, bool) {
 	if s.isAdminToken(token) {
 		return Caller{Admin: true}, true
 	}
+	if s.Demo != nil {
+		if dev, ok := s.Demo.lookup(token, time.Now()); ok {
+			return Caller{Device: &dev}, true
+		}
+		return Caller{}, false
+	}
 	if s.Devices != nil {
 		if dev, ok := s.Devices.Lookup(token); ok {
 			return Caller{Device: &dev}, true
@@ -624,7 +630,7 @@ type Status struct {
 func (s *Server) status(dev *Device) Status {
 	records := s.Archive.Len()
 	if s.Demo != nil {
-		records = s.Demo.received()
+		records = s.Demo.records()
 	}
 	return Status{Version: version, WireVersion: WireVersion, Records: records, Device: dev, Handoff: s.handoff()}
 }
@@ -675,18 +681,25 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	}
 	var dev Device
 	var err error
-	if s.Demo.isCode(req.Code) {
-		// A demo server keeps nothing about who paired: the device list holds the token's hash.
-		name, model = "Demo iPhone", ""
+	if s.Demo != nil {
+		// A demo server stores nothing about who pairs: a signed token, no device list (demo.go).
+		if !s.Demo.isCode(req.Code) {
+			s.count("pair_rejected")
+			httpError(w, http.StatusForbidden, badCodeMessage)
+			return
+		}
 		if !s.Demo.admitPairing() {
 			s.count("demo_quota")
+			w.Header().Set("Retry-After", "600")
 			httpError(w, http.StatusTooManyRequests, "this demo server has paired many iPhones in the last hour: try again later")
 			return
 		}
-		dev, err = add() // the demo server's shared code pairs many times (demo.go)
-	} else {
-		dev, err = s.Codes.Redeem(req.Code, add)
+		token, dev = s.Demo.mint(time.Now())
+		s.count("paired")
+		writeJSON(w, http.StatusOK, PairResponse{Token: token, Device: dev, Server: s.status(&dev)})
+		return
 	}
+	dev, err = s.Codes.Redeem(req.Code, add)
 	if errors.Is(err, errBadCode) {
 		s.count("pair_rejected")
 		httpError(w, http.StatusForbidden, badCodeMessage)

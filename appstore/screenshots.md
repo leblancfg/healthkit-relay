@@ -25,9 +25,12 @@ App Store Connect scales the 6.9-inch set for smaller iPhones. The app runs on i
 
 ## Demo video for App Review (1 to 2 minutes, not for the product page)
 
-Recorded on a real iPhone (Control Center › Screen Recording) or the simulator
-(`xcrun simctl io <udid> recordVideo review.mp4`), uploaded as an unlisted link or an
-attachment in the review notes:
+The screenshot workflow records its run as `review-demo.mp4` (in the same artifact): the
+welcome screen, the demo address and code typed in, Health's sheet, the sync, Advanced. It
+shows the real demo code, so it goes only to App Review (App Review Information ›
+Attachment), never to the product page. To record by hand instead, on a real iPhone
+(Control Center › Screen Recording) or a simulator (`xcrun simctl io <udid> recordVideo
+review.mp4`), follow:
 
 1. Launch on a fresh install: the welcome screen (3 s).
 2. Enter Server Details Instead; type the demo address and code; Connect.

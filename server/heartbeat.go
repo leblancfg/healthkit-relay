@@ -177,6 +177,9 @@ const refusalLogEvery = 10 * time.Second
 // client, and which token (a short prefix of its SHA-256, enough to tell two tokens apart and
 // to match a token one holds; nothing to guess it from).
 func (s *Server) logRefusal(r *http.Request, why string) {
+	if s.Demo != nil {
+		return // a demo server logs no addresses or tokens; the counters keep the totals
+	}
 	s.mu.Lock()
 	now := time.Now()
 	if now.Sub(s.refusalLog) < refusalLogEvery {

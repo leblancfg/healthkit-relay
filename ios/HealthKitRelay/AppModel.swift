@@ -82,7 +82,7 @@ final class AppModel: ObservableObject {
     func connectManually(url: String, token: String) async -> Bool {
         let typed = ServerSettings(url: url, token: token)
         guard typed.isComplete, let base = typed.baseURL else {
-            setupError = "Enter the server address, starting with http:// or https://, for example http://192.168.1.10:8080. Then enter the setup code from the server's setup page."
+            setupError = "Enter the server address, starting with https://, for example https://health.example.ts.net, or http:// for an address on your local network, for example http://192.168.1.10:8080. Then enter the setup code from the server's setup page."
             return false
         }
         if Self.isSetupCode(typed.token) {
@@ -147,8 +147,9 @@ final class AppModel: ObservableObject {
             guard let newToken = paired?.token ?? token else { throw ServerError.tooOld }
             let new = ServerSettings(url: url, token: newToken)
             try new.save()
-            if isConfigured && !sameServer {
-                // Another server has none of this iPhone's history yet.
+            if !sameServer {
+                // Another server (or a new pairing after a disconnect) has none of this
+                // iPhone's history yet.
                 await SyncEngine.shared.resetAnchors()
                 Log.info("setup: new server, history will be sent again")
             }
@@ -177,10 +178,37 @@ final class AppModel: ObservableObject {
         settings = new
     }
 
-    /// Forgets the server (the token stays valid on the server until revoked there).
+    /// Has the server permanently delete everything this iPhone uploaded, then disconnects:
+    /// nothing is sent again. Syncing and uploads stop first, so nothing arrives after the
+    /// erase. Throws, with the connection as it was, unless the server erased.
+    func eraseServerDataAndDisconnect() async throws {
+        guard !erasing else { return }
+        guard isConfigured, let base = settings.baseURL else { throw UploadError.notConfigured }
+        let kept = settings
+        erasing = true
+        defer { erasing = false }
+        Log.info("erase: stopping, then asking \(kept.host) to delete this iPhone's data")
+        ServerSettings.clear()
+        SyncEngine.shared.backgroundTimeOver(force: true)
+        BackgroundUploads.shared.cancelAll()
+        do {
+            let erased = try await ServerClient(base: base).erase(token: kept.token)
+            Log.info("erase: server deleted \(erased.erased) items; disconnecting")
+        } catch {
+            try? kept.save()
+            Log.error("erase: \(error.localizedDescription); still connected")
+            throw error
+        }
+        disconnect()
+    }
+
+    /// Forgets the server (the token stays valid on the server until revoked there) and stops
+    /// what was under way: the running sync and the uploads the system carries on.
     func disconnect() {
         Log.info("setup: disconnected from \(settings.host)")
         ServerSettings.clear()
+        SyncEngine.shared.backgroundTimeOver(force: true)
+        BackgroundUploads.shared.cancelAll()
         PairedDevice.save(nil)
         KnownServer.forget()
         settings = ServerSettings.load()
@@ -313,14 +341,17 @@ final class AppModel: ObservableObject {
     }
 
     func refreshServer() async {
-        guard let base = settings.baseURL else { return }
+        let asked = settings
+        guard let base = asked.baseURL else { return }
         do {
-            let status = try await ServerClient(base: base).status(token: settings.token)
+            let status = try await ServerClient(base: base).status(token: asked.token)
+            // A setup or disconnect while the answer was on its way: it is not this server's.
+            guard settings == asked else { return }
             server = status
             KnownServer.note(status.handoff)
             reachable = true
             revoked = false
-            if connecting == nil, let moved = await AddressHandoff.follow(status.handoff, from: settings, device: device?.id) {
+            if connecting == nil, let moved = await AddressHandoff.follow(status.handoff, from: asked, device: device?.id) {
                 serverMoved(to: moved)
             }
         } catch ServerError.unauthorized {

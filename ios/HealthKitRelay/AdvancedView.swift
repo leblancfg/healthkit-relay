@@ -12,6 +12,7 @@ struct AdvancedView: View {
     @State private var busy: Set<String> = []
     @State private var confirmErase = false
     @State private var confirmDisconnect = false
+    @State private var confirmEraseDisconnect = false
     @State private var showManual = false
     @State private var alert: String?
 
@@ -81,6 +82,7 @@ struct AdvancedView: View {
                     } else {
                         Button("Erase Server Data and Start Over", role: .destructive) { confirmErase = true }
                             .disabled(status.running)
+                        Button("Erase Server Data and Disconnect", role: .destructive) { confirmEraseDisconnect = true }
                     }
                     ShareLink(item: Log.fileURL) {
                         Text("Share Diagnostic Log")
@@ -121,6 +123,21 @@ struct AdvancedView: View {
             } message: {
                 Text("This permanently deletes everything this iPhone uploaded to \(model.settings.host), then sends all its Health data again from the start. You cannot undo this.")
             }
+            .confirmationDialog("Erase server data and disconnect?", isPresented: $confirmEraseDisconnect, titleVisibility: .visible) {
+                Button("Erase and Disconnect", role: .destructive) {
+                    Log.info("ui: erase and disconnect confirmed")
+                    Task {
+                        do {
+                            try await model.eraseServerDataAndDisconnect()
+                            dismiss()
+                        } catch {
+                            alert = "Could not erase server data: \(error.localizedDescription)"
+                        }
+                    }
+                }
+            } message: {
+                Text("Syncing stops, then \(model.settings.host) permanently deletes everything this iPhone uploaded, and Health Relay disconnects. Your data in the Health app stays as it is. You cannot undo this.")
+            }
             .confirmationDialog("Disconnect from \(model.settings.host)?", isPresented: $confirmDisconnect, titleVisibility: .visible) {
                 Button("Disconnect", role: .destructive) {
                     model.disconnect()
@@ -144,7 +161,7 @@ struct AdvancedView: View {
         if status.running {
             return "You can erase once the running sync is done. " + log
         }
-        return "Erasing permanently deletes everything this iPhone uploaded to the server, then sends all Health data again from the start. " + log
+        return "Erase and Start Over permanently deletes everything this iPhone uploaded to the server, then sends all Health data again from the start. Erase and Disconnect deletes it and stops syncing. " + log
     }
 
     private func itemRow(_ name: String, symbol: String, result: String?, id: String,

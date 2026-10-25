@@ -365,7 +365,7 @@ struct ManualSetupView: View {
                         .textContentType(.oneTimeCode)
                         .accessibilityIdentifier("manual.code")
                 } footer: {
-                    Text("The server address is how this iPhone reaches the server, for example https://health.example.ts.net or http://192.168.1.10:8080. Addresses with http:// work only with an IP address or a name ending in .local. The setup code is the one under the QR code on the server's setup page, for example ABCD-EFGH-JKLM-NPQR-STUV-WXYZ. The admin token, which the server printed in its log on its first start, works too: Health Relay uses it once to pair this iPhone, then keeps a token of its own.")
+                    Text("The server address is how this iPhone reaches the server, for example https://health.example.ts.net or http://192.168.1.10:8080. Addresses with http:// work only on your local network (an address such as 192.168.1.10, or a name ending in .local), and others on that network can read what is sent. The setup code is the one under the QR code on the server's setup page, for example ABCD-EFGH-JKLM-NPQR-STUV-WXYZ. The admin token, which the server printed in its log on its first start, works too: Health Relay uses it once to pair this iPhone, then keeps a token of its own.")
                 }
                 if let error = model.setupError, !working {
                     Section { Text(error).foregroundStyle(.red) }

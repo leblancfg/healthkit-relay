@@ -36,8 +36,9 @@ your Health data as it is. The App Store version of the app reads no clinical he
 ## Where the data goes
 
 - **To your server only.** The app sends the data it reads to the server address you set
-  up, over HTTPS (or plain HTTP to an address on your own local network, if you choose
-  one). The server then keeps it in files on your own computer.
+  up, over HTTPS, or over plain HTTP to an address on your own local network if you choose
+  one (others on that network can then read it). The server keeps it in files on your own
+  computer.
 - **Kept between you and your server.** The app connects to your server and to nothing
   else; its code is all its own, without analytics, advertising, tracking or
   crash-reporting libraries. We, and any third party, have no access to your data, and it
@@ -56,23 +57,28 @@ server you set up.
 ## The demo server
 
 So that Apple's App Review can try the app without a server of its own, we run a
-demonstration server, reachable with a setup code given to App Review. It keeps no Health
-data: it checks each batch it receives, answers it, and drops it, keeping only the number of
-records received (reset every hour). Devices paired with it are listed under the name "Demo
-iPhone", with the fingerprint of their token, and removed after a week without contact. It
-is not part of the app's normal use.
+demonstration server, reachable with a setup code given to App Review. It stores nothing
+about the people who use it: it checks each batch it receives, answers it and drops it,
+keeping only the total number of records received in the last hour, all devices together.
+Devices paired with it get a signed token that the server checks without keeping a list of
+devices, names or addresses. It is not part of the app's normal use.
 
 ## Keeping and deleting your data
 
 Your server keeps your data for as long as you keep it there. You control it completely:
 
-- **Delete it from your server:** in the app, **Advanced › Erase Server Data and Start Over**
-  has your server permanently delete everything your iPhone sent. You can also delete the
-  server's files yourself.
+- **Delete it from your server:** in the app, **Advanced › Erase Server Data and
+  Disconnect** stops syncing, then has your server permanently delete everything your
+  iPhone sent. (**Erase Server Data and Start Over** deletes it too, then sends your Health
+  data again from the start.) This deletes the server's archive; copies you made from it
+  yourself, such as backups or numbers forwarded to a metrics database, follow their own
+  settings. You can also delete the server's files yourself.
 - **Stop syncing:** **Advanced › Disconnect** in the app, or turn off Health Relay's access
   in the Health settings above.
-- **Remove the app:** deleting the app removes its token, pending batches and log from your
-  iPhone.
+- **Remove the app:** deleting the app removes its pending batches, sync positions and log
+  from your iPhone. iOS keeps the app's Keychain items (server address and token); a new
+  install of Health Relay clears them on its first start. To make that token useless right
+  away, revoke this iPhone on your server's setup page.
 
 The app works without an account: you set it up with your own server's setup code, and
 everything about you stays on your iPhone and your server.

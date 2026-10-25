@@ -164,11 +164,11 @@ func run(args []string) error {
 		if err != nil {
 			return fmt.Errorf("-demo-code-file: %w", err)
 		}
-		if srv.Demo, err = NewDemo(code, *demoReset, *demoQuota); err != nil {
+		if srv.Demo, err = NewDemo(*archiveDir, code, *demoReset, *demoQuota); err != nil {
 			return fmt.Errorf("-demo-code-file: %w", err)
 		}
-		log.Printf("demo server: the code in %s pairs any number of iPhones; all records are erased every %s; uploads beyond %d MB per period get 429",
-			*demoCodeFile, *demoReset, *demoQuota>>20)
+		log.Printf("demo server: the code in %s pairs iPhones with signed tokens; batches are checked and dropped; %d MB of uploads per %s",
+			*demoCodeFile, *demoQuota>>20, *demoReset)
 	}
 	if *queryDuckDB != "" {
 		dir := cmpOr(*queryDir, *archiveDir)
@@ -184,7 +184,10 @@ func run(args []string) error {
 		}
 	}
 	if *forwardURL != "" {
-		f := &Forwarder{URL: *forwardURL, Measurement: *measurement, Client: &http.Client{}}
+		// Health numbers go to -forward-url and nowhere else: a redirect is an error.
+		f := &Forwarder{URL: *forwardURL, Measurement: *measurement, Client: &http.Client{
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		}}
 		if *forwardTokenFile != "" {
 			if f.Token, err = readSecret(*forwardTokenFile); err != nil {
 				return err

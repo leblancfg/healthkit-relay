@@ -2,20 +2,21 @@
 
 Pasted into App Store Connect › App Review Information › Notes (4000 characters). The
 setup code is filled in from the demo server's secret at submission time (`{{DEMO_CODE}}`
-here); the filled copy lives outside the repository. Sign-in required: **No**.
+here); the filled copy lives outside the repository. Sign-in required: **Yes**, with the
+server address as the user name and the setup code as the password (listing.md).
 
 ---
 
-Health Relay copies the user's Apple Health data to a server the user runs themselves (the
+Health Relay copies the user's Apple Health data to a server the user runs (the
 open-source healthkit-relay program on a home computer, NAS or cloud server). It has no
-account and no developer-run backend: the data goes only to the user's own server. For
-this review we run a demo server you can reach from the internet.
+account; data goes only to the user's server. For this review we run a demo server.
 
 DEMO SERVER
 Address: https://health-demo.tail3f3b8.ts.net
 Setup code: {{DEMO_CODE}}
-The code pairs many devices. The demo server keeps no Health data: it checks each batch,
-answers it and drops it, counting records only (the count resets every hour).
+The code pairs many devices. The demo server stores nothing about its users: it checks each
+batch, answers it and drops it, counting records only (all devices together, reset hourly),
+and keeps no device list.
 
 STEPS (about 2 minutes)
 1. Open Health Relay. The welcome screen explains that it works with your own server.
@@ -30,36 +31,43 @@ STEPS (about 2 minutes)
 5. The app syncs: "Up to date", the records the demo server received and the records sent
    appear. With an empty Health app the sync sends little and still completes. Pull down or
    tap Sync Now to sync again.
-6. The gear (top right) opens Advanced: the server and pairing, the data types read, the
-   types Health shares item by item, Erase Server Data and Start Over (asks first, then has
-   the server delete everything this device sent), the diagnostic log, Privacy Policy and Help.
+6. The gear (top right) opens Advanced: server and pairing, data types read, types Health
+   shares item by item, the erase options (each asks first), the diagnostic log, Privacy
+   Policy and Help.
 
 PERMISSIONS AND WHY
-- HealthKit read access (NSHealthShareUsageDescription): the app reads the Health data the
-  user allows, to copy it to the user's server. It requests read access only and writes
-  nothing to Health. NSHealthUpdateUsageDescription is present because HealthKit's
-  authorization API covers both directions; the app never requests write access.
+- HealthKit read access: the app reads the Health data the user allows, to copy it to the
+  user's server. It requests read access only (toShare is empty); the
+  NSHealthUpdateUsageDescription string is there because the authorization API covers both.
 - HealthKit background delivery: new Health data wakes the app so it can sync.
-- Background modes: "fetch" (background app refresh, a fallback when HealthKit does not wake
-  the app) and "processing" (a catch-up sync while the iPhone charges). Both run the same
-  sync to the user's server.
+- Background modes: "fetch" (background app refresh) and "processing" (a catch-up sync while
+  charging) run the same sync to the user's server.
 - Local network (NSLocalNetworkUsageDescription): only when the user's server is on their
-  home network, e.g. http://192.168.1.10:8080. App Transport Security allows plain HTTP to
-  local addresses only (NSAllowsLocalNetworking); every other address uses HTTPS. The demo
-  server uses HTTPS, so this prompt does not appear during review.
+  home network, e.g. http://192.168.1.10:8080. NSAllowsLocalNetworking lets plain HTTP reach
+  such servers; the app itself accepts http:// only for private addresses and .local or
+  single-label names, and HTTPS for everything else. The demo server uses HTTPS, so this
+  prompt does not appear during review.
 
 DATA AND PRIVACY
-- The developer collects no data: Health data goes only to the user's server. No analytics,
-  ads, tracking or third-party SDKs. Privacy label: Data Not Collected.
+- The developer collects no data: no analytics, ads, tracking or third-party SDKs. Privacy
+  label: Data Not Collected.
 - Pending uploads stay out of iCloud and device backups; nothing is stored in iCloud.
 - The App Store version reads no clinical health records.
-- No accounts: the user pairs with their own server using a setup code from it, and can
-  disconnect (Advanced › Disconnect) or erase their data on the server (Advanced › Erase
-  Server Data and Start Over) at any time.
-- Health Relay provides no medical service, advice or diagnosis: it copies the user's own
-  data to the user's own computer, like a backup tool.
+- No accounts: the user pairs with their own server using a setup code from it, and can at
+  any time disconnect (Advanced › Disconnect) or stop syncing and erase everything the
+  device sent (Advanced › Erase Server Data and Disconnect).
+- Health Relay provides no medical service, advice or diagnosis, and the developer holds no
+  user's data: it copies the user's own Health data to a computer the user owns, like a
+  backup tool. The developer receives and keeps none of it (the demo server above drops
+  what it receives).
+
+WHY A SERVER
+Health Relay is the iPhone half of a self-hosted tool: its purpose is to keep a copy of the
+user's Health history on their own computer, under their control, for their own charts,
+queries and backups. The server is a program the user runs on a computer, not an iOS app or
+an online service. The demo server stands in for it during review.
 
 DEMO VIDEO
-A screen recording of these steps on an iPhone is attached [link added at submission].
+The attached screen recording shows these steps on an iPhone simulator with the demo server.
 
 Contact: healthrelay@leblancfg.com

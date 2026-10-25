@@ -96,11 +96,16 @@ func TestSetupFormsRefuseCrossOrigin(t *testing.T) {
 			t.Errorf("%s token: %d", site, w.Code)
 		}
 	}
+	// A browser without Fetch Metadata: its Origin must be the page's own.
+	h := http.Header{"Origin": {"http://192.168.1.20:3000"}, "Cookie": {cookie}}
+	if w := setupRequest(t, s, "POST", "/setup/revoke", lan, h, url.Values{"id": {dev.ID}}); w.Code != 403 {
+		t.Errorf("other origin, no Fetch Metadata: %d", w.Code)
+	}
 	if s.Devices.Len() != 1 {
 		t.Fatal("a cross-origin post revoked the device")
 	}
 	// The page's own forms still work.
-	h := http.Header{"Sec-Fetch-Site": {"same-origin"}, "Cookie": {cookie}}
+	h = http.Header{"Sec-Fetch-Site": {"same-origin"}, "Cookie": {cookie}}
 	if w := setupRequest(t, s, "POST", "/setup/revoke", lan, h, url.Values{"id": {dev.ID}}); w.Code != 303 || s.Devices.Len() != 0 {
 		t.Fatalf("same-origin revoke: %d, %d devices", w.Code, s.Devices.Len())
 	}

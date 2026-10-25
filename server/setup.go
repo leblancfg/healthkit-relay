@@ -181,7 +181,15 @@ func (s *Server) setupForbidden(w http.ResponseWriter) {
 // same host or a sibling subdomain could revoke devices or sign the browser in. Requests without the header (curl, old browsers) pass.
 func setupForm(w http.ResponseWriter, r *http.Request) bool {
 	switch r.Header.Get("Sec-Fetch-Site") {
-	case "", "same-origin", "none":
+	case "same-origin", "none":
+	case "":
+		// Browsers without Fetch Metadata still send Origin with a form post: it must be this
+		// page's own (scheme, host and port). Without either header the request is not a
+		// browser's form (curl), and the session cookie is what authorizes it.
+		if o := r.Header.Get("Origin"); o != "" && o != requestURL(r) {
+			http.Error(w, "This form was sent from another site. Open the setup page and try again from there.", http.StatusForbidden)
+			return false
+		}
 	default:
 		http.Error(w, "This form was sent from another site. Open the setup page and try again from there.", http.StatusForbidden)
 		return false

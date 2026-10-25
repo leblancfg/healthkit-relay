@@ -299,6 +299,23 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(ServerSettings.load().url, "")
     }
 
+    /// An app still holding the admin token (set up by hand before pairing) does not swap it
+    /// for a device token while Erase Server Data and Disconnect runs.
+    func testNoTokenUpgradeDuringErase() async throws {
+        let model = try await erasable()
+        try ServerSettings(url: "https://stub.test", token: "server-token-0123456789").save()
+        PairedDevice.save(nil)
+        UserDefaults.standard.set(false, forKey: "tokenUpgradeTried")
+        model.reloadForTesting()
+        let erase = Task { try await model.eraseServerDataAndDisconnect() }
+        try await Task.sleep(for: .milliseconds(50))
+        await model.becameActive()
+        try await erase.value
+        XCTAssertEqual(StubServer.pairs, [], "the token upgrade paired during the erase")
+        XCTAssertFalse(model.isConfigured)
+        XCTAssertEqual(ServerSettings.load().url, "")
+    }
+
     /// While a pairing awaits its answer (the server may already have rotated the token), the
     /// app neither moves to a preferred address nor notes one.
     func testNoAddressMoveWhileASetupRuns() async throws {
@@ -321,6 +338,8 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(model.isConfigured)
         XCTAssertEqual(ServerSettings.load().url, "")
         XCTAssertEqual(eraseRequests.count, 1)
+        // The server revokes the token in the same step: nothing sent before arrives after.
+        XCTAssertEqual(eraseRequests.first?.url?.absoluteString, "https://stub.test/v1/data?confirm=erase&disconnect=1")
 
         model = try await erasable()
         StubServer.eraseAnswer = (500, #"{"error":"disk full"}"#)

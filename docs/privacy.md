@@ -71,7 +71,7 @@ Your server keeps your data for as long as you keep it there. You control it com
 
 - **Delete it from your server:** in the app, **Advanced › Erase Server Data and
   Disconnect** stops syncing, then has your server permanently delete everything your
-  iPhone sent. (**Erase Server Data and Start Over** deletes it too, then sends your Health
+  iPhone sent and revoke its token. (**Erase Server Data and Start Over** deletes it too, then sends your Health
   data again from the start.) This deletes the server's archive; copies you made from it
   yourself, such as backups or numbers forwarded to a metrics database, follow their own
   settings. You can also delete the server's files yourself.

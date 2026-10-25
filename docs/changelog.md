@@ -53,7 +53,8 @@ server releases and the app are versioned separately.
 ### Server
 
 - An upload already under way when an erase of its device finishes is refused (`409`)
-  instead of bringing data back.
+  instead of bringing data back; `DELETE /v1/data?disconnect=1` also revokes the device's
+  token in the same step (the app's Erase Server Data and Disconnect).
 - A server ID per archive (`server.json`) and the preferred address in `GET /v1/status` and
   in the answer to each heartbeat (now `200` with JSON); `GET /v1/server` answers the ID
   without a token. Phones move to `-public-url` on their own.

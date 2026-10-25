@@ -264,7 +264,7 @@ final class AppModel: ObservableObject {
         SyncEngine.shared.backgroundTimeOver(force: true)
         await BackgroundUploads.shared.cancelAllAndWait()
         do {
-            let erased = try await ServerClient(base: base).erase(token: kept.token)
+            let erased = try await ServerClient(base: base).erase(token: kept.token, disconnect: true)
             Log.info("erase: server deleted \(erased.erased) items; disconnecting")
         } catch {
             // Still connected as before, unless the user disconnected or set up another
@@ -298,13 +298,14 @@ final class AppModel: ObservableObject {
     /// An app set up by hand before pairing existed holds the admin token: swap it for a
     /// device token of its own, once, without asking anything.
     private func upgradeServerToken() async {
+        guard !erasing else { return } // a setup, like any other: never during an erase
         let accepted = lifecycle
         await exclusively { if self.lifecycle == accepted { await self.upgradeServerTokenNow() } }
     }
 
     private func upgradeServerTokenNow() async {
         // Checked once it is this change's turn: a link handled meanwhile already paired.
-        guard isConfigured, device == nil, let base = settings.baseURL,
+        guard isConfigured, !erasing, device == nil, let base = settings.baseURL,
               !UserDefaults.standard.bool(forKey: "tokenUpgradeTried") else { return }
         let started = generation
         do {
@@ -332,7 +333,7 @@ final class AppModel: ObservableObject {
     /// The app came to the foreground: ask for Health access if an update brought new types,
     /// refresh the server's numbers and sync if it has been a while.
     func becameActive() async {
-        guard isConfigured, connecting == nil else { return }
+        guard isConfigured, connecting == nil, !erasing else { return }
         await upgradeServerToken()
         await refreshHealthAccess()
         await refreshServer()

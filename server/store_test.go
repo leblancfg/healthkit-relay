@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -451,6 +452,18 @@ func TestUploadAdmittedBeforeEraseIsRefused(t *testing.T) {
 	// The next upload is stored.
 	if r := mustPost(t, ts.URL, a.Token, body); r.Stored != 5 {
 		t.Fatalf("upload after the erase: %+v", r)
+	}
+	// Erase and disconnect: the device's token is revoked in the same step, so an upload
+	// that arrives late is refused.
+	resp2, b := call(t, "DELETE", ts.URL+"/v1/data?confirm=erase&disconnect=1", a.Token, nil)
+	if resp2.StatusCode != 200 || !strings.Contains(string(b), `"revoked":true`) || !strings.Contains(string(b), `"erased":5`) {
+		t.Fatalf("erase and disconnect: %d %s", resp2.StatusCode, b)
+	}
+	if resp3, _ := call(t, "POST", ts.URL+"/v1/samples", a.Token, json.RawMessage(body)); resp3.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("upload after erase and disconnect: %d, want 401", resp3.StatusCode)
+	}
+	if n := int64(ts.store.Len()) + ts.store.Staged(); n != 0 {
+		t.Fatalf("%d records after erase and disconnect", n)
 	}
 }
 

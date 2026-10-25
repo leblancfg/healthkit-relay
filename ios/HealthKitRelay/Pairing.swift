@@ -176,10 +176,14 @@ struct ServerClient: Sendable {
     static let eraseTimeout: TimeInterval = 600
 
     /// Permanently deletes everything the token's device uploaded.
-    func erase(token: String) async throws -> Erased {
+    /// `disconnect`: the server also revokes this device's token, in the same step, so nothing
+    /// sent before can be stored after the erase (a server before 1.0 ignores it).
+    func erase(token: String, disconnect: Bool = false) async throws -> Erased {
         let data: Data
+        var query = [URLQueryItem(name: "confirm", value: "erase")]
+        if disconnect { query.append(URLQueryItem(name: "disconnect", value: "1")) }
         do {
-            data = try await request("DELETE", "v1/data", query: [URLQueryItem(name: "confirm", value: "erase")],
+            data = try await request("DELETE", "v1/data", query: query,
                                  token: token, timeout: Self.eraseTimeout)
         } catch ServerError.tooOld {
             throw ServerError.eraseUnsupported

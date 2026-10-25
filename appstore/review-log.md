@@ -85,3 +85,13 @@ accepted.
 | 6 | Major | A unit test still expected the uploader to add the connection to a commit | The test gives the commit its owner and checks it is carried unchanged through every retry |
 | 7 | Minor | Concurrent demo uploads each read the same remaining quota | Kept: the overshoot is bounded (4 uploads at once, each capped to the body limit), the quota guards the free Cloudflare plan, not privacy, and nothing is stored |
 | 8 | Minor | The demo setup page said uploads were erased hourly | It says uploads are checked and dropped at once, and only hourly counts are kept (Worker and Go demo mode) |
+
+## Round 6 (on 5a05e27)
+
+Round 5's #1, #2, #5, #6 and #8 verified; the new Swift checked as a Swift 5 compiler would
+(no type, isolation, overload or access error found); the server barrier's lock order holds.
+
+| # | Sev. | Finding | Done |
+|---|---|---|---|
+| 1 | Blocking | The launch-time admin-token upgrade could still pair during Erase Server Data and Disconnect | The upgrade, like any setup, does not run while erasing (checked before it queues and at its turn), and opening the app during an erase does nothing |
+| 2 | Major | Cancelling the app's uploads does not wait for them to stop; an upload buffered on the way could reach the server after the erase and be stored | Erase Server Data and Disconnect asks the server to revoke the device's token in the same step (`?disconnect=1`, under the same lock as the erase): a late upload gets 401. For Erase and Start Over a late copy of old data is harmless: the app sends its whole history again and the server keeps one copy |

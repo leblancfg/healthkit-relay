@@ -191,7 +191,13 @@ func (s *Server) eraseHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// Rewriting files can take a while with a long history and several devices.
 	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(30 * time.Minute))
-	n, err := s.Archive.Erase(context.WithoutCancel(r.Context()), uploader)
+	var n int64
+	var err error
+	if s.Demo != nil {
+		n = s.Demo.forget(uploader)
+	} else {
+		n, err = s.Archive.Erase(context.WithoutCancel(r.Context()), uploader)
+	}
 	if err != nil {
 		log.Printf("erase: %v", err)
 		httpError(w, http.StatusInternalServerError, "could not erase: "+err.Error())

@@ -44,9 +44,9 @@ final class AppModel: ObservableObject {
             setupError = "This link is not a setup code from a healthkit-relay server. Open your server's setup page and scan the setup code there."
             return
         }
-        // The server already paired, maybe at another address (it names its server ID): no
-        // question, and the device and its history stay.
-        if await KnownServer.isCurrent(link.server, settings: settings) {
+        // The server already paired, maybe at the other address it named itself: no question,
+        // and the device and its history stay.
+        if KnownServer.isCurrent(link.server, settings: settings) {
             await connect(with: link)
         } else {
             Log.info("setup: link for \(link.host), waiting for confirmation")
@@ -141,8 +141,7 @@ final class AppModel: ObservableObject {
 
     private func pairAndSave(url: String, host: String, token: String?,
                              pair: (String?) async throws -> ServerClient.Paired?) async -> Bool {
-        var sameServer = false
-        if let u = URL(string: url) { sameServer = await KnownServer.isCurrent(u, settings: settings) }
+        let sameServer = URL(string: url).map { KnownServer.isCurrent($0, settings: settings) } ?? false
         do {
             let paired = try await pair(sameServer ? settings.token : nil)
             guard let newToken = paired?.token ?? token else { throw ServerError.tooOld }
@@ -157,8 +156,8 @@ final class AppModel: ObservableObject {
             device = paired?.device
             PairedDevice.save(paired?.device)
             server = paired?.server
-            if !sameServer { KnownServer.id = nil }
-            KnownServer.note(paired?.server.serverID)
+            if !sameServer { KnownServer.forget() }
+            if let status = paired?.server { KnownServer.note(status.handoff) }
             reachable = true
             revoked = false
             SyncStatus.shared.lastError = nil
@@ -183,7 +182,7 @@ final class AppModel: ObservableObject {
         Log.info("setup: disconnected from \(settings.host)")
         ServerSettings.clear()
         PairedDevice.save(nil)
-        KnownServer.id = nil
+        KnownServer.forget()
         settings = ServerSettings.load()
         device = nil
         server = nil
@@ -318,7 +317,7 @@ final class AppModel: ObservableObject {
         do {
             let status = try await ServerClient(base: base).status(token: settings.token)
             server = status
-            KnownServer.note(status.serverID)
+            KnownServer.note(status.handoff)
             reachable = true
             revoked = false
             if connecting == nil, let moved = await AddressHandoff.follow(status.handoff, from: settings, device: device?.id) {

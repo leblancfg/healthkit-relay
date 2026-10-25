@@ -152,6 +152,14 @@ final class ServerAddressTests: XCTestCase {
         XCTAssertEqual(old.handoff, Handoff(serverID: nil, preferredURL: nil))
     }
 
+    func testSameOrigin() {
+        let a = URL(string: "https://health.example.ts.net/v1/samples")!
+        XCTAssertTrue(BackgroundUploads.sameOrigin(a, URL(string: "https://HEALTH.example.ts.net:443/other")!))
+        XCTAssertFalse(BackgroundUploads.sameOrigin(a, URL(string: "http://health.example.ts.net/v1/samples")!))
+        XCTAssertFalse(BackgroundUploads.sameOrigin(a, URL(string: "https://elsewhere.example/v1/samples")!))
+        XCTAssertFalse(BackgroundUploads.sameOrigin(a, URL(string: "https://health.example.ts.net:8443/v1/samples")!))
+    }
+
     func testSetupCodeOrAdminToken() {
         XCTAssertTrue(AppModel.isSetupCode("ABCD-EFGH-JKLM-NPQR"))
         XCTAssertTrue(AppModel.isSetupCode("abcdefghjklmnpqrstuvwxyz"))

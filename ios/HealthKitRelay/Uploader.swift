@@ -23,7 +23,8 @@ enum UploadError: LocalizedError {
 struct Uploader: Sendable {
     var settings: ServerSettings
     var maxAttempts = 5
-    var session: URLSession = .shared
+    /// For heartbeats; follows no redirect, like every request with the token.
+    var session: URLSession = AddressHandoff.noRedirects
     var transport: UploadTransport = BackgroundUploads.shared
     /// The first retry's delay; each next one doubles it.
     var backoff: Double = 1

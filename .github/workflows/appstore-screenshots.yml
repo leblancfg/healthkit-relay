@@ -44,14 +44,15 @@ jobs:
           TEST_RUNNER_HKR_DEMO_SERVER: ${{ secrets.HKR_DEMO_SERVER }}
           TEST_RUNNER_HKR_DEMO_CODE: ${{ secrets.HKR_DEMO_CODE }}
         run: |
+          mkdir -p build
           xcodebuild test -project HealthKitRelay.xcodeproj -scheme HealthKitRelay \
             -destination "id=${{ steps.sim.outputs.udid }}" -derivedDataPath build \
             -resultBundlePath build/screenshots.xcresult \
             -only-testing:HealthKitRelayUITests/SetupFlowUITests/testManualSetupWithTheDemoServer \
             CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
             > build/screenshots.log 2>&1 || { tail -80 build/screenshots.log; exit 1; }
-          grep -E 'Test Case|skipped|TEST (SUCCEEDED|FAILED)' build/screenshots.log
-          if grep -q 'skipped' build/screenshots.log; then echo "::error::the demo server secrets are not set"; exit 1; fi
+          grep -E "Test Case|TEST (SUCCEEDED|FAILED)" build/screenshots.log
+          if grep -q "Test Case .* skipped" build/screenshots.log; then echo "::error::the demo server secrets are not set"; exit 1; fi
       - name: Export the screenshots
         if: always()
         run: |

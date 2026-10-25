@@ -55,9 +55,12 @@ server you set up.
 
 ## The demo server
 
-So that Apple's App Review can try the app, we run a demonstration server, reachable only
-with a setup code given to App Review. Data sent to it is erased automatically every hour
-and is never used for anything. It is not part of the app's normal use.
+So that Apple's App Review can try the app without a server of its own, we run a
+demonstration server, reachable with a setup code given to App Review. It keeps no Health
+data: it checks each batch it receives, answers it, and drops it, keeping only the number of
+records received (reset every hour). Devices paired with it are listed under the name "Demo
+iPhone", with the fingerprint of their token, and removed after a week without contact. It
+is not part of the app's normal use.
 
 ## Keeping and deleting your data
 

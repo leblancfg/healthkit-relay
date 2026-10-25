@@ -92,11 +92,16 @@ final class SetupFlowUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.tap()
         field.typeText(server)
+        // The screenshot shows the example code from the form's footer, never the demo's own:
+        // App Store screenshots are public.
         let codeField = app.textFields["manual.code"]
         codeField.tap()
-        codeField.typeText(code)
+        codeField.typeText("ABCD-EFGH-JKLM-NPQR")
+        app.navigationBars["Server Details"].tap() // keyboard away
         sleep(1)
         snapshot("02-server-details")
+        codeField.tap()
+        codeField.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 19) + code)
         app.buttons["manual.connect"].tap()
 
         let primer = app.buttons["health.continue"]

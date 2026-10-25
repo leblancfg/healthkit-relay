@@ -63,6 +63,15 @@ func TestDemoCodePairsManyTimes(t *testing.T) {
 	if !strings.Contains(w.Body.String(), `"pending"`) {
 		t.Errorf("setup status: %s", w.Body.String())
 	}
+	// Pairings are bounded per period.
+	s.Demo.pairings = DemoPairings
+	if code, _ := pairWith(t, ts.URL, demoCode, ""); code != http.StatusTooManyRequests {
+		t.Errorf("pairing beyond the limit: %d", code)
+	}
+	s.demoReset(context.Background())
+	if code, _ := pairWith(t, ts.URL, demoCode, ""); code != 200 {
+		t.Errorf("pairing after the reset: %d", code)
+	}
 	if _, err := NewDemo("SHORT", time.Hour, 1); err == nil {
 		t.Error("a short demo code is accepted")
 	}
@@ -86,39 +95,48 @@ func TestDemoQuota(t *testing.T) {
 	}
 }
 
-func TestDemoResetErasesEverything(t *testing.T) {
+func TestDemoKeepsNoHealthData(t *testing.T) {
 	s, ts, dir := demoServer(t, 1<<20)
 	_, a := pairWith(t, ts.URL, demoCode, "")
 	_, b := pairWith(t, ts.URL, demoCode, "")
-	post(t, ts.URL, a.Token, `{"version":2,"samples":[`+hrSample+`]}`)
+	if a.Device.Name != "Demo iPhone" || a.Device.Model != "" {
+		t.Errorf("a demo device keeps the name it sent: %+v", a.Device)
+	}
+	if resp, r := post(t, ts.URL, a.Token, `{"version":2,"samples":[`+hrSample+`]}`); resp.StatusCode != 200 || r.Stored != 1 {
+		t.Fatalf("upload: %d, stored %d", resp.StatusCode, r.Stored)
+	}
 	post(t, ts.URL, b.Token, `{"version":2,"samples":[`+sleepSample+`],"deletions":[`+deletion+`]}`)
-	if _, err := s.Archive.Flush(context.Background(), true); err != nil {
-		t.Fatal(err)
+	// Checked like on any server: a bad batch is refused.
+	if resp, _ := post(t, ts.URL, a.Token, `{"version":2,"samples":[{"uuid":"x"}]}`); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("invalid batch: %d", resp.StatusCode)
 	}
-	post(t, ts.URL, a.Token, `{"version":2,"samples":[`+strings.Replace(hrSample, "1b4e", "9b4e", 1)+`]}`)
-	if len(archived(t, dir)) == 0 {
-		t.Fatal("nothing archived")
+	if got := archived(t, dir); len(got) != 0 || s.Archive.Len() != 0 {
+		t.Errorf("the demo archive holds %v", got)
 	}
-	// A device unseen for over a week is revoked; a recent one stays.
+	_, body := call(t, "GET", ts.URL+"/v1/status", a.Token, nil)
+	if !strings.Contains(string(body), `"records":3`) {
+		t.Errorf("status counts what was received: %s", body)
+	}
+	// Erase forgets this device's count.
+	if _, body := call(t, "DELETE", ts.URL+"/v1/data?confirm=erase", a.Token, nil); !strings.Contains(string(body), `"erased":1`) {
+		t.Errorf("erase: %s", body)
+	}
+	if s.Demo.received() != 2 {
+		t.Errorf("after erase: %d", s.Demo.received())
+	}
+
+	// A device unseen for over a week is revoked at a reset; a recent one stays.
 	s.Devices.mu.Lock()
 	s.Devices.byHash[hashToken(b.Token)].LastSeen = time.Now().Add(-DemoDeviceTTL - time.Hour)
 	s.Devices.mu.Unlock()
-
 	s.demoReset(context.Background())
-	if got := archived(t, dir); len(got) != 0 {
-		t.Errorf("after the reset the archive holds %v", got)
-	}
-	if s.Archive.Len() != 0 {
-		t.Errorf("record count %d", s.Archive.Len())
+	if s.Demo.received() != 0 {
+		t.Errorf("counts after the reset: %d", s.Demo.received())
 	}
 	if _, ok := s.Devices.Lookup(a.Token); !ok {
 		t.Error("a recent device was revoked")
 	}
 	if _, ok := s.Devices.Lookup(b.Token); ok {
 		t.Error("a device unseen for over a week stays")
-	}
-	// The same records upload again (the de-duplication index went too).
-	if resp, r := post(t, ts.URL, a.Token, `{"version":2,"samples":[`+hrSample+`]}`); resp.StatusCode != 200 || r.Stored != 1 {
-		t.Errorf("upload after reset: %d, stored %d", resp.StatusCode, r.Stored)
 	}
 }

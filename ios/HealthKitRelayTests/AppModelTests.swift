@@ -75,6 +75,9 @@ final class AppModelTests: XCTestCase {
         saved = (ServerSettings.load(), UserDefaults.standard.data(forKey: "pairedDevice"),
                  UserDefaults.standard.bool(forKey: "tokenUpgradeTried"))
         URLProtocol.registerClass(StubServer.self)
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubServer.self]
+        AddressHandoff.noRedirects = AddressHandoff.session(config)
         StubServer.pairs = []
         StubServer.requests = []
         StubServer.eraseAnswer = (200, #"{"erased": 42, "device": "dev1"}"#)
@@ -82,11 +85,12 @@ final class AppModelTests: XCTestCase {
 
     override func tearDown() async throws {
         URLProtocol.unregisterClass(StubServer.self)
+        AddressHandoff.noRedirects = AddressHandoff.session()
         try? FileManager.default.removeItem(at: AnchorStore().directory.appendingPathComponent(marker + ".txt"))
         if saved.0.url.isEmpty { ServerSettings.clear() } else { try saved.0.save() }
         UserDefaults.standard.set(saved.1, forKey: "pairedDevice")
         UserDefaults.standard.set(saved.2, forKey: "tokenUpgradeTried")
-        KnownServer.id = nil
+        KnownServer.forget()
         AppModel.shared.reloadForTesting()
     }
 
@@ -236,15 +240,13 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.settings.token, "device-token-1")
     }
 
-    /// A setup link for the paired server at another address (it answers with the same server
-    /// ID): no confirmation, the same device on the server, sync positions kept.
-    func testLinkToTheSameServerAtAnotherAddressKeepsTheDevice() async throws {
+    /// A setup link for the address the paired server named as its preferred one: no
+    /// confirmation, the same device on the server, sync positions kept. A link for any other
+    /// address waits for confirmation, whatever that address answers.
+    func testLinkToTheServersPreferredAddressKeepsTheDevice() async throws {
         let model = try await erasable()
-        KnownServer.id = "stub-server-id"
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [StubServer.self]
-        KnownServer.session = AddressHandoff.session(config)
-        defer { KnownServer.id = nil; KnownServer.session = AddressHandoff.noRedirects }
+        KnownServer.preferredURL = "https://stub.test:8443"
+        defer { KnownServer.forget() }
         await model.open(URL(string: "healthrelay://pair?server=https%3A%2F%2Fstub.test%3A8443&code=MOVE")!)
         XCTAssertNil(model.pendingLink, "asked to confirm the same server")
         let pair = try XCTUnwrap(StubServer.pairs.last)
@@ -253,10 +255,10 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.settings.url, "https://stub.test:8443")
         XCTAssertTrue(positionsKept)
 
-        // Another server ID is another server: it waits for confirmation.
-        KnownServer.id = "some-other-server"
+        // The stub answers with the same server ID at every address: still another address.
         await model.open(URL(string: "healthrelay://pair?server=https%3A%2F%2Fstub.test%3A9443&code=OTHER")!)
         XCTAssertNotNil(model.pendingLink)
+        XCTAssertFalse(StubServer.pairs.contains { $0.code == "OTHER" })
         model.pendingLink = nil
     }
 

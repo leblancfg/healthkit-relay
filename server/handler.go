@@ -191,7 +191,13 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 	if c.Device != nil {
 		uploader = c.Device.ID
 	}
-	outcomes, err := s.Archive.Ingest(uploader, items)
+	var outcomes []Outcome
+	var err error
+	if s.Demo != nil {
+		outcomes = s.Demo.discard(uploader, len(items)) // validated, then dropped (demo.go)
+	} else {
+		outcomes, err = s.Archive.Ingest(uploader, items)
+	}
 	if err != nil {
 		log.Printf("archive: %v", err)
 		s.count("archive_error")

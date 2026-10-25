@@ -11,10 +11,9 @@ You need:
   server. To install Docker, follow [Docker Engine](https://docs.docker.com/engine/install/)
   on Linux or [Docker Desktop](https://docs.docker.com/desktop/) on a Mac. Check it with
   `docker compose version`: it prints `Docker Compose version v2...`.
-- **A Mac with Xcode 16 or newer** and a paid
-  [Apple Developer Program](https://developer.apple.com/programs/) membership, to build the
-  iPhone app. Apple requires the paid membership to sign apps that read Health data.
-- **An iPhone** on the same Wi-Fi network as the server.
+- **An iPhone** on the same Wi-Fi network as the server, with the **Health Relay** app from
+  the App Store. (To build the app yourself instead: a Mac with Xcode 16 or newer and a paid
+  [Apple Developer Program](https://developer.apple.com/programs/) membership, see step 3.)
 
 ## 1. Find the server address
 
@@ -108,44 +107,50 @@ More settings, updates and the optional dashboards are in
 
 ## 3. Install the iPhone app
 
-You build the app with Xcode on your Mac and install it on your iPhone from there.
+Install **Health Relay** from the App Store on the iPhone (search for "Health Relay"). It
+opens on three steps, starting with **Open your server's setup page**: go on with step 4.
 
-1. Install [XcodeGen](https://github.com/yonaskolb/XcodeGen), which writes the Xcode
-   project, e.g. with [Homebrew](https://brew.sh):
+??? note "Build the app yourself instead"
 
-    ```sh
-    brew install xcodegen
-    ```
+    You build the app with Xcode on your Mac and install it on your iPhone from there. Apple
+    requires a paid Apple Developer Program membership to sign apps that read Health data.
 
-2. Download the code and make your settings file:
+    1. Install [XcodeGen](https://github.com/yonaskolb/XcodeGen), which writes the Xcode
+       project, e.g. with [Homebrew](https://brew.sh):
 
-    ```sh
-    git clone https://github.com/leblancfg/healthkit-relay && cd healthkit-relay
-    cp ios/Config/Local.xcconfig.example ios/Config/Local.xcconfig
-    ```
+        ```sh
+        brew install xcodegen
+        ```
 
-3. Open `ios/Config/Local.xcconfig` in a text editor. Set your Team ID (on
-   [developer.apple.com](https://developer.apple.com/account), under **Membership**) and a
-   bundle identifier of your own:
+    2. Download the code and make your settings file:
 
-    ```text
-    HKR_BUNDLE_ID = com.yourname.healthkitrelay
-    HKR_TEAM_ID = ABCDE12345
-    ```
+        ```sh
+        git clone https://github.com/leblancfg/healthkit-relay && cd healthkit-relay
+        cp ios/Config/Local.xcconfig.example ios/Config/Local.xcconfig
+        ```
 
-4. Make the Xcode project and open it:
+    3. Open `ios/Config/Local.xcconfig` in a text editor. Set your Team ID (on
+       [developer.apple.com](https://developer.apple.com/account), under **Membership**) and a
+       bundle identifier of your own:
 
-    ```sh
-    make ios-project && open ios/HealthKitRelay.xcodeproj
-    ```
+        ```text
+        HKR_BUNDLE_ID = com.yourname.healthkitrelay
+        HKR_TEAM_ID = ABCDE12345
+        ```
 
-5. Connect your iPhone to the Mac with a cable. In Xcode, choose your iPhone at the top of
-   the window, then click **Run** (the triangle). The first time, turn on Developer Mode on
-   the iPhone (Settings › Privacy & Security › Developer Mode) and trust the Mac.
+    4. Make the Xcode project and open it:
 
-Health Relay opens on the iPhone and shows three steps, starting with
-**Open your server's setup page**. More details:
-[ios/README.md](https://github.com/leblancfg/healthkit-relay/blob/main/ios/README.md).
+        ```sh
+        make ios-project && open ios/HealthKitRelay.xcodeproj
+        ```
+
+    5. Connect your iPhone to the Mac with a cable. In Xcode, choose your iPhone at the top of
+       the window, then click **Run** (the triangle). The first time, turn on Developer Mode on
+       the iPhone (Settings › Privacy & Security › Developer Mode) and trust the Mac.
+
+    Health Relay opens on the iPhone and shows three steps, starting with
+    **Open your server's setup page**. More details:
+    [ios/README.md](https://github.com/leblancfg/healthkit-relay/blob/main/ios/README.md).
 
 ## 4. Pair the iPhone
 

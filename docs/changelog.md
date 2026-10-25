@@ -71,6 +71,7 @@ and arm64) with the systemd unit, and `checksums.txt`.
   revocation survives a power loss. Erasing a device with nothing stored returns at once.
   Setup page forms without Fetch Metadata must carry the page's own Origin.
 - Docker Compose: Grafana listens on this computer only unless `GRAFANA_BIND` says otherwise.
+- github.com/klauspost/compress 1.18.7 (GHSA-259r-337f-4rfw).
 
 - Counts app 0.7.0's triggers under their own names in `healthkit_relay_batches_total`,
   `healthkit_relay_heartbeats_total` and the last-batch and last-heartbeat timestamps:

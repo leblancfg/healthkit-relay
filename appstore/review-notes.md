@@ -14,7 +14,8 @@ this review we run a demo server you can reach from the internet.
 DEMO SERVER
 Address: https://health-demo.tail3f3b8.ts.net
 Setup code: {{DEMO_CODE}}
-The code pairs any number of devices. The demo server erases all uploaded data every hour.
+The code pairs many devices. The demo server keeps no Health data: it checks each batch,
+answers it and drops it, counting records only (the count resets every hour).
 
 STEPS (about 2 minutes)
 1. Open Health Relay. The welcome screen explains that it works with your own server.
@@ -26,9 +27,9 @@ STEPS (about 2 minutes)
    on the device and tap "Open in Health Relay", then Connect.)
 4. The app says what to pick in Health's sheet; tap Continue. In Apple Health's permission
    sheet, turn on all categories (or the ones you like) and tap Allow.
-5. The app syncs: "Up to date" and the number of records on the server appear. With an empty
-   Health app, the sync sends nothing and still completes. Pull down or tap Sync Now to sync
-   again.
+5. The app syncs: "Up to date", the records the demo server received and the records sent
+   appear. With an empty Health app the sync sends little and still completes. Pull down or
+   tap Sync Now to sync again.
 6. The gear (top right) opens Advanced: the server and pairing, the data types read, the
    types Health shares item by item, Erase Server Data and Start Over (asks first, then has
    the server delete everything this device sent), the diagnostic log, Privacy Policy and Help.

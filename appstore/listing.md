@@ -104,6 +104,9 @@ Capabilities: Unrestricted Web Access **No** (links open Safari), User-Generated
   data off the device so that the developer or its partners can access it. Health Relay
   sends Health data only to a server the user runs and controls; the developer has no access
   to it, and the app has no analytics, crash reporting, advertising or third-party SDK.
+  The developer's demo server for App Review stores no Health data either: it validates each
+  batch, answers and drops it (counts only), so nothing is retained beyond servicing the
+  request.
 - Result on the product page: **Data Not Collected**.
 - Tracking: **No** (`NSPrivacyTracking` false in the privacy manifest; no tracking domains).
 

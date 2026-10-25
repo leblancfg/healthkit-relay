@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -198,4 +199,24 @@ func (s *Server) eraseHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	s.count("erased")
 	writeJSON(w, http.StatusOK, map[string]any{"erased": n, "device": uploader})
+}
+
+// Uploaders lists everyone with records in the archive: device IDs, and "" for the admin
+// token.
+func (s *Store) Uploaders() ([]string, error) {
+	rows, err := s.db.Query(`SELECT uploader FROM seen UNION SELECT uploader FROM staged
+		UNION SELECT uploader FROM deleted UNION SELECT uploader FROM parents`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var u sql.NullString
+		if err := rows.Scan(&u); err != nil {
+			return nil, err
+		}
+		out = append(out, u.String)
+	}
+	return out, rows.Err()
 }

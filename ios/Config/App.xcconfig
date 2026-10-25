@@ -6,4 +6,7 @@ HKR_BUNDLE_ID = org.example.healthkitrelay
 // Ten-character Apple Developer Team ID. Empty: Xcode asks for a team.
 HKR_TEAM_ID =
 
+// Extra Swift compilation conditions, e.g. HKR_HEALTH_RECORDS (README.md).
+HKR_SWIFT_CONDITIONS =
+
 #include? "Local.xcconfig"

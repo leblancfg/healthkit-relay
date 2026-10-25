@@ -53,6 +53,9 @@ environment.
 | `-flush-interval` | `1h` | how often staged records are written to Parquet |
 | `-compact-at` | `03:30` | local time of the nightly compaction |
 | `-query-duckdb` | (off) | `duckdb` executable for the read-only query API, `/openapi.json` and `/docs`; see [docs/query-api.md](../docs/query-api.md) for it and the other `-query-*` flags |
+| `-demo-code-file` | | turns this server into a public demo server: file holding a shared setup code (16 or more characters of A-Z and 2-7) that pairs any number of iPhones; see [Demo server](#demo-server) |
+| `-demo-reset` | `1h` | demo server: how often every record is erased |
+| `-demo-quota` | `268435456` | demo server: most upload bytes accepted between two erases |
 | `-group-read` | off | make the archive readable by the service's group (directories 0750, files 0640), for a backup job or a query tool; by default only the service's user can read it (0700, 0600), set at every start |
 | `-version` | | print the version and exit |
 
@@ -272,8 +275,29 @@ or a client outside `-setup-from`. The app shows the `403` message as is.
 ### `GET /v1/status`
 
 A paired device's token (read tokens get `403`), or the admin token (deprecated).
-`{"version": "…", "wire_version": 2, "records": 12571973, "device": {…}}` (`device` only for
-a paired device's token). The app shows the record count and detects a revoked token here.
+`{"version": "…", "wire_version": 2, "records": 12571973, "device": {…}, "server_id":
+"5f0c2a…", "preferred_url": "https://health.example.com"}` (`device` only for a paired
+device's token; `preferred_url` only when `-public-url` is https). The app shows the record
+count and detects a revoked token here, and moves to the preferred address (see
+[Server address](#server-address)).
+
+### `GET /v1/server`
+
+No token. `{"server_id": "5f0c2a…", "wire_version": 2}`: the app checks that an address
+reaches this server before it sends its token there.
+
+### Server address
+
+Each archive has a random server ID, made on first start in `<archive-dir>/server.json`; an
+admin reset keeps it, and so does an archive moved to another machine. `GET /v1/status` and
+the answer to each heartbeat (`POST /v1/heartbeat`, `200` with `{"server_id",
+"preferred_url"}`) name it, with `-public-url` when that is https. When the app reaches the
+server at another address (an IP address, an older name), it checks that the preferred
+address answers `GET /v1/server` over HTTPS with the same ID, then `GET /v1/status` with its
+token as the same device, and uses the preferred address from then on, with its history and
+sync positions as they are. To move phones to a new address: serve the server there over
+HTTPS, set `-public-url` to it, keep the old address working until the phones have synced
+once (the server's log shows `heartbeat:` lines from each).
 
 ### `POST /v1/pairing-codes`, `GET /v1/devices`, `DELETE /v1/devices/{id}`
 
@@ -315,10 +339,12 @@ metrics database stay there. See [Erasing](#erasing).
 
 ### `GET /metrics`
 
-Prometheus text format: `healthkit_relay_requests_total{result}` (`ok`, `unauthorized`,
+Private networks only, like the setup page (requests through Tailscale Funnel count as
+public). Prometheus text format: `healthkit_relay_requests_total{result}` (`ok`, `unauthorized`,
 `bad_request`, `incomplete` for a body cut short by a client going away, `archive_error`,
 `paired`, `pair_rejected`, `erased`, `forbidden` for a token of the wrong scope,
-`query_error`, `query_timeout`, `query_busy`), `healthkit_relay_admin_token_uploads_total`,
+`query_error`, `query_timeout`, `query_busy`, `demo_quota` for an upload refused by a demo
+server's quota), `healthkit_relay_admin_token_uploads_total`,
 `healthkit_relay_records_total{outcome}`,
 `healthkit_relay_archive_records`, `healthkit_relay_staged_records` (not flushed yet),
 `healthkit_relay_last_success_timestamp_seconds{job="flush"|"compaction"}` (alert when it
@@ -328,6 +354,29 @@ gets old: more than two hours for the flush, a day and a half for the compaction
 `healthkit_relay_batches_total{trigger}` (accepted batches by what started the app's sync,
 see `trigger` above; `unknown` for apps before 0.6.1). `/metrics` holds counts and
 timestamps only.
+
+## Demo server
+
+A demo server lets people try the app without running a server of their own, for example
+App Review. Start it with `-demo-code-file` naming a file that holds a shared setup code, and
+`-setup-from any` so that phones on the internet may pair:
+
+```sh
+printf 'ABCD-EFGH-JKLM-NPQR\n' > /etc/healthkit-relay-demo-code   # pick your own
+healthkit-relay -archive-dir /var/lib/healthkit-relay-demo -public-url https://demo.example.com \
+  -setup-from any -demo-code-file /etc/healthkit-relay-demo-code
+```
+
+- The shared code pairs any number of iPhones, each with a token of its own. In the app:
+  **Enter Server Details Instead**, the server address and the code. Or open
+  `https://demo.example.com/setup?code=ABCD-EFGH-JKLM-NPQR` on the iPhone and tap **Open in
+  Health Relay**.
+- Every `-demo-reset` (an hour by default) the server erases every record, and revokes
+  devices unseen for a week.
+- Between two erases it accepts `-demo-quota` bytes of uploads (256 MB by default); beyond
+  that, uploads get `429` with `Retry-After`, and the app tries again later.
+
+Run it with an archive of its own, never one holding real data.
 
 ## Archive
 

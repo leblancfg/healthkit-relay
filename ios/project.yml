@@ -14,8 +14,8 @@ configFiles:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.7.0"
-    CURRENT_PROJECT_VERSION: "12"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "13"
 targets:
   HealthKitRelay:
     type: application
@@ -46,9 +46,15 @@ targets:
           - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER).pair
             CFBundleURLSchemes: [healthrelay]
         # Servers on a home network often have no TLS certificate: plain HTTP is allowed to
-        # local addresses (IPs, .local and single-label names) only.
+        # local addresses (IPs, .local and single-label names) only; everything else is HTTPS.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # Shown when the app first reaches a server on the local network.
+        NSLocalNetworkUsageDescription: Health Relay connects to the server you set up on your local network, for example a computer at home at 192.168.1.10, to send it your Health data.
+        # Only HTTPS through the system's URL loading (exempt from export documentation).
+        ITSAppUsesNonExemptEncryption: false
+        # The app reads Health data and does nothing else.
+        UIRequiredDeviceCapabilities: [healthkit]
         # Background app refresh (fetch) and the catch-up while charging (processing), fallbacks
         # for HealthKit background delivery (ScheduledTask); continued syncs the user started
         # (iOS 26, ContinuedSync) use identifiers under .continued.*.
@@ -59,14 +65,15 @@ targets:
           - $(PRODUCT_BUNDLE_IDENTIFIER).continued.*
         UIApplicationSupportsIndirectInputEvents: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
-        NSHealthShareUsageDescription: Health Relay reads your Health data and copies it to your own server.
-        NSHealthUpdateUsageDescription: Health Relay only reads your Health data, and leaves it as it is.
-        NSHealthClinicalHealthRecordsShareUsageDescription: Health Relay reads your health records and copies them to your own server.
+        NSHealthShareUsageDescription: Health Relay reads the Health data you allow and copies it to the server you set up, such as a computer at home, so you keep a copy of your history that you control.
+        NSHealthUpdateUsageDescription: Health Relay reads Health data to copy it to your server, and leaves the data in Health as it is.
+        # Builds that read Health Records (HKR_HEALTH_RECORDS, see README.md) add:
+        # NSHealthClinicalHealthRecordsShareUsageDescription: Health Relay reads your health records and copies them to your own server.
     entitlements:
       path: HealthKitRelay/HealthKitRelay.entitlements
       properties:
         com.apple.developer.healthkit: true
-        com.apple.developer.healthkit.access: [health-records]
+        # Builds that read Health Records add: com.apple.developer.healthkit.access: [health-records]
         com.apple.developer.healthkit.background-delivery: true
     settings:
       base:
@@ -79,6 +86,8 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         SWIFT_OBJC_BRIDGING_HEADER: HealthKitRelay/Support/HealthKitRelay-Bridging-Header.h
         ENABLE_USER_SCRIPT_SANDBOXING: NO
+        # HKR_HEALTH_RECORDS (in HKR_SWIFT_CONDITIONS, Config/App.xcconfig) reads Health Records.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) $(HKR_SWIFT_CONDITIONS)
   HealthKitRelayTests:
     type: bundle.unit-test
     platform: iOS
@@ -91,6 +100,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(HKR_BUNDLE_ID).tests
         DEVELOPMENT_TEAM: $(HKR_TEAM_ID)
         GENERATE_INFOPLIST_FILE: true
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) $(HKR_SWIFT_CONDITIONS)
   # The setup flow end to end (setup page, link, Health sheet, sync, screenshots). Needs a
   # running server: Scripts/ui-test starts one and passes its setup page in
   # TEST_RUNNER_HKR_SETUP_URL; without it the test is skipped.

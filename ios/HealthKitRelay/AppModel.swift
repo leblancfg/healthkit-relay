@@ -67,13 +67,28 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Server address and admin token typed in by hand. The admin token is exchanged for a device
-    /// token when the server supports it; an older server keeps the token as given.
+    /// A setup code as shown on the setup page (24 characters of A-Z and 2-7, dashes and spaces
+    /// aside); admin tokens are longer and use other characters.
+    static func isSetupCode(_ text: String) -> Bool {
+        let code = text.uppercased().filter { $0 != "-" && !$0.isWhitespace }
+        return (16...32).contains(code.count) && code.allSatisfy { ("A"..."Z").contains($0) || ("2"..."7").contains($0) }
+    }
+
+    /// Server address and a setup code or the admin token, typed in by hand. A setup code pairs
+    /// like a scanned one. The admin token is exchanged for a device token when the server
+    /// supports it; an older server keeps the token as given.
     func connectManually(url: String, token: String) async -> Bool {
         let typed = ServerSettings(url: url, token: token)
         guard typed.isComplete, let base = typed.baseURL else {
-            setupError = "Enter the server address, starting with http:// or https://, for example http://192.168.1.10:8080. Then enter the admin token."
+            setupError = "Enter the server address, starting with http:// or https://, for example http://192.168.1.10:8080. Then enter the setup code from the server's setup page."
             return false
+        }
+        if Self.isSetupCode(typed.token) {
+            Log.info("setup: setup code typed in for \(typed.host)")
+            await connect(to: base.absoluteString, host: typed.host, token: nil) { old in
+                try await ServerClient(base: base).pair(code: typed.token.trimmingCharacters(in: .whitespacesAndNewlines), replacing: old)
+            }
+            return setupError == nil
         }
         await connect(to: base.absoluteString, host: typed.host, token: typed.token) { old in
             do {
@@ -149,6 +164,13 @@ final class AppModel: ObservableObject {
             return false
         }
         return true
+    }
+
+    /// The server's preferred address answered as the same server (AddressHandoff), from a
+    /// status check or a heartbeat: settings already saved, history and sync positions kept.
+    func serverMoved(to new: ServerSettings) {
+        guard ServerSettings.load() == new else { return }
+        settings = new
     }
 
     /// Forgets the server (the token stays valid on the server until revoked there).
@@ -288,9 +310,13 @@ final class AppModel: ObservableObject {
     func refreshServer() async {
         guard let base = settings.baseURL else { return }
         do {
-            server = try await ServerClient(base: base).status(token: settings.token)
+            let status = try await ServerClient(base: base).status(token: settings.token)
+            server = status
             reachable = true
             revoked = false
+            if connecting == nil, let moved = await AddressHandoff.follow(status.handoff, from: settings, device: device?.id) {
+                serverMoved(to: moved)
+            }
         } catch ServerError.unauthorized {
             reachable = true
             revoked = true

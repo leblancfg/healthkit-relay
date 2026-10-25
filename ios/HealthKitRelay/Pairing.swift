@@ -32,10 +32,26 @@ struct ServerStatus: Codable, Equatable, Sendable {
     var wireVersion: Int
     var records: Int
     var device: PairedDevice?
+    /// Server 1.0+ (ServerAddress.swift).
+    var serverID: String?
+    var preferredURL: String?
 
     enum CodingKeys: String, CodingKey {
         case version, records, device
         case wireVersion = "wire_version"
+        case serverID = "server_id"
+        case preferredURL = "preferred_url"
+    }
+
+    var handoff: Handoff { Handoff(serverID: serverID, preferredURL: preferredURL) }
+}
+
+/// What GET /v1/server says, without a token (server 1.0+).
+struct ServerInfo: Codable, Equatable, Sendable {
+    var serverID: String
+
+    enum CodingKeys: String, CodingKey {
+        case serverID = "server_id"
     }
 }
 
@@ -137,6 +153,10 @@ struct ServerClient: Sendable {
         struct Code: Decodable { let code: String }
         let data = try await request("POST", "v1/pairing-codes", token: serverToken, body: ["public_url": base.absoluteString])
         return try await pair(code: try JSONDecoder().decode(Code.self, from: data).code, replacing: old)
+    }
+
+    func serverInfo() async throws -> ServerInfo {
+        try JSONDecoder().decode(ServerInfo.self, from: try await request("GET", "v1/server", timeout: 15))
     }
 
     func status(token: String) async throws -> ServerStatus {

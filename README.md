@@ -47,7 +47,7 @@ chart, query or delete.
 
 Health Relay is an open-source **HealthKit sync and backup** tool. The iPhone app reads
 everything in Apple Health (heart rate, HRV, sleep stages, steps, workouts with GPS routes,
-ECG recordings, blood pressure, cycle tracking, medications, Health Records and the rest)
+ECG recordings, blood pressure, cycle tracking, medications and the rest)
 and uploads it in the background to a single Go binary or Docker container. The server keeps
 a lossless archive in **Parquet** files you can query with **DuckDB**, and can forward the
 numbers as InfluxDB line protocol to **Prometheus-compatible stores** such as
@@ -59,7 +59,8 @@ sync.
   build time: all quantity and category types, workouts (activities, events, statistics,
   every GPS point of the route), heartbeat series, ECG voltages, audiograms, blood pressure
   and food correlations, State of Mind, GAD-7/PHQ-9, medications, vision prescriptions,
-  clinical records (FHIR), activity rings and characteristics. Building with a newer Xcode
+  activity rings and characteristics (and Health Records, in builds of your own: see
+  [ios/README.md](ios/README.md#health-records)). Building with a newer Xcode
   adds the types of that iOS version.
 - **Continuous and incremental.** The first sync uploads your whole history. After that, the
   app syncs in the background several times a day; open the app to sync right away.

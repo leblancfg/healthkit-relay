@@ -3,7 +3,7 @@ import HealthKit
 
 /// Persists one HKQueryAnchor per data type (and other small sync positions), so each sync
 /// only fetches what changed. Files use complete-until-first-unlock protection, so background
-/// syncs can read them.
+/// syncs can read them, and stay out of backups (AppDirectory).
 struct AnchorStore: Sendable {
     let directory: URL
 
@@ -18,9 +18,7 @@ struct AnchorStore: Sendable {
     }
 
     private func create() {
-        try? FileManager.default.createDirectory(
-            at: directory, withIntermediateDirectories: true,
-            attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
+        _ = AppDirectory.make(directory.lastPathComponent)
     }
 
     private func file(_ key: String, _ ext: String) -> URL {

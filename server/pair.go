@@ -617,10 +617,12 @@ type Status struct {
 	WireVersion int     `json:"wire_version"`
 	Records     int     `json:"records"`
 	Device      *Device `json:"device,omitempty"`
+	// The server ID and preferred address (identity.go).
+	Handoff
 }
 
 func (s *Server) status(dev *Device) Status {
-	return Status{Version: version, WireVersion: WireVersion, Records: s.Archive.Len(), Device: dev}
+	return Status{Version: version, WireVersion: WireVersion, Records: s.Archive.Len(), Device: dev, Handoff: s.handoff()}
 }
 
 func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
@@ -655,7 +657,7 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	}
 	var token string
 	model := strings.TrimSpace(req.Model)
-	dev, err := s.Codes.Redeem(req.Code, func() (Device, error) {
+	add := func() (Device, error) {
 		if req.Replaces != "" && !s.isAdminToken(req.Replaces) {
 			t, d, ok, err := s.Devices.Rekey(req.Replaces, name, model)
 			if ok {
@@ -666,7 +668,14 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 		t, d, err := s.Devices.Add(name, model)
 		token = t
 		return d, err
-	})
+	}
+	var dev Device
+	var err error
+	if s.Demo.isCode(req.Code) {
+		dev, err = add() // the demo server's shared code pairs any number of times (demo.go)
+	} else {
+		dev, err = s.Codes.Redeem(req.Code, add)
+	}
 	if errors.Is(err, errBadCode) {
 		s.count("pair_rejected")
 		httpError(w, http.StatusForbidden, badCodeMessage)

@@ -1,0 +1,68 @@
+# The App Store screenshots, and a check of what App Review does: on a fresh simulator, the
+# app is set up by hand with the demo server's address and setup code (repository secrets
+# HKR_DEMO_SERVER and HKR_DEMO_CODE, docs/appstore/review-notes.md), allowed to read Health
+# and syncs. Screenshots come from the largest iPhone simulator (6.9-inch, 1320 x 2868), with
+# a clean status bar, and are uploaded as the "appstore-screenshots" artifact.
+name: App Store screenshots
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    runs-on: xcode-27
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tools
+        run: brew install xcodegen
+      - name: Generate the Xcode project
+        run: xcodegen generate
+      - name: Pick the largest iPhone simulator
+        id: sim
+        run: |
+          udid=$(xcrun simctl list devices available -j |
+            jq -r '[.devices | to_entries[] | select(.key | contains("iOS")) | .value[] | select(.name | test("iPhone.*Pro Max"))] | last | .udid')
+          if [ -z "$udid" ] || [ "$udid" = null ]; then
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          xcrun simctl erase "$udid"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl status_bar "$udid" override --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 \
+            --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
+      - name: Set up with the demo server, as App Review does
+        env:
+          TEST_RUNNER_HKR_DEMO_SERVER: ${{ secrets.HKR_DEMO_SERVER }}
+          TEST_RUNNER_HKR_DEMO_CODE: ${{ secrets.HKR_DEMO_CODE }}
+        run: |
+          xcodebuild test -project HealthKitRelay.xcodeproj -scheme HealthKitRelay \
+            -destination "id=${{ steps.sim.outputs.udid }}" -derivedDataPath build \
+            -resultBundlePath build/screenshots.xcresult \
+            -only-testing:HealthKitRelayUITests/SetupFlowUITests/testManualSetupWithTheDemoServer \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+            > build/screenshots.log 2>&1 || { tail -80 build/screenshots.log; exit 1; }
+          grep -E 'Test Case|skipped|TEST (SUCCEEDED|FAILED)' build/screenshots.log
+          if grep -q 'skipped' build/screenshots.log; then echo "::error::the demo server secrets are not set"; exit 1; fi
+      - name: Export the screenshots
+        if: always()
+        run: |
+          mkdir -p build/appstore-screenshots
+          xcrun xcresulttool export attachments --path build/screenshots.xcresult --output-path build/appstore-screenshots || true
+          ls -l build/appstore-screenshots
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: appstore-screenshots
+          path: |
+            ios/build/appstore-screenshots
+            ios/build/screenshots.log
+          retention-days: 30

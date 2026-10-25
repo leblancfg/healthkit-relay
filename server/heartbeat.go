@@ -159,7 +159,9 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(&b, "; wakes: %s", strings.Join(parts, ", "))
 	}
 	log.Print(b.String())
-	w.WriteHeader(http.StatusNoContent)
+	// The answer tells the app where the server prefers to be reached (identity.go); apps
+	// before 1.0 read only the status code.
+	writeJSON(w, http.StatusOK, s.handoff())
 }
 
 // refusalLogEvery bounds how often refused tokens are logged, so a client retrying in a loop

@@ -53,6 +53,7 @@ struct AdvancedView: View {
                             _ = await SyncEngine.shared.requestPerObject(row.identifier)
                         }
                     }
+                    #if HKR_HEALTH_RECORDS
                     if healthRecordsAvailable {
                         itemRow("Health Records", symbol: "cross.case", result: healthRecordsOptedIn ? "Included" : nil,
                                 id: Self.healthRecordsID) {
@@ -63,10 +64,12 @@ struct AdvancedView: View {
                             }
                         }
                     }
+                    #endif
                 } header: {
                     Text("Shared item by item")
                 } footer: {
-                    Text("Health shares these one item at a time, for example each vision prescription, so each row has its own permission. Tap a row to choose the items to share. When Health has none of that kind yet, its list is empty. Health Records need a health provider connected in the Health app first.")
+                    Text("Health shares these one item at a time, for example each vision prescription, so each row has its own permission. Tap a row to choose the items to share. When Health has none of that kind yet, its list is empty."
+                         + (healthRecordsAvailable ? " Health Records need a health provider connected in the Health app first." : ""))
                 }
 
                 Section {
@@ -91,6 +94,8 @@ struct AdvancedView: View {
                 Section {
                     LabeledContent("Version", value: Self.appVersion)
                     LabeledContent("Data types from", value: SDKHealthTypes.sdk)
+                    Link("Privacy Policy", destination: Links.privacy)
+                    Link("Help", destination: Links.support)
                 }
             }
             .navigationTitle("Advanced")
@@ -173,8 +178,10 @@ struct AdvancedView: View {
     private func load() async {
         let engine = SyncEngine.shared
         perObjectRows = await engine.perObjectRows()
+        #if HKR_HEALTH_RECORDS
         healthRecordsAvailable = await engine.healthRecordsAvailable()
         healthRecordsOptedIn = await engine.healthRecordsOptedIn
+        #endif
         coverage = await engine.coverage()
     }
 

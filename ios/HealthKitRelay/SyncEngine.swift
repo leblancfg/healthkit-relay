@@ -196,7 +196,11 @@ actor SyncEngine {
         let started = Date.now
         var p = AuthPlan()
         let readable = await MainActor.run { UIApplication.shared.isProtectedDataAvailable }
+        #if HKR_HEALTH_RECORDS
         let healthRecords = store.supportsHealthRecords()
+        #else
+        let healthRecords = false // never reached: the catalog has no clinical types (HealthTypes.isClinical)
+        #endif
         for synced in HealthTypes.all {
             let type = synced.type
             if type is HKClinicalType {
@@ -662,8 +666,11 @@ actor SyncEngine {
             wakes: wakes, battery: power.battery, lowPowerMode: power.lowPowerMode,
             backgroundRefresh: power.backgroundRefresh)
         do {
-            try await Uploader(settings: settings).heartbeat(hb)
+            let handoff = try await Uploader(settings: settings).heartbeat(hb)
             lastError = nil
+            if let handoff, let moved = await AddressHandoff.follow(handoff, from: settings, device: PairedDevice.load()?.id) {
+                await AppModel.shared.serverMoved(to: moved)
+            }
         } catch {
             lastError = "heartbeat not sent: \(error.localizedDescription)"
             Log.info("heartbeat: not sent (\(trigger.rawValue)): \(error.localizedDescription)")

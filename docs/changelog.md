@@ -5,6 +5,36 @@ server releases and the app are versioned separately.
 
 ## Unreleased
 
+### App 1.0.0 (13), for the App Store
+
+- The server's address follows the server: when a paired server names a preferred https
+  address (its `-public-url`), the app checks that the address answers as the same server
+  (same server ID, without the token, then its token as the same device) and moves there,
+  with its history and sync positions. Redirects are not followed. An address that does not
+  answer as the same server is tried again after 6 hours.
+- **Enter Server Details Instead** takes the setup code shown on the setup page, as well as
+  the admin token.
+- The welcome screen says what the app works with: a server you run yourself, with a link to
+  the setup guide. Links to the privacy policy and help on the welcome screen and in
+  Advanced.
+- Pending uploads, sync positions and the log stay out of iCloud and computer backups.
+- Privacy manifest (`PrivacyInfo.xcprivacy`): no tracking, no collected data, the reasons for
+  UserDefaults and file metadata.
+- The App Store build reads no clinical data: Health Records and CDA documents are left out
+  (a build of your own can read them, see ios/README.md).
+- Info.plist: the local network permission explains itself, export compliance is declared
+  (HTTPS only), and the app requires HealthKit.
+
+### Server
+
+- A server ID per archive (`server.json`) and the preferred address in `GET /v1/status` and
+  in the answer to each heartbeat (now `200` with JSON); `GET /v1/server` answers the ID
+  without a token. Phones move to `-public-url` on their own.
+- Demo mode (`-demo-code-file`, `-demo-reset`, `-demo-quota`): a shared setup code that pairs
+  any number of iPhones, every record erased every hour, an upload quota between erases.
+- Requests through Tailscale Funnel count as public for `-setup-from private`, and
+  `/metrics` answers private networks only.
+
 ### App 0.7.0
 
 - Every background mechanism iOS offers, layered: HealthKit background delivery, the

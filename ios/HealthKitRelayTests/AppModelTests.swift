@@ -241,7 +241,10 @@ final class AppModelTests: XCTestCase {
     func testLinkToTheSameServerAtAnotherAddressKeepsTheDevice() async throws {
         let model = try await erasable()
         KnownServer.id = "stub-server-id"
-        defer { KnownServer.id = nil }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubServer.self]
+        KnownServer.session = AddressHandoff.session(config)
+        defer { KnownServer.id = nil; KnownServer.session = AddressHandoff.noRedirects }
         await model.open(URL(string: "healthrelay://pair?server=https%3A%2F%2Fstub.test%3A8443&code=MOVE")!)
         XCTAssertNil(model.pendingLink, "asked to confirm the same server")
         let pair = try XCTUnwrap(StubServer.pairs.last)

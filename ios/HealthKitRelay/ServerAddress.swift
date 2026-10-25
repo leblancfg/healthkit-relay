@@ -23,13 +23,16 @@ enum KnownServer {
         set { UserDefaults.standard.set(newValue, forKey: key) }
     }
 
+    /// Follows no redirect; tests replace it.
+    nonisolated(unsafe) static var session = AddressHandoff.noRedirects
+
     static func note(_ id: String?) {
         if let id, !id.isEmpty, id != Self.id { Self.id = id }
     }
 
     /// Whether `url` reaches the server this app is paired with: the same address, or, over
     /// HTTPS, an address answering GET /v1/server with the known server ID (no token sent).
-    static func isCurrent(_ url: URL, settings: ServerSettings, session: URLSession = AddressHandoff.noRedirects) async -> Bool {
+    static func isCurrent(_ url: URL, settings: ServerSettings) async -> Bool {
         if settings.sameServer(as: url.absoluteString) { return true }
         guard settings.isComplete, let id, url.scheme?.lowercased() == "https" else { return false }
         let answer = try? await ServerClient(base: url, session: session).serverInfo()

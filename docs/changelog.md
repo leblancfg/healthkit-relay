@@ -12,9 +12,9 @@ server releases and the app are versioned separately.
   (same server ID, without the token, then its token as the same device) and moves there,
   with its history and sync positions. Redirects are not followed. An address that does not
   answer as the same server is tried again after 6 hours.
-- A setup link for the paired server at another address (it answers `GET /v1/server` with
-  the same server ID) pairs without asking, as the same device, with its sync positions:
-  before, a new address meant a new device and a full upload again.
+- A setup link for the address the paired server names as its preferred one pairs without
+  asking, as the same device, with its sync positions: before, a new address meant a new
+  device and a full upload again. A link for any other address asks first, as before.
 - **Enter Server Details Instead** takes the setup code shown on the setup page, as well as
   the admin token.
 - The welcome screen says what the app works with: a server you run yourself, with a link to

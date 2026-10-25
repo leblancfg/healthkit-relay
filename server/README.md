@@ -373,8 +373,8 @@ healthkit-relay -archive-dir /var/lib/healthkit-relay-demo -public-url https://d
   Health Relay**.
 - Every `-demo-reset` (an hour by default) the server erases every record, and revokes
   devices unseen for a week.
-- Between two erases it accepts `-demo-quota` bytes of uploads (256 MB by default); beyond
-  that, uploads get `429` with `Retry-After`, and the app tries again later.
+- Between two erases it accepts `-demo-quota` bytes of uploads (256 MB by default) and 200
+  pairings; beyond that, uploads and pairings get `429`, and the app tries again later.
 
 Run it with an archive of its own, never one holding real data.
 

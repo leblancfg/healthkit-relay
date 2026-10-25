@@ -25,8 +25,13 @@ type Demo struct {
 
 	mu        sync.Mutex
 	used      int64
+	pairings  int
 	nextReset time.Time
 }
+
+// DemoPairings bounds pairings with the shared code between two resets, so a script cannot
+// grow devices.json without end.
+const DemoPairings = 200
 
 // DemoDeviceTTL is how long a device on a demo server may go unseen before it is revoked.
 const DemoDeviceTTL = 7 * 24 * time.Hour
@@ -63,6 +68,17 @@ func (d *Demo) admit() (time.Duration, bool) {
 		return 0, true
 	}
 	return max(time.Until(d.nextReset), time.Second), false
+}
+
+// admitPairing counts a pairing with the shared code; false once DemoPairings is reached.
+func (d *Demo) admitPairing() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.pairings >= DemoPairings {
+		return false
+	}
+	d.pairings++
+	return true
 }
 
 func (d *Demo) use(n int64) {
@@ -145,7 +161,7 @@ func (s *Server) demoReset(ctx context.Context) {
 	}
 	s.Demo.mu.Lock()
 	used := s.Demo.used
-	s.Demo.used, s.Demo.nextReset = 0, start.Add(s.Demo.resetEvery)
+	s.Demo.used, s.Demo.pairings, s.Demo.nextReset = 0, 0, start.Add(s.Demo.resetEvery)
 	s.Demo.mu.Unlock()
 	log.Printf("demo reset: erased %d records of %d uploaders, revoked %d devices unseen for %s, %d bytes uploaded since the last reset, in %s",
 		erased, len(uploaders), revoked, DemoDeviceTTL, used, time.Since(start).Round(time.Millisecond))

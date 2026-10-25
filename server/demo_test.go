@@ -63,6 +63,15 @@ func TestDemoCodePairsManyTimes(t *testing.T) {
 	if !strings.Contains(w.Body.String(), `"pending"`) {
 		t.Errorf("setup status: %s", w.Body.String())
 	}
+	// Pairings are bounded per period.
+	s.Demo.pairings = DemoPairings
+	if code, _ := pairWith(t, ts.URL, demoCode, ""); code != http.StatusTooManyRequests {
+		t.Errorf("pairing beyond the limit: %d", code)
+	}
+	s.demoReset(context.Background())
+	if code, _ := pairWith(t, ts.URL, demoCode, ""); code != 200 {
+		t.Errorf("pairing after the reset: %d", code)
+	}
 	if _, err := NewDemo("SHORT", time.Hour, 1); err == nil {
 		t.Error("a short demo code is accepted")
 	}

@@ -13,30 +13,41 @@ struct Handoff: Codable, Equatable, Sendable {
     }
 }
 
-/// The ID of the server this app is paired with, from its last answer that named one (status,
-/// pairing, heartbeat). Lets the app recognize its server at another address.
+/// What the paired server said about itself in its last authenticated answer (status, pairing,
+/// heartbeat): its server ID and its preferred https address. A setup link for that address
+/// is a link for this same server.
 enum KnownServer {
-    static let key = "serverID"
+    static let idKey = "serverID"
+    static let preferredKey = "serverPreferredURL"
 
     static var id: String? {
-        get { UserDefaults.standard.string(forKey: key) }
-        set { UserDefaults.standard.set(newValue, forKey: key) }
+        get { UserDefaults.standard.string(forKey: idKey) }
+        set { UserDefaults.standard.set(newValue, forKey: idKey) }
     }
 
-    /// Follows no redirect; tests replace it.
-    nonisolated(unsafe) static var session = AddressHandoff.noRedirects
-
-    static func note(_ id: String?) {
-        if let id, !id.isEmpty, id != Self.id { Self.id = id }
+    static var preferredURL: String? {
+        get { UserDefaults.standard.string(forKey: preferredKey) }
+        set { UserDefaults.standard.set(newValue, forKey: preferredKey) }
     }
 
-    /// Whether `url` reaches the server this app is paired with: the same address, or, over
-    /// HTTPS, an address answering GET /v1/server with the known server ID (no token sent).
-    static func isCurrent(_ url: URL, settings: ServerSettings) async -> Bool {
+    static func note(_ handoff: Handoff) {
+        if let id = handoff.serverID, !id.isEmpty { Self.id = id }
+        if let url = handoff.preferredURL, url.lowercased().hasPrefix("https://") { preferredURL = url }
+    }
+
+    static func forget() {
+        id = nil
+        preferredURL = nil
+    }
+
+    /// Whether `url` reaches the server this app is paired with: its current address, or the
+    /// preferred address the server itself named. Anything else is another server, whatever it
+    /// answers: the server ID is public, so only the paired server's own word counts.
+    static func isCurrent(_ url: URL, settings: ServerSettings) -> Bool {
+        guard settings.isComplete else { return false }
         if settings.sameServer(as: url.absoluteString) { return true }
-        guard settings.isComplete, let id, url.scheme?.lowercased() == "https" else { return false }
-        let answer = try? await ServerClient(base: url, session: session).serverInfo()
-        return answer?.serverID == id
+        guard let preferredURL else { return false }
+        return ServerSettings(url: preferredURL, token: "x").sameServer(as: url.absoluteString)
     }
 }
 
@@ -58,7 +69,7 @@ enum AddressHandoff {
     static func follow(_ handoff: Handoff, from settings: ServerSettings, device: String?,
                        session: URLSession = noRedirects, defaults: UserDefaults = .standard,
                        now: Date = .now) async -> ServerSettings? {
-        KnownServer.note(handoff.serverID)
+        KnownServer.note(handoff)
         guard let id = handoff.serverID, !id.isEmpty, let preferred = handoff.preferredURL,
               settings.isComplete, !settings.sameServer(as: preferred) else { return nil }
         var tried = defaults.dictionary(forKey: triedKey) as? [String: Date] ?? [:]

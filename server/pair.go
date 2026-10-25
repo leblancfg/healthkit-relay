@@ -672,7 +672,12 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	var dev Device
 	var err error
 	if s.Demo.isCode(req.Code) {
-		dev, err = add() // the demo server's shared code pairs any number of times (demo.go)
+		if !s.Demo.admitPairing() {
+			s.count("demo_quota")
+			httpError(w, http.StatusTooManyRequests, "this demo server has paired many iPhones in the last hour: try again later")
+			return
+		}
+		dev, err = add() // the demo server's shared code pairs many times (demo.go)
 	} else {
 		dev, err = s.Codes.Redeem(req.Code, add)
 	}

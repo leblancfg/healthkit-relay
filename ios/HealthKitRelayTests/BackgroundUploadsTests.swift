@@ -211,6 +211,7 @@ final class BackgroundUploadsTests: XCTestCase {
 
     private func uploader(_ transport: ScriptedTransport) -> Uploader {
         var u = Uploader(settings: settings, transport: transport)
+        u.stillConnected = { _ in true }
         u.backoff = 0.001
         return u
     }
@@ -295,5 +296,15 @@ final class BackgroundUploadsTests: XCTestCase {
     func testNewTriggers() {
         XCTAssertEqual([SyncTrigger.processing, .urlsession, .backgrounded, .continued].map(\.rawValue),
                        ["processing", "urlsession", "backgrounded", "continued"], "the server counts these names")
+    }
+
+    func testDisconnectStopsUploads() async throws {
+        let t = ScriptedTransport([.success((200, records))])
+        var u = uploader(t)
+        u.stillConnected = { _ in false }
+        do {
+            try await u.upload(try batch(records: 1))
+            XCTFail("uploaded after a disconnect")
+        } catch UploadError.notConfigured {}
     }
 }

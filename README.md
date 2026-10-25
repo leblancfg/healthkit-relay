@@ -13,7 +13,7 @@
   <a href="https://github.com/leblancfg/healthkit-relay/releases/latest"><img src="https://img.shields.io/github/v/release/leblancfg/healthkit-relay?sort=semver" alt="Latest release"></a>
   <a href="https://github.com/leblancfg/healthkit-relay/pkgs/container/healthkit-relay"><img src="https://img.shields.io/badge/docker-ghcr.io%2Fleblancfg%2Fhealthkit--relay-2496ED?logo=docker&logoColor=white" alt="Docker image"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/leblancfg/healthkit-relay" alt="MIT license"></a>
-  <a href="https://leblancfg.com/healthkit-relay/"><img src="https://img.shields.io/badge/docs-mkdocs-ff2d55" alt="Documentation"></a>
+  <a href="https://health-relay.leblancfg.com/"><img src="https://img.shields.io/badge/docs-mkdocs-ff2d55" alt="Documentation"></a>
 </p>
 
 Your iPhone and Apple Watch record a lot about you: every heartbeat, every night of sleep,
@@ -38,9 +38,9 @@ chart, query or delete.
 - **Runs on what you already have.** A NAS, a Raspberry Pi, a home server or a small VPS. The
   server is one program that keeps everything in files.
 
-**[Documentation](https://leblancfg.com/healthkit-relay/)** ·
+**[Documentation](https://health-relay.leblancfg.com/)** ·
 [Quick start](#quick-start) ·
-[Setup guides](https://leblancfg.com/healthkit-relay/setup/) ·
+[Setup guides](https://health-relay.leblancfg.com/setup/) ·
 [FAQ](#faq)
 
 ## Features
@@ -125,9 +125,9 @@ flowchart LR
 ## Quick start
 
 You need a computer that stays on (a home server, a NAS, a Raspberry Pi) with Docker, and an
-iPhone. The [setup guides](https://leblancfg.com/healthkit-relay/setup/) cover installing
+iPhone. The [setup guides](https://health-relay.leblancfg.com/setup/) cover installing
 without Docker, and NixOS, macOS, NAS and Raspberry Pi. The
-[glossary](https://leblancfg.com/healthkit-relay/glossary/) explains each term.
+[glossary](https://health-relay.leblancfg.com/glossary/) explains each term.
 
 1. **Start the server.** On that computer, run these commands. Replace `192.168.1.10` with
    the computer's address on your network: this is the **server address**, the one the
@@ -161,7 +161,7 @@ without Docker, and NixOS, macOS, NAS and Raspberry Pi. The
    starts. The setup page lists your iPhone under **Paired devices**, and the app shows
    **Up to date** with the number of **Records on server**.
 
-To sync away from home too, [put the server behind HTTPS](https://leblancfg.com/healthkit-relay/networking/).
+To sync away from home too, [put the server behind HTTPS](https://health-relay.leblancfg.com/networking/).
 Tailscale is the easiest way.
 
 ## Privacy
@@ -176,7 +176,7 @@ Tailscale is the easiest way.
   admin token.
 - Your data is plain files on your disk: easy to back up, easy to delete.
 
-More in [Security & privacy](https://leblancfg.com/healthkit-relay/security/).
+More in [Security & privacy](https://health-relay.leblancfg.com/security/).
 
 > [!IMPORTANT]
 > **Not a medical device.** Health Relay copies data. Talk to a health professional about
@@ -240,7 +240,7 @@ Forwarding is optional; the Parquet archive always has everything.
 
 The iPhone syncs whenever it can reach the server. With the server on your home network,
 it syncs while you are at home. To sync from anywhere, use Tailscale or another VPN. See
-[Networking & HTTPS](https://leblancfg.com/healthkit-relay/networking/).
+[Networking & HTTPS](https://health-relay.leblancfg.com/networking/).
 </details>
 
 <details>

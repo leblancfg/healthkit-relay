@@ -1,3 +1,8 @@
+---
+description: >-
+  Pair an iPhone with your Health Relay server: setup codes, QR codes, per-device tokens, several iPhones, and revoking a device.
+---
+
 # Pairing an iPhone
 
 Pairing connects the Health Relay app to your server. You show the iPhone a *setup code*, a

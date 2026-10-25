@@ -1,3 +1,8 @@
+---
+description: >-
+  Run the Health Relay server on a Raspberry Pi 4 or 5 or another 64-bit ARM board, to keep your Apple Health data at home.
+---
+
 # Raspberry Pi & ARM
 
 The server runs well on a Raspberry Pi 4 or 5, or any board with a 64-bit ARM processor. It

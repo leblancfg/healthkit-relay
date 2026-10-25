@@ -1,3 +1,8 @@
+---
+description: >-
+  Run Health Relay on NixOS with the flake's module: a hardened systemd service, with options for the server address, VictoriaMetrics forwarding and read tokens.
+---
+
 # NixOS
 
 The repository is a flake with the server package and a NixOS module,

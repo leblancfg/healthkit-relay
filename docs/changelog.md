@@ -1,3 +1,8 @@
+---
+description: >-
+  Release notes for the Health Relay server and iPhone app.
+---
+
 # Changelog
 
 Notable changes to the server and the app. Versions follow [Semantic Versioning](https://semver.org);

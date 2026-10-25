@@ -1,3 +1,8 @@
+---
+description: >-
+  Run the Health Relay server on a Mac that stays on, Apple silicon or Intel, as a launchd service that starts at login.
+---
+
 # macOS (launchd)
 
 A Mac mini, or any Mac that stays on, can run the server, on Apple silicon or Intel. launchd,

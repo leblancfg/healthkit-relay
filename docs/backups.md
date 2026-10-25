@@ -1,3 +1,8 @@
+---
+description: >-
+  Back up the Health Relay archive, your Apple Health data in Parquet files, with restic, rsync or filesystem snapshots.
+---
+
 # Backups
 
 Your iPhone keeps Apple Health, and iCloud may too. The server's **archive**, the folder where

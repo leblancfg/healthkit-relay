@@ -1,3 +1,8 @@
+---
+description: >-
+  Read your Apple Health data over HTTP: Health Relay's read-only query API runs SQL with DuckDB for Grafana, notebooks, scripts and AI agents.
+---
+
 # Query API
 
 The **query API** lets a program read your health data from the server: a Grafana dashboard,

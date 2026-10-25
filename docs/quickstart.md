@@ -1,3 +1,8 @@
+---
+description: >-
+  Step by step: run the Health Relay server with Docker Compose, pair your iPhone with a QR code, and sync your Apple Health history to your own server.
+---
+
 # Quick start
 
 This page takes you, step by step, to an iPhone that syncs its Health data to your own server,

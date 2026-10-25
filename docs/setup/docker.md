@@ -1,3 +1,8 @@
+---
+description: >-
+  Run the Health Relay server with Docker or Docker Compose: the image, the settings, pairing an iPhone, VictoriaMetrics and Grafana, and updates.
+---
+
 # Docker & Compose
 
 Docker runs the server in a *container*: a packaged program with everything it needs. Docker

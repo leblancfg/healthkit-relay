@@ -1,3 +1,8 @@
+---
+description: >-
+  Chart Apple Health data in Grafana: forward heart rate, HRV, steps and sleep from Health Relay to VictoriaMetrics or InfluxDB, with example queries.
+---
+
 # Grafana
 
 [Grafana](https://grafana.com/oss/grafana/) draws dashboards: charts of your heart rate,

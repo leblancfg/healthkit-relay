@@ -1,3 +1,8 @@
+---
+description: >-
+  Contribute to Health Relay: bug reports, fixes, setup guides, Grafana dashboards and DuckDB recipes for the open-source Apple Health sync.
+---
+
 # Contributing
 
 Contributions are welcome: bug reports, fixes, data types that look wrong, setup guides for

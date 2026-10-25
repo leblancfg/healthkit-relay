@@ -1,8 +1,8 @@
 ---
+seo_title: "Health Relay: self-hosted Apple Health export to your own server"
 description: >-
-  Health Relay is a self-hosted Apple Health export and HealthKit sync tool. Back up iPhone
-  and Apple Watch data (heart rate, HRV, sleep, workouts, GPS routes, ECG) to your own
-  server, query it with DuckDB, chart it in Grafana. Your data stays on your server.
+  Self-hosted Apple Health export: sync iPhone and Apple Watch HealthKit data to your own
+  server, query it with DuckDB, chart it in Grafana. Free and open source.
 ---
 
 # Health Relay

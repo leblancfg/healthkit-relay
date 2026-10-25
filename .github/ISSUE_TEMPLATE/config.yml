@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/leblancfg/healthkit-relay/security/advisories/new
     about: Privately, never in a public issue.
   - name: Documentation
-    url: https://leblancfg.com/healthkit-relay/
+    url: https://health-relay.leblancfg.com/
     about: Setup guides, troubleshooting and FAQ.

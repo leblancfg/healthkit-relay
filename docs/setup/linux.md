@@ -1,3 +1,8 @@
+---
+description: >-
+  Install the Health Relay server as a systemd service on a Linux server or VPS (amd64 or arm64): Debian, Ubuntu, Fedora, Arch and others.
+---
+
 # Linux binary + systemd
 
 This guide runs the server directly on a Linux server or VPS (virtual private server),

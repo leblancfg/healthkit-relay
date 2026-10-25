@@ -18,8 +18,8 @@ it runs on Cloudflare's free plan, on no computer of ours:
 
 `src/index.js` has the routes; one Durable Object serves every request, which keeps the hourly
 counts exact. `src/setup.js` is the setup page (`/setup?code=...`) with its QR code
-(`src/qr.js`, a port of `server/qr.go`). It also answers https://health-relay.leblancfg.com,
-the product's address, with a redirect to the documentation.
+(`src/qr.js`, a port of `server/qr.go`). The product's address,
+https://health-relay.leblancfg.com, is the documentation site on GitHub Pages.
 
 ## Same answers as the Go server
 

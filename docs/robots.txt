@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://health-relay.leblancfg.com/sitemap.xml

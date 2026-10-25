@@ -1,3 +1,8 @@
+---
+description: >-
+  Run the Health Relay server on a Synology, Unraid or TrueNAS NAS with its Docker image, and keep your Apple Health archive on redundant disks.
+---
+
 # Synology, Unraid, TrueNAS
 
 On a NAS (network-attached storage), run the server's Docker image from the NAS's container

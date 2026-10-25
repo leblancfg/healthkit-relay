@@ -2,84 +2,71 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
 // Demo mode (-demo-code-file): a public server for trying the app, such as the one App Review
-// uses. It keeps no Health data: each batch is checked like on any server, answered as
-// stored, then dropped; the server counts the records each device sent, for the app's
-// "Records on server". Pairing works with one shared setup code, many times, under a fixed
-// device name. Every -demo-reset (an hour by default) the counts go back to zero, the archive
-// is erased (it stays empty) and devices unseen for a week are revoked. Between two resets it
-// accepts at most -demo-quota bytes of uploads and DemoPairings pairings, answering 429 beyond
-// that; the app retries later on its own.
+// uses. It keeps nothing about the people who use it:
+//
+//   - Health data: each batch is checked like on any server, answered as stored, then
+//     dropped. The server counts records received, all devices together, for the app's
+//     "Records on server"; the count goes back to zero every -demo-reset (an hour).
+//   - Devices: pairing with the shared code returns a signed token (an HMAC with a key in
+//     <archive-dir>/demo-key) that is valid for DemoTokenLifetime. The server checks the
+//     signature and stores no device list, name, model or last-seen time; every device is
+//     "Demo iPhone".
+//   - Logs: no per-request lines, only an hourly summary of counts.
+//
+// Between two resets it accepts at most -demo-quota bytes of uploads, DemoUploads uploads at
+// once and DemoPairings pairings, answering 429 beyond that; the app retries later on its own.
 type Demo struct {
 	codeHash   string // SHA-256 of the normalized shared code
 	resetEvery time.Duration
 	quota      int64
+	key        []byte // signs demo tokens
+	uploads    chan struct{}
 
 	mu        sync.Mutex
 	used      int64
 	pairings  int
-	counts    map[string]int // records received by uploader since the last reset
+	batches   int
+	received  int // records received since the last reset, all devices
 	nextReset time.Time
 }
 
-// discard counts a validated batch of n items for uploader and drops it.
-func (d *Demo) discard(uploader string, n int) []Outcome {
-	d.mu.Lock()
-	if d.counts == nil {
-		d.counts = map[string]int{}
-	}
-	d.counts[uploader] += n
-	d.mu.Unlock()
-	out := make([]Outcome, n)
-	for i := range out {
-		out[i].Stored = true
-	}
-	return out
-}
+const (
+	// DemoTokenLifetime is how long a demo token works.
+	DemoTokenLifetime = 30 * 24 * time.Hour
+	// DemoPairings bounds pairings with the shared code between two resets.
+	DemoPairings = 500
+	// DemoUploads bounds uploads read at once.
+	DemoUploads = 4
+	// minDemoCode is the shortest shared code accepted: 16 characters of A-Z2-7, 80 bits.
+	minDemoCode = 16
+	demoKeyFile = "demo-key"
+	demoPrefix  = "demo."
+)
 
-// received is the number of records received since the last reset, all devices.
-func (d *Demo) received() int {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	n := 0
-	for _, c := range d.counts {
-		n += c
-	}
-	return n
-}
-
-// forget clears uploader's count (DELETE /v1/data) and returns it.
-func (d *Demo) forget(uploader string) int64 {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	n := d.counts[uploader]
-	delete(d.counts, uploader)
-	return int64(n)
-}
-
-// DemoPairings bounds pairings with the shared code between two resets, so a script cannot
-// grow devices.json without end.
-const DemoPairings = 200
-
-// DemoDeviceTTL is how long a device on a demo server may go unseen before it is revoked.
-const DemoDeviceTTL = 7 * 24 * time.Hour
-
-// minDemoCode is the shortest shared code accepted: 16 characters of A-Z2-7, 80 bits.
-const minDemoCode = 16
-
-// NewDemo checks the shared code and returns the demo settings.
-func NewDemo(code string, resetEvery time.Duration, quota int64) (*Demo, error) {
+// NewDemo checks the shared code, loads (or makes) the token key in dir and returns the demo
+// settings.
+func NewDemo(dir, code string, resetEvery time.Duration, quota int64) (*Demo, error) {
 	code = normalizeCode(code)
 	if len(code) < minDemoCode {
 		return nil, fmt.Errorf("the demo setup code must be at least %d characters (letters A-Z and digits 2-7 make it easy to type)", minDemoCode)
@@ -87,7 +74,38 @@ func NewDemo(code string, resetEvery time.Duration, quota int64) (*Demo, error) 
 	if resetEvery < time.Minute {
 		return nil, errors.New("-demo-reset must be at least a minute")
 	}
-	return &Demo{codeHash: hashToken(code), resetEvery: resetEvery, quota: quota, nextReset: time.Now().Add(resetEvery)}, nil
+	key, err := demoKey(dir)
+	if err != nil {
+		return nil, fmt.Errorf("demo token key: %w", err)
+	}
+	return &Demo{codeHash: hashToken(code), resetEvery: resetEvery, quota: quota, key: key,
+		uploads: make(chan struct{}, DemoUploads), nextReset: time.Now().Add(resetEvery)}, nil
+}
+
+// demoKey reads dir/demo-key, making it on first start. Replacing the file signs out every
+// demo device.
+func demoKey(dir string) ([]byte, error) {
+	path := filepath.Join(dir, demoKeyFile)
+	unlock, err := lockState(path)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			panic(err) // crypto/rand does not fail on supported platforms
+		}
+		return key, writeFileAtomic(path, []byte(hex.EncodeToString(key)+"\n"))
+	} else if err != nil {
+		return nil, err
+	}
+	key, err := hex.DecodeString(strings.TrimSpace(string(b)))
+	if err != nil || len(key) < 32 {
+		return nil, fmt.Errorf("%s is not a 32-byte hex key", path)
+	}
+	return key, nil
 }
 
 // isCode tells whether code is the shared demo code, in constant time.
@@ -98,15 +116,44 @@ func (d *Demo) isCode(code string) bool {
 	return subtle.ConstantTimeCompare([]byte(hashToken(normalizeCode(code))), []byte(d.codeHash)) == 1
 }
 
-// admit tells whether uploads are still accepted, and when not, how long until the next
-// reset. Bytes count as they are read, so the upload that crosses the quota still goes in.
-func (d *Demo) admit() (time.Duration, bool) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.used < d.quota {
-		return 0, true
+// mint returns a new demo token and the device it stands for.
+func (d *Demo) mint(now time.Time) (string, Device) {
+	payload := make([]byte, 16)
+	if _, err := rand.Read(payload[:8]); err != nil {
+		panic(err)
 	}
-	return max(time.Until(d.nextReset), time.Second), false
+	binary.BigEndian.PutUint64(payload[8:], uint64(now.Add(DemoTokenLifetime).Unix()))
+	token := demoPrefix + base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(d.sign(payload))
+	return token, demoDevice(payload, now)
+}
+
+func (d *Demo) sign(payload []byte) []byte {
+	m := hmac.New(sha256.New, d.key)
+	m.Write(payload)
+	return m.Sum(nil)
+}
+
+// lookup checks a demo token's signature and lifetime.
+func (d *Demo) lookup(token string, now time.Time) (Device, bool) {
+	rest, ok := strings.CutPrefix(token, demoPrefix)
+	if d == nil || !ok {
+		return Device{}, false
+	}
+	p, s, ok := strings.Cut(rest, ".")
+	payload, err1 := base64.RawURLEncoding.DecodeString(p)
+	sig, err2 := base64.RawURLEncoding.DecodeString(s)
+	if !ok || err1 != nil || err2 != nil || len(payload) != 16 || !hmac.Equal(sig, d.sign(payload)) {
+		return Device{}, false
+	}
+	if now.Unix() > int64(binary.BigEndian.Uint64(payload[8:])) {
+		return Device{}, false
+	}
+	return demoDevice(payload, now), true
+}
+
+func demoDevice(payload []byte, now time.Time) Device {
+	return Device{ID: hex.EncodeToString(payload[:4]), Name: "Demo iPhone", Scope: ScopeUpload,
+		CreatedAt: now.UTC().Truncate(time.Second)}
 }
 
 // admitPairing counts a pairing with the shared code; false once DemoPairings is reached.
@@ -120,10 +167,55 @@ func (d *Demo) admitPairing() bool {
 	return true
 }
 
-func (d *Demo) use(n int64) {
+// discard counts a validated batch of n items and drops it.
+func (d *Demo) discard(n int) []Outcome {
 	d.mu.Lock()
-	d.used += n
+	d.batches++
+	d.received += n
 	d.mu.Unlock()
+	out := make([]Outcome, n)
+	for i := range out {
+		out[i].Stored = true
+	}
+	return out
+}
+
+// records is the number of records received since the last reset, all devices.
+func (d *Demo) records() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.received
+}
+
+// demoAdmit lets an upload in when the quota has room and fewer than DemoUploads are read at
+// once; the body may then use what is left of the quota, at most. It answers 429 otherwise.
+// ok is false when it has answered; done releases the upload's slot.
+func (s *Server) demoAdmit(w http.ResponseWriter, r *http.Request) (done func(), ok bool) {
+	if s.Demo == nil {
+		return func() {}, true
+	}
+	d := s.Demo
+	refuse := func(wait time.Duration, msg string) (func(), bool) {
+		s.count("demo_quota")
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		httpError(w, http.StatusTooManyRequests, msg)
+		return nil, false
+	}
+	select {
+	case d.uploads <- struct{}{}:
+	default:
+		return refuse(10*time.Second, "this demo server is busy: try again in a few seconds")
+	}
+	d.mu.Lock()
+	left, wait := d.quota-d.used, max(time.Until(d.nextReset), time.Second)
+	d.mu.Unlock()
+	if left <= 0 {
+		<-d.uploads
+		return refuse(wait, fmt.Sprintf("this demo server accepts %d MB of uploads per %s: try again in %s",
+			d.quota>>20, d.resetEvery, wait.Round(time.Minute)))
+	}
+	r.Body = countingReader{http.MaxBytesReader(w, r.Body, min(left, s.MaxBodyBytes)), d}
+	return func() { <-d.uploads }, true
 }
 
 // countingReader counts the bytes of an upload toward the demo quota.
@@ -134,30 +226,15 @@ type countingReader struct {
 
 func (c countingReader) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
-	c.d.use(int64(n))
+	c.d.mu.Lock()
+	c.d.used += int64(n)
+	c.d.mu.Unlock()
 	return n, err
 }
 
 func (c countingReader) Close() error { return c.r.Close() }
 
-// demoAdmit answers 429 when the demo quota is used up; ok is false when it has answered.
-func (s *Server) demoAdmit(w http.ResponseWriter, r *http.Request) bool {
-	if s.Demo == nil {
-		return true
-	}
-	wait, ok := s.Demo.admit()
-	if !ok {
-		s.count("demo_quota")
-		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-		httpError(w, http.StatusTooManyRequests, fmt.Sprintf("this demo server accepts %d MB of uploads per %s: try again in %s",
-			s.Demo.quota>>20, s.Demo.resetEvery, wait.Round(time.Minute)))
-		return false
-	}
-	r.Body = countingReader{r.Body, s.Demo}
-	return true
-}
-
-// runDemoResets erases the demo server's data every resetEvery until ctx ends.
+// runDemoResets starts a new period every resetEvery until ctx ends.
 func (s *Server) runDemoResets(ctx context.Context) {
 	t := time.NewTicker(s.Demo.resetEvery)
 	defer t.Stop()
@@ -166,42 +243,19 @@ func (s *Server) runDemoResets(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			s.demoReset(ctx)
+			s.demoReset()
 		}
 	}
 }
 
-// demoReset erases every record, revokes devices unseen for DemoDeviceTTL and starts a new
-// quota period.
-func (s *Server) demoReset(ctx context.Context) {
-	start := time.Now()
-	uploaders, err := s.Archive.Uploaders()
-	if err != nil {
-		log.Printf("demo reset: %v", err)
-	}
-	var erased int64
-	for _, u := range uploaders {
-		n, err := s.Archive.Erase(ctx, u)
-		if err != nil {
-			log.Printf("demo reset: erase %s: %v", uploaderName(u), err)
-			continue
-		}
-		erased += n
-	}
-	revoked := 0
-	for _, dev := range s.Devices.List() {
-		if start.Sub(dev.LastSeen) > DemoDeviceTTL {
-			if ok, err := s.Devices.Revoke(dev.ID); err != nil {
-				log.Printf("demo reset: revoke %s: %v", dev.ID, err)
-			} else if ok {
-				revoked++
-			}
-		}
-	}
-	s.Demo.mu.Lock()
-	used := s.Demo.used
-	s.Demo.used, s.Demo.pairings, s.Demo.counts, s.Demo.nextReset = 0, 0, nil, start.Add(s.Demo.resetEvery)
-	s.Demo.mu.Unlock()
-	log.Printf("demo reset: erased %d records of %d uploaders, revoked %d devices unseen for %s, %d bytes uploaded since the last reset, in %s",
-		erased, len(uploaders), revoked, DemoDeviceTTL, used, time.Since(start).Round(time.Millisecond))
+// demoReset zeroes the counts and logs what the period saw, in counts only.
+func (s *Server) demoReset() {
+	d := s.Demo
+	d.mu.Lock()
+	used, pairings, batches, received := d.used, d.pairings, d.batches, d.received
+	d.used, d.pairings, d.batches, d.received = 0, 0, 0, 0
+	d.nextReset = time.Now().Add(d.resetEvery)
+	d.mu.Unlock()
+	log.Printf("demo: last %s: %d pairings, %d batches, %d records received and dropped, %d bytes",
+		d.resetEvery, pairings, batches, received, used)
 }

@@ -28,6 +28,8 @@ struct Uploader: Sendable {
     var transport: UploadTransport = BackgroundUploads.shared
     /// The first retry's delay; each next one doubles it.
     var backoff: Double = 1
+    /// Whether these settings are still the app's: a disconnect or a new pairing stops uploads.
+    var stillConnected: @Sendable (ServerSettings) -> Bool = { ServerSettings.load() == $0 }
 
     /// Whether an answer confirms a batch with `records` records: 2xx, and a server that knows
     /// records (a v1 server ignores them silently: never advance past data it dropped).
@@ -52,6 +54,8 @@ struct Uploader: Sendable {
         var lastError = UploadError.failed("no attempt")
         var direct = false
         for attempt in 0..<maxAttempts {
+            // Disconnected, or set up with another server meanwhile: nothing more goes out.
+            guard stillConnected(settings) else { throw UploadError.notConfigured }
             if attempt > 0 {
                 // 1, 2, 4, 8 s, plus up to 50% jitter.
                 let delay = backoff * pow(2, Double(attempt - 1)) * Double.random(in: 1...1.5)

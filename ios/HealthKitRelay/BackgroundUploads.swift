@@ -179,8 +179,12 @@ final class BackgroundUploads: NSObject, UploadTransport, URLSessionDataDelegate
                 try await transfer.value
             } onCancel: {
                 transfer.cancel()
-                handedOff.set()
-                handOff(id, request)
+                // Cut short by the end of background time: the system finishes the upload. Cut
+                // short by a disconnect: it stops here.
+                if ServerSettings.load().endpoint == request.url {
+                    handedOff.set()
+                    handOff(id, request)
+                }
             }
             if !handedOff.isSet { store.remove(id) }
             return ((response as? HTTPURLResponse)?.statusCode ?? 0, data.prefix(Self.maxAnswer))
@@ -238,6 +242,21 @@ final class BackgroundUploads: NSObject, UploadTransport, URLSessionDataDelegate
     }
 
     private func isWaiting(_ id: String) -> Bool { lock.withLock { waiting[id] != nil } }
+
+    /// Disconnect: every upload under way in the system stops, and none moves a sync position.
+    func cancelAll() {
+        let waiters = lock.withLock {
+            let w = waiting
+            waiting = [:]
+            return w
+        }
+        for (_, cont) in waiters { cont.resume(throwing: CancellationError()) }
+        urlSession.getAllTasks { tasks in
+            for task in tasks { task.cancel() }
+            for id in self.store.ids() { self.store.remove(id) }
+            if !tasks.isEmpty { Log.info("upload: disconnected, \(tasks.count) uploads under way stopped") }
+        }
+    }
 
     /// Same scheme, host and port.
     static func sameOrigin(_ a: URL, _ b: URL) -> Bool {

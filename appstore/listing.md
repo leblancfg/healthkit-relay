@@ -53,11 +53,12 @@ Kept out of `docs/` so the documentation site does not publish them. Review note
 >   several times a day; open the app to sync right away.
 >
 > WHAT IT COPIES
-> Every type of data Apple Health lets apps read: steps, heart rate, heart rate variability,
-> resting heart rate, VO2 max, sleep stages, workouts with their routes, ECG recordings, blood
-> oxygen, blood pressure, weight and body measurements, nutrition, mindfulness, State of
-> Mind, cycle tracking, medications you log, hearing and more. Each record keeps its source,
-> device and details, exactly as Health stores it. Deletions in Health are copied too.
+> The data types Apple Health lets apps read, the ones you allow: steps, heart rate, heart
+> rate variability, resting heart rate, VO2 max, sleep stages, workouts with their routes,
+> ECG recordings, blood oxygen, blood pressure, weight and body measurements, nutrition,
+> mindfulness, State of Mind, cycle tracking, medications you log, hearing and more (clinical
+> health records are not part of this version). Each record keeps its source, device and
+> details. Deletions in Health are copied too.
 >
 > ON YOUR SERVER
 > The server keeps everything in Parquet files, sorted by type and month, ready for a
@@ -66,10 +67,11 @@ Kept out of `docs/` so the documentation site does not publish them. Review note
 >
 > PRIVATE BY DESIGN
 > • Health Relay reads your Health data and leaves it as it is.
-> • It connects only to the server you set up, over HTTPS (or your local network).
+> • It connects only to the server you set up: over HTTPS, or plain HTTP on your own local
+>   network if you choose.
 > • Analytics, advertising and tracking are absent from the app; your data stays between your
 >   iPhone and your server.
-> • Erase Server Data and Start Over deletes, on your server, everything your iPhone sent.
+> • Erase Server Data and Disconnect deletes, on your server, everything your iPhone sent.
 >
 > WHAT YOU NEED
 > An iPhone with the Health app, and a computer or server that stays on, where you install
@@ -118,7 +120,9 @@ build.
 
 ## Other App Store Connect answers
 
-- **Sign-in required:** No (App Review uses the demo server: see review notes).
+- **Sign-in required:** Yes. App Review Information › Sign-in information: User name
+  `https://health-demo.tail3f3b8.ts.net` (the server address), Password: the demo setup
+  code. The app has no account; the setup code is what pairs it with a server.
 - **Contains, displays or accesses third-party content:** No.
 - **Advertising identifier (IDFA):** No.
 - **Government, regulated, medical device:** No. Health Relay is a personal data copy tool;

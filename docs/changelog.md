@@ -21,6 +21,16 @@ server releases and the app are versioned separately.
   the setup guide. Links to the privacy policy and help on the welcome screen and in
   Advanced.
 - Pending uploads, sync positions and the log stay out of iCloud and computer backups.
+- **Erase Server Data and Disconnect** (Advanced): stops syncing, has the server delete
+  everything this iPhone sent, and disconnects.
+- **Disconnect** stops the running sync and the uploads iOS carries on; a new pairing with
+  another server (also after a disconnect) sends the whole history again.
+- Every request that carries the token goes only to the server's address: redirects are
+  refused, and an upload iOS's background session redirected elsewhere counts as not sent.
+- Plain HTTP only to addresses on the local network (private, link-local and Tailscale IPs,
+  `.local` and single-label names); every other server takes HTTPS.
+- A new install starts unpaired: a server address and token an earlier install left in the
+  Keychain are cleared on first start.
 - Privacy manifest (`PrivacyInfo.xcprivacy`): no tracking, no collected data, the reasons for
   UserDefaults and file metadata.
 - The App Store build reads no clinical data: Health Records and CDA documents are left out
@@ -37,6 +47,13 @@ server releases and the app are versioned separately.
   any number of iPhones, every record erased every hour, an upload quota between erases.
 - Requests through Tailscale Funnel count as public for `-setup-from private`, and
   `/metrics` answers private networks only.
+- The demo server stores nothing about its users: batches are checked, answered and dropped;
+  devices get signed tokens (30 days) instead of entries in `devices.json`; no per-request
+  log lines; upload bytes, concurrent uploads and pairings are capped per hour.
+- Metrics forwarding refuses redirects. State files are synced with their directory, so a
+  revocation survives a power loss. Erasing a device with nothing stored returns at once.
+  Setup page forms without Fetch Metadata must carry the page's own Origin.
+- Docker Compose: Grafana listens on this computer only unless `GRAFANA_BIND` says otherwise.
 
 ### App 0.7.0
 

@@ -17,8 +17,9 @@ Health Relay is an open-source HealthKit sync and backup tool in two parts:
 - **An iPhone app** that reads everything in Apple Health (read-only) and uploads new
   samples and deletions in the background: heart rate, HRV, resting heart rate, sleep
   stages, steps, VO2 max, workouts with every GPS point of their routes, ECG voltages, blood
-  pressure, cycle tracking, medications, Health Records (FHIR) and the rest. Your Apple
-  Watch's data reaches the app through the iPhone's Health app.
+  pressure, cycle tracking, medications and the rest. Your Apple Watch's data reaches the
+  app through the iPhone's Health app. (Clinical Health Records are read only by builds of
+  your own, see ios/README.md.)
 - **A server**, one Go program, published as a Docker image and as a binary for Linux, macOS
   and FreeBSD. It pairs iPhones with a QR code, keeps every record in Parquet files you can
   query with DuckDB, and can forward the numbers to VictoriaMetrics, InfluxDB or any

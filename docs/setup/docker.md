@@ -123,8 +123,10 @@ echo HKR_FORWARD_URL=http://victoriametrics:8428/influx/write >> .env
 docker compose --profile metrics up -d
 ```
 
-Grafana is on `http://localhost:3000`. `GRAFANA_PORT` in `.env` changes the port. The first
-login is `admin`, password `admin`. See [Grafana](../grafana.md) for queries. The long
+Grafana is on `http://localhost:3000`, on this computer only. `GRAFANA_PORT` in `.env`
+changes the port. The first login is `admin`, password `admin`: Grafana then asks for a new
+password. To open Grafana from other computers, set that password first, then add
+`GRAFANA_BIND=0.0.0.0` to `.env` and run `docker compose --profile metrics up -d` again. See [Grafana](../grafana.md) for queries. The long
 retention matters: the first sync sends years of history, and a database with a short
 retention drops most of it. VictoriaMetrics and Grafana keep their data in the Docker
 volumes `victoriametrics` and `grafana`.

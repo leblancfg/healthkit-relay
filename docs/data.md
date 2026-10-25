@@ -24,7 +24,8 @@ With the iOS 27 SDK that is over 200 types:
 - **Heartbeat series**, **ECGs** (every voltage sample, classification), **audiograms**;
 - **Correlations** (blood pressure, food) with their members;
 - **State of Mind**, **GAD-7 / PHQ-9**, **medications** and dose events, **vision
-  prescriptions**, **Health Records** (FHIR) and **CDA documents**;
+  prescriptions**; **Health Records** (FHIR) and **CDA documents** in builds of your own
+  with Health Records turned on (the App Store app leaves clinical records out);
 - daily **activity summaries** (rings and goals) and **characteristics** (date of birth,
   biological sex, blood type...).
 

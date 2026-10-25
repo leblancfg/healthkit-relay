@@ -14,10 +14,13 @@ import (
 )
 
 // Demo mode (-demo-code-file): a public server for trying the app, such as the one App Review
-// uses. Pairing works with one shared setup code, any number of times; every -demo-reset
-// (an hour by default) the server erases all records and revokes devices unseen for a week;
-// and it accepts at most -demo-quota bytes of uploads between two resets, answering 429 with
-// Retry-After beyond that. The app retries later on its own.
+// uses. It keeps no Health data: each batch is checked like on any server, answered as
+// stored, then dropped; the server counts the records each device sent, for the app's
+// "Records on server". Pairing works with one shared setup code, many times, under a fixed
+// device name. Every -demo-reset (an hour by default) the counts go back to zero, the archive
+// is erased (it stays empty) and devices unseen for a week are revoked. Between two resets it
+// accepts at most -demo-quota bytes of uploads and DemoPairings pairings, answering 429 beyond
+// that; the app retries later on its own.
 type Demo struct {
 	codeHash   string // SHA-256 of the normalized shared code
 	resetEvery time.Duration
@@ -26,7 +29,43 @@ type Demo struct {
 	mu        sync.Mutex
 	used      int64
 	pairings  int
+	counts    map[string]int // records received by uploader since the last reset
 	nextReset time.Time
+}
+
+// discard counts a validated batch of n items for uploader and drops it.
+func (d *Demo) discard(uploader string, n int) []Outcome {
+	d.mu.Lock()
+	if d.counts == nil {
+		d.counts = map[string]int{}
+	}
+	d.counts[uploader] += n
+	d.mu.Unlock()
+	out := make([]Outcome, n)
+	for i := range out {
+		out[i].Stored = true
+	}
+	return out
+}
+
+// received is the number of records received since the last reset, all devices.
+func (d *Demo) received() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	n := 0
+	for _, c := range d.counts {
+		n += c
+	}
+	return n
+}
+
+// forget clears uploader's count (DELETE /v1/data) and returns it.
+func (d *Demo) forget(uploader string) int64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	n := d.counts[uploader]
+	delete(d.counts, uploader)
+	return int64(n)
 }
 
 // DemoPairings bounds pairings with the shared code between two resets, so a script cannot
@@ -161,7 +200,7 @@ func (s *Server) demoReset(ctx context.Context) {
 	}
 	s.Demo.mu.Lock()
 	used := s.Demo.used
-	s.Demo.used, s.Demo.pairings, s.Demo.nextReset = 0, 0, start.Add(s.Demo.resetEvery)
+	s.Demo.used, s.Demo.pairings, s.Demo.counts, s.Demo.nextReset = 0, 0, nil, start.Add(s.Demo.resetEvery)
 	s.Demo.mu.Unlock()
 	log.Printf("demo reset: erased %d records of %d uploaders, revoked %d devices unseen for %s, %d bytes uploaded since the last reset, in %s",
 		erased, len(uploaders), revoked, DemoDeviceTTL, used, time.Since(start).Round(time.Millisecond))

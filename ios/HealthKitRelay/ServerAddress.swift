@@ -101,8 +101,10 @@ enum AddressHandoff {
         }
     }
 
-    /// A session that follows no redirect: the token goes only to the address the server named.
-    static let noRedirects = session()
+    /// A session that follows no redirect, for every request that carries the token, a setup
+    /// code or Health data outside the background session: they go only to the server's own
+    /// address. A redirect answer (3xx) counts as an error.
+    nonisolated(unsafe) static var noRedirects = session() // tests swap in a stubbed one
 
     static func session(_ configuration: URLSessionConfiguration = .ephemeral) -> URLSession {
         URLSession(configuration: configuration, delegate: RefuseRedirects(), delegateQueue: nil)

@@ -172,7 +172,7 @@ final class BackgroundUploads: NSObject, UploadTransport, URLSessionDataDelegate
     /// Through a standard session; handed to the background session if cut short.
     private func now(_ id: String, _ request: URLRequest) async throws -> (Int, Data) {
         let file = store.bodyURL(id)
-        let transfer = Task { try await URLSession.shared.upload(for: request, fromFile: file) }
+        let transfer = Task { try await AddressHandoff.noRedirects.upload(for: request, fromFile: file) }
         let handedOff = Flag()
         do {
             let (data, response) = try await withTaskCancellationHandler {
@@ -239,6 +239,15 @@ final class BackgroundUploads: NSObject, UploadTransport, URLSessionDataDelegate
 
     private func isWaiting(_ id: String) -> Bool { lock.withLock { waiting[id] != nil } }
 
+    /// Same scheme, host and port.
+    static func sameOrigin(_ a: URL, _ b: URL) -> Bool {
+        func key(_ u: URL) -> String {
+            let scheme = u.scheme?.lowercased() ?? ""
+            return "\(scheme)://\(u.host()?.lowercased() ?? ""):\(u.port ?? (scheme == "https" ? 443 : 80))"
+        }
+        return key(a) == key(b)
+    }
+
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         lock.withLock {
             var answer = answers[dataTask.taskIdentifier] ?? Data()
@@ -249,7 +258,16 @@ final class BackgroundUploads: NSObject, UploadTransport, URLSessionDataDelegate
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         let answer = lock.withLock { answers.removeValue(forKey: task.taskIdentifier) } ?? Data()
-        let code = (task.response as? HTTPURLResponse)?.statusCode ?? 0
+        var code = (task.response as? HTTPURLResponse)?.statusCode ?? 0
+        var error = error
+        // A background session follows redirects on its own (iOS gives the app no say). An
+        // answer from another address than the server's confirms nothing: the batch counts as
+        // not sent, and its anchor stays.
+        if let from = task.originalRequest?.url, let to = task.currentRequest?.url, !Self.sameOrigin(from, to) {
+            Log.error("upload: the server redirected the upload to \(to.host() ?? "another address"); not counted as sent")
+            code = 0
+            error = UploadError.failed("the server redirected the upload to another address")
+        }
         finished(task.taskDescription ?? "", code: code, answer: answer, error: error)
     }
 

@@ -120,6 +120,11 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	s.add("heartbeats_"+trigger, 1)
 
+	if s.Demo != nil {
+		// A demo server logs no app details; the count above is all it keeps.
+		writeJSON(w, http.StatusOK, s.handoff())
+		return
+	}
 	device := "admin token"
 	if c.Device != nil {
 		device = "device " + c.Device.ID

@@ -98,7 +98,8 @@ enum ServerError: LocalizedError, Equatable {
 /// Calls the server's setup endpoints.
 struct ServerClient: Sendable {
     let base: URL
-    var session: URLSession = .shared
+    /// Follows no redirect: pairing and status go only to the address the user chose.
+    var session: URLSession = AddressHandoff.noRedirects
 
     private func request(_ method: String, _ path: String, query: [URLQueryItem] = [], token: String? = nil,
                          body: [String: String]? = nil, timeout: TimeInterval = 20) async throws -> Data {

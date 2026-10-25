@@ -75,6 +75,9 @@ final class AppModelTests: XCTestCase {
         saved = (ServerSettings.load(), UserDefaults.standard.data(forKey: "pairedDevice"),
                  UserDefaults.standard.bool(forKey: "tokenUpgradeTried"))
         URLProtocol.registerClass(StubServer.self)
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubServer.self]
+        AddressHandoff.noRedirects = AddressHandoff.session(config)
         StubServer.pairs = []
         StubServer.requests = []
         StubServer.eraseAnswer = (200, #"{"erased": 42, "device": "dev1"}"#)
@@ -82,6 +85,7 @@ final class AppModelTests: XCTestCase {
 
     override func tearDown() async throws {
         URLProtocol.unregisterClass(StubServer.self)
+        AddressHandoff.noRedirects = AddressHandoff.session()
         try? FileManager.default.removeItem(at: AnchorStore().directory.appendingPathComponent(marker + ".txt"))
         if saved.0.url.isEmpty { ServerSettings.clear() } else { try saved.0.save() }
         UserDefaults.standard.set(saved.1, forKey: "pairedDevice")

@@ -146,8 +146,8 @@ without Docker, and NixOS, macOS, NAS and Raspberry Pi. The
    password of your server, and the log shows it only on the first start: save it in a
    password manager now.
 
-3. **Install the iPhone app.** It is built from source for now: you need a Mac with Xcode
-   and a paid Apple Developer account, which HealthKit apps require. Follow
+3. **Install the iPhone app.** Get **Health Relay** from the App Store. To build it
+   yourself instead (a Mac with Xcode and a paid Apple Developer account), follow
    [ios/README.md](ios/README.md).
 
 4. **Pair the iPhone.** On a computer on the same network, open the **setup page**,
@@ -208,8 +208,8 @@ app again.
 <details>
 <summary><b>Do I need an Apple Developer account?</b></summary>
 
-Today, yes: you build the app from source, and signing a HealthKit app takes a paid Apple
-Developer Program membership. A TestFlight or App Store build may come later.
+No: Health Relay is on the App Store. Building the app from source yourself takes one,
+since Apple signs HealthKit apps only for paid Apple Developer Program members.
 </details>
 
 <details>

@@ -44,6 +44,7 @@ jobs:
           TEST_RUNNER_HKR_DEMO_SERVER: ${{ secrets.HKR_DEMO_SERVER }}
           TEST_RUNNER_HKR_DEMO_CODE: ${{ secrets.HKR_DEMO_CODE }}
         run: |
+          mkdir -p build
           xcodebuild test -project HealthKitRelay.xcodeproj -scheme HealthKitRelay \
             -destination "id=${{ steps.sim.outputs.udid }}" -derivedDataPath build \
             -resultBundlePath build/screenshots.xcresult \

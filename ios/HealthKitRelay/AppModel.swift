@@ -263,9 +263,11 @@ final class AppModel: ObservableObject {
         ServerSettings.clear()
         SyncEngine.shared.backgroundTimeOver(force: true)
         await BackgroundUploads.shared.cancelAllAndWait()
+        let revoked: Bool
         do {
             let erased = try await ServerClient(base: base).erase(token: kept.token, disconnect: true)
-            Log.info("erase: server deleted \(erased.erased) items; disconnecting")
+            revoked = erased.disconnected == true
+            Log.info("erase: server deleted \(erased.erased) items" + (revoked ? " and revoked this iPhone's token" : "") + "; disconnecting")
         } catch {
             // Still connected as before, unless the user disconnected or set up another
             // server while the erase was on its way.
@@ -273,7 +275,13 @@ final class AppModel: ObservableObject {
             Log.error("erase: \(error.localizedDescription)" + (generation == started ? "; still connected" : ""))
             throw error
         }
-        if generation == started { disconnect() }
+        guard generation == started else { return }
+        disconnect()
+        if !revoked {
+            // Erased, but the token still works there (a server before 1.0, or the admin
+            // token): an upload still on its way could arrive. Say how to stop it.
+            setupError = "Your server deleted this iPhone's data. It could not also revoke the token this iPhone used: to be sure nothing more arrives, revoke this iPhone on your server's setup page (or change the admin token, if you entered it by hand)."
+        }
     }
 
     /// Forgets the server (the token stays valid on the server until revoked there) and stops

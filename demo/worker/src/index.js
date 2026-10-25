@@ -167,7 +167,10 @@ export class DemoState {
     if (!device) return unauthorized();
     const confirm = url.searchParams.get("confirm") ?? "";
     if (confirm !== "" && confirm !== "erase") return httpError(400, 'confirm must be "erase"; nothing was erased');
-    return writeJSON(200, { device: device.id, erased: 0 }); // a demo server stores no records
+    // A demo server stores no records, and nothing sent with any token: for it, Erase and
+    // Disconnect (disconnect=1) leaves the device disconnected.
+    if (url.searchParams.get("disconnect") === "1") return writeJSON(200, { device: device.id, erased: 0, disconnected: true });
+    return writeJSON(200, { device: device.id, erased: 0 });
   }
 
   async samples(request) {

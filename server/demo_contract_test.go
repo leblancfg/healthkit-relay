@@ -309,6 +309,12 @@ func (c *demoContract) run() {
 				t.Errorf("DELETE /v1/data%s: %d %s", q, r.code, r.body)
 			}
 		}
+		// Erase and Disconnect: a demo server stores nothing sent with the token, so the
+		// device counts as disconnected (the app checks it).
+		r := c.do("DELETE", "/v1/data?confirm=erase&disconnect=1", c.token, "")
+		if m := r.json(t); r.code != 200 || m["erased"] != 0.0 || m["device"] != c.deviceID || m["disconnected"] != true || len(m) != 3 {
+			t.Errorf("DELETE /v1/data?confirm=erase&disconnect=1: %d %s", r.code, r.body)
+		}
 		if r := c.do("DELETE", "/v1/data?confirm=yes", c.token, ""); r.code != 400 || r.errorText(t) != `confirm must be "erase"; nothing was erased` {
 			t.Errorf("confirm=yes: %d %s", r.code, r.body)
 		}

@@ -456,7 +456,7 @@ func TestUploadAdmittedBeforeEraseIsRefused(t *testing.T) {
 	// Erase and disconnect: the device's token is revoked in the same step, so an upload
 	// that arrives late is refused.
 	resp2, b := call(t, "DELETE", ts.URL+"/v1/data?confirm=erase&disconnect=1", a.Token, nil)
-	if resp2.StatusCode != 200 || !strings.Contains(string(b), `"revoked":true`) || !strings.Contains(string(b), `"erased":5`) {
+	if resp2.StatusCode != 200 || !strings.Contains(string(b), `"disconnected":true`) || !strings.Contains(string(b), `"erased":5`) {
 		t.Fatalf("erase and disconnect: %d %s", resp2.StatusCode, b)
 	}
 	if resp3, _ := call(t, "POST", ts.URL+"/v1/samples", a.Token, json.RawMessage(body)); resp3.StatusCode != http.StatusUnauthorized {

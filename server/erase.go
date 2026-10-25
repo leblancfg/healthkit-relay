@@ -36,7 +36,7 @@ func (s *Store) EraseThen(ctx context.Context, uploader string, then func() erro
 	defer s.maint.Unlock()
 	// Uploads admitted before the erase ends are refused (IngestAdmitted), also when it fails:
 	// the app sends them again.
-	defer s.erased(uploader)
+	defer s.erases.Add(1)
 	if _, err := s.db.Exec(`INSERT OR IGNORE INTO pending_erase (uploader) VALUES (?)`, uploader); err != nil {
 		return 0, err
 	}
@@ -186,7 +186,7 @@ func rewriteWithout[T any](s *Store, path string, drop func(*T) bool) error {
 
 // eraseHandler serves DELETE /v1/data: a device erases what it uploaded; with ?disconnect=1
 // its token is revoked in the same step (the app's Erase Server Data and Disconnect), so
-// nothing it sent can arrive afterwards. The admin token erases what was uploaded with the
+// nothing it sent can arrive afterwards, and the answer says "disconnected": true. The admin token erases what was uploaded with the
 // admin token, or, with ?device=<id>, what that device uploaded (also after it was revoked).
 func (s *Server) eraseHandler(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.authorize(w, r, ScopeUpload)
@@ -227,6 +227,8 @@ func (s *Server) eraseHandler(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 	}
+	// A demo server stores nothing sent with any token: for it, the device is disconnected.
+	disconnected := revoke != nil || (s.Demo != nil && r.URL.Query().Get("disconnect") == "1" && c.Device != nil)
 	var n int64
 	var err error
 	if s.Demo != nil {
@@ -241,8 +243,8 @@ func (s *Server) eraseHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	s.count("erased")
 	answer := map[string]any{"erased": n, "device": uploader}
-	if revoke != nil {
-		answer["revoked"] = true
+	if disconnected {
+		answer["disconnected"] = true
 	}
 	writeJSON(w, http.StatusOK, answer)
 }

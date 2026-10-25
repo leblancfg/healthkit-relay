@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -91,8 +92,7 @@ type Store struct {
 	ingest sync.Mutex // one batch at a time; erase holds it too
 	maint  sync.Mutex // flush, compaction and erase, one at a time
 
-	eraseMu sync.Mutex
-	erases  map[string]uint64 // erases per uploader since the start, see EraseGeneration
+	erases atomic.Uint64 // erases finished since the start, see EraseGeneration
 
 	mu    sync.Mutex
 	count int64 // distinct records, see Len
@@ -475,34 +475,23 @@ var minNanoTime, maxNanoTime = time.Unix(0, math.MinInt64+1), time.Unix(0, math.
 // ErrErasedMeanwhile: the uploader's data was erased after its upload was admitted.
 var ErrErasedMeanwhile = errors.New("this device's data was erased while the upload was on its way")
 
-// EraseGeneration counts the erases of an uploader's data that finished since the start. An
-// upload notes it when it is admitted; IngestAdmitted stores the batch only if no erase
-// finished since, so an upload already under way when an erase ran cannot bring data back.
-func (s *Store) EraseGeneration(uploader string) uint64 {
-	s.eraseMu.Lock()
-	defer s.eraseMu.Unlock()
-	return s.erases[uploader]
-}
-
-func (s *Store) erased(uploader string) {
-	s.eraseMu.Lock()
-	defer s.eraseMu.Unlock()
-	if s.erases == nil {
-		s.erases = map[string]uint64{}
-	}
-	s.erases[uploader]++
-}
+// EraseGeneration counts the erases that finished since the start. An upload notes it before
+// its token is checked; IngestAdmitted stores the batch only if no erase finished since, so
+// an upload already under way when an erase ran cannot bring data back, and one checked after
+// an erase that revoked its token was refused. Any device's erase voids every upload under
+// way: those are sent again (erases are rare).
+func (s *Store) EraseGeneration() uint64 { return s.erases.Load() }
 
 func (s *Store) Ingest(uploader string, items []Item) ([]Outcome, error) {
-	return s.IngestAdmitted(uploader, s.EraseGeneration(uploader), items)
+	return s.IngestAdmitted(uploader, s.EraseGeneration(), items)
 }
 
 // IngestAdmitted stores a batch admitted at erase generation `admitted` (EraseGeneration),
-// or returns ErrErasedMeanwhile if an erase of the uploader finished since.
+// or returns ErrErasedMeanwhile if an erase finished since.
 func (s *Store) IngestAdmitted(uploader string, admitted uint64, items []Item) ([]Outcome, error) {
 	s.ingest.Lock()
 	defer s.ingest.Unlock()
-	if s.EraseGeneration(uploader) != admitted {
+	if s.EraseGeneration() != admitted {
 		return nil, ErrErasedMeanwhile
 	}
 	out := make([]Outcome, len(items))

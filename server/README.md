@@ -330,7 +330,8 @@ device's records; with the admin token, what was uploaded with the admin token, 
 `?confirm=erase`: any other value, or none, is refused (`400`, nothing erased). Only the app
 before 0.6 may leave it out (a paired device's token, or iOS's CFNetwork user agent). `200`
 `{"erased": 12571973, "device": "3f9a1c2e"}`. With a paired device's token, `?disconnect=1`
-also revokes that token in the same step (`"revoked": true`): the app's **Erase Server Data
+also revokes that token in the same step (`"disconnected": true`; a demo server, which keeps
+nothing, answers it too): the app's **Erase Server Data
 and Disconnect** sends it, so no upload of that device is stored after the erase. An upload
 already under way when the erase ends is refused (`409`). The app's **Erase Server Data and
 Start Over** calls it without `disconnect`, then uploads its history again from scratch.

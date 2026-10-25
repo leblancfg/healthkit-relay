@@ -340,6 +340,13 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(eraseRequests.count, 1)
         // The server revokes the token in the same step: nothing sent before arrives after.
         XCTAssertEqual(eraseRequests.first?.url?.absoluteString, "https://stub.test/v1/data?confirm=erase&disconnect=1")
+        XCTAssertNotNil(model.setupError, "a server that did not say it revoked the token: the app says how to")
+        StubServer.eraseAnswer = (200, #"{"erased": 42, "device": "dev1", "disconnected": true}"#)
+        model = try await erasable()
+        try await model.eraseServerDataAndDisconnect()
+        XCTAssertFalse(model.isConfigured)
+        XCTAssertNil(model.setupError)
+        StubServer.eraseAnswer = (200, #"{"erased": 42, "device": "dev1"}"#)
 
         model = try await erasable()
         StubServer.eraseAnswer = (500, #"{"error":"disk full"}"#)

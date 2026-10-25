@@ -170,6 +170,9 @@ struct ServerClient: Sendable {
         let erased: Int
         /// The device whose data was deleted; empty for the admin token.
         let device: String?
+        /// Asked with `disconnect`: the server stores nothing more sent with this token (it
+        /// revoked it, or is a demo server). Nil from a server before 1.0, or for the admin token.
+        var disconnected: Bool? = nil
     }
 
     /// Long: the server deletes a whole history before it answers.

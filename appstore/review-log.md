@@ -95,3 +95,14 @@ Round 5's #1, #2, #5, #6 and #8 verified; the new Swift checked as a Swift 5 com
 |---|---|---|---|
 | 1 | Blocking | The launch-time admin-token upgrade could still pair during Erase Server Data and Disconnect | The upgrade, like any setup, does not run while erasing (checked before it queues and at its turn), and opening the app during an erase does nothing |
 | 2 | Major | Cancelling the app's uploads does not wait for them to stop; an upload buffered on the way could reach the server after the erase and be stored | Erase Server Data and Disconnect asks the server to revoke the device's token in the same step (`?disconnect=1`, under the same lock as the erase): a late upload gets 401. For Erase and Start Over a late copy of old data is harmless: the app sends its whole history again and the server keeps one copy |
+
+## Round 7 (on 6b77d32)
+
+Round 6's #1 verified; no lock-order deadlock between the archive and the device list; a
+revoke failure after the erase answers 500 and the app keeps its credentials. Demo answers
+unchanged.
+
+| # | Sev. | Finding | Done |
+|---|---|---|---|
+| 1 | Major | An upload checked before the revoke but noting the erase count after the erase could still be stored | The upload notes the count before its token is checked: an erase finishing after that voids it (409), and one finishing before it revoked the token (401). The count is server-wide: an erase voids every upload under way, which the app sends again |
+| 2 | Major | The app took an erase without revocation (a server before 1.0, the admin token) as a disconnect | The answer says `"disconnected": true` when nothing more sent with the token is stored (revoked, or a demo server); otherwise the app still disconnects (the data is erased) and says to revoke the iPhone, or change the admin token, on the server |

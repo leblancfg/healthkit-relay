@@ -115,6 +115,12 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
+	// Noted before the token is checked and the body read: an erase that finishes meanwhile
+	// voids this upload (one that revoked the token makes the check below refuse it).
+	var admitted uint64
+	if s.Archive != nil {
+		admitted = s.Archive.EraseGeneration()
+	}
 	c, ok := s.authorize(w, r, ScopeUpload)
 	if !ok {
 		return
@@ -128,11 +134,6 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 	uploader := ""
 	if c.Device != nil {
 		uploader = c.Device.ID
-	}
-	// Noted before the body is read: an erase that finishes meanwhile voids this upload.
-	var admitted uint64
-	if s.Archive != nil {
-		admitted = s.Archive.EraseGeneration(uploader)
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, s.MaxBodyBytes)
 	var b Batch

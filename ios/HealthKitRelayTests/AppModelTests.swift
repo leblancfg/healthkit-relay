@@ -40,7 +40,7 @@ final class StubServer: URLProtocol, @unchecked Sendable {
         let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: String] ?? [:]
         var answer: [String: Any] = [:]
         var status = 200
-        let server: [String: Any] = ["version": "test", "wire_version": 2, "records": 1]
+        let server: [String: Any] = ["version": "test", "wire_version": 2, "records": 1, "server_id": "stub-server-id"]
         switch path {
         case "/v1/pairing-codes":
             answer = ["code": "UPGRADE"]
@@ -86,6 +86,7 @@ final class AppModelTests: XCTestCase {
         if saved.0.url.isEmpty { ServerSettings.clear() } else { try saved.0.save() }
         UserDefaults.standard.set(saved.1, forKey: "pairedDevice")
         UserDefaults.standard.set(saved.2, forKey: "tokenUpgradeTried")
+        KnownServer.id = nil
         AppModel.shared.reloadForTesting()
     }
 
@@ -233,6 +234,30 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(StubServer.pairs, [StubServer.Pair(code: "LINK", replaces: nil, token: "device-token-1")])
         XCTAssertEqual(ServerSettings.load().url, "https://stub.test")
         XCTAssertEqual(model.settings.token, "device-token-1")
+    }
+
+    /// A setup link for the paired server at another address (it answers with the same server
+    /// ID): no confirmation, the same device on the server, sync positions kept.
+    func testLinkToTheSameServerAtAnotherAddressKeepsTheDevice() async throws {
+        let model = try await erasable()
+        KnownServer.id = "stub-server-id"
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubServer.self]
+        KnownServer.session = AddressHandoff.session(config)
+        defer { KnownServer.id = nil; KnownServer.session = AddressHandoff.noRedirects }
+        await model.open(URL(string: "healthrelay://pair?server=https%3A%2F%2Fstub.test%3A8443&code=MOVE")!)
+        XCTAssertNil(model.pendingLink, "asked to confirm the same server")
+        let pair = try XCTUnwrap(StubServer.pairs.last)
+        XCTAssertEqual(pair.code, "MOVE")
+        XCTAssertEqual(pair.replaces, "device-token-erase")
+        XCTAssertEqual(model.settings.url, "https://stub.test:8443")
+        XCTAssertTrue(positionsKept)
+
+        // Another server ID is another server: it waits for confirmation.
+        KnownServer.id = "some-other-server"
+        await model.open(URL(string: "healthrelay://pair?server=https%3A%2F%2Fstub.test%3A9443&code=OTHER")!)
+        XCTAssertNotNil(model.pendingLink)
+        model.pendingLink = nil
     }
 
     func testUnencryptedLinkIsFlagged() {

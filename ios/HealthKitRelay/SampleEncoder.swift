@@ -60,9 +60,11 @@ struct SampleEncoder: Sendable {
         case let a as HKAudiogramSample:
             o["kind"] = "audiogram"
             o["sensitivity_points"] = .array(a.sensitivityPoints.map(audiogramPoint))
+        #if HKR_HEALTH_RECORDS
         case let r as HKClinicalRecord:
             o["kind"] = "clinical_record"
             clinical(r, into: &o)
+        #endif
         case let d as HKCDADocumentSample:
             o["kind"] = "cda_document"
             records += await cda(d, into: &o)
@@ -394,6 +396,7 @@ struct SampleEncoder: Sendable {
         return .object(o)
     }
 
+    #if HKR_HEALTH_RECORDS
     private func clinical(_ r: HKClinicalRecord, into o: inout [String: JSON]) {
         o["clinical_type"] = .string(r.clinicalType.identifier)
         o["display_name"] = .string(r.displayName)
@@ -411,6 +414,7 @@ struct SampleEncoder: Sendable {
         }
         o["fhir"] = .object(f)
     }
+    #endif
 
     private func cda(_ d: HKCDADocumentSample, into o: inout [String: JSON]) async -> [JSON] {
         // Anchored queries return CDA samples without the document: fetch it.

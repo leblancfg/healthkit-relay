@@ -44,6 +44,8 @@ enum HealthTypes {
         let types: [SyncedType]
         /// Identifiers the SDK declares that this iOS does not provide.
         let unavailable: [String]
+        /// Clinical identifiers this build leaves out (see `isClinical`).
+        let leftOut: [String]
         let byKey: [String: SyncedType]
     }
 
@@ -61,6 +63,7 @@ enum HealthTypes {
     static func resolve() -> Catalog {
         var types: [SyncedType] = []
         var unavailable: [String] = []
+        var leftOut: [String] = []
         var seen = Set<String>()
 
         func add(_ object: Any?, unit: String? = nil, valueEnum: String? = nil, fallbackName: String) {
@@ -73,6 +76,10 @@ enum HealthTypes {
         }
 
         for t in SDKHealthTypes.identified {
+            if isClinical(t.family, t.identifier) {
+                leftOut.append(t.identifier)
+                continue
+            }
             guard isAvailable(t.ios), let family = SDKHealthTypes.families[t.family] else {
                 unavailable.append(t.identifier)
                 continue
@@ -88,14 +95,25 @@ enum HealthTypes {
             add(HKRCallClassMethod(f.className, f.selector, nil), fallbackName: "\(f.className).\(f.selector)")
         }
         let byKey = Dictionary(types.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
-        return Catalog(types: types, unavailable: unavailable, byKey: byKey)
+        return Catalog(types: types, unavailable: unavailable, leftOut: leftOut, byKey: byKey)
+    }
+
+    /// Clinical data (Health Records and CDA documents): read only by builds with the
+    /// HKR_HEALTH_RECORDS condition, which also need the Clinical Health Records capability
+    /// and its usage string (ios/README.md). App Store builds leave them out.
+    static func isClinical(_ family: String, _ identifier: String) -> Bool {
+        #if HKR_HEALTH_RECORDS
+        return false
+        #else
+        return family == "HKClinicalTypeIdentifier" || identifier == "HKDocumentTypeIdentifierCDA"
+        #endif
     }
 
     /// Plain identifier constants with no matching type: an SDK addition the factories missed.
     /// Constant names and values can differ by "Identifier" (HKDataTypeIdentifierStateOfMind is
     /// "HKDataTypeStateOfMind"), so both are compared without it.
     static var uncoveredIdentifiers: [String] {
-        let have = Set(catalog.types.map { $0.key.replacingOccurrences(of: "Identifier", with: "") })
+        let have = Set((catalog.types.map(\.key) + catalog.leftOut).map { $0.replacingOccurrences(of: "Identifier", with: "") })
         return SDKHealthTypes.namedIdentifiers.filter { !have.contains($0.replacingOccurrences(of: "Identifier", with: "")) }
     }
 

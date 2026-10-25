@@ -6,8 +6,13 @@ final class HealthTypesTests: XCTestCase {
     func testCatalogCoversTheSDK() {
         let catalog = HealthTypes.catalog
         // Everything the SDK declares resolves, except what needs a newer iOS than this one.
-        XCTAssertEqual(catalog.types.count + catalog.unavailable.count,
+        XCTAssertEqual(catalog.types.count + catalog.unavailable.count + catalog.leftOut.count,
                        SDKHealthTypes.identified.count + SDKHealthTypes.factories.count)
+        // App Store builds read no clinical data (Health Records, CDA documents).
+        #if !HKR_HEALTH_RECORDS
+        XCTAssertFalse(catalog.types.contains { $0.type is HKClinicalType || $0.key == "HKDocumentTypeIdentifierCDA" })
+        XCTAssertTrue(catalog.leftOut.contains("HKClinicalTypeIdentifierAllergyRecord"))
+        #endif
         XCTAssertGreaterThan(catalog.types.count, 200)
         for id in ["HKQuantityTypeIdentifierHeartRate", "HKCategoryTypeIdentifierSleepAnalysis",
                    "HKWorkoutTypeIdentifier", "HKWorkoutRouteTypeIdentifier", "HKDataTypeIdentifierHeartbeatSeries",

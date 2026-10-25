@@ -93,7 +93,9 @@ struct Uploader: Sendable {
 
     /// Sends a heartbeat (POST /v1/heartbeat), once, briefly: it must not use up the
     /// background time a sync needs. A server before 0.6.2 answers 404, which is not an error.
-    func heartbeat(_ beat: AppHeartbeat) async throws {
+    /// Returns where the server asks to be reached (server 1.0+; nil before).
+    @discardableResult
+    func heartbeat(_ beat: AppHeartbeat) async throws -> Handoff? {
         guard settings.isComplete, let base = settings.baseURL else { throw UploadError.notConfigured }
         var request = URLRequest(url: base.appendingPathComponent("v1/heartbeat"), timeoutInterval: 15)
         request.httpMethod = "POST"
@@ -102,7 +104,8 @@ struct Uploader: Sendable {
         request.httpBody = try AppHeartbeat.encoder.encode(beat)
         let (data, response) = try await session.data(for: request)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if (200..<300).contains(code) || code == 404 { return }
+        if (200..<300).contains(code) { return try? JSONDecoder().decode(Handoff.self, from: data) }
+        if code == 404 { return nil }
         if code == 401 { throw UploadError.unauthorized }
         throw UploadError.failed("HTTP \(code): \(String(decoding: data.prefix(300), as: UTF8.self))")
     }

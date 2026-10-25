@@ -46,9 +46,17 @@ and correlations and medication dose events are read through their parts. Types 
 object by object (vision prescriptions, medications, CDA documents) and Health Records are
 not part of it: each is one tap under **Advanced**, since their sheets can be slow, lead to
 Apple's provider setup, or never come when Health has nothing to list, and an app cannot
-see beforehand whether there is anything to pick. Health
-records need the Clinical Health Records capability on your App ID (Automatic signing adds
-it).
+see beforehand whether there is anything to pick.
+
+### Health Records
+
+The App Store build reads no clinical data: Health Records (FHIR) and CDA documents are
+left out. A build of your own reads them with three changes: `HKR_SWIFT_CONDITIONS =
+HKR_HEALTH_RECORDS` in `Config/Local.xcconfig`, and in `project.yml` the entitlement
+`com.apple.developer.healthkit.access: [health-records]` and the usage string
+`NSHealthClinicalHealthRecordsShareUsageDescription` (both are there, commented out).
+Automatic signing then adds the Clinical Health Records capability to your App ID. Health
+Records show up under **Advanced** as an opt-in row.
 
 HealthKit raises Objective-C exceptions, not errors, for some types and queries (an observer
 query for vision prescriptions, for one). Every query is created and run inside an
@@ -59,8 +67,9 @@ exception guard (`HealthKitSafe.swift`), so such a type is skipped and logged, n
 1. **Set up**: open your server's setup page (`https://<server>/setup`) on a computer and
    scan its code with the iPhone's Camera, then tap **Open in Health Relay** (on the iPhone
    itself, tap the page's button). Or run `healthkit-relay pair` on the server and scan the
-   code it prints. **Enter Server Details Instead** takes the server address and the admin token,
-   which the app swaps for a token of its own.
+   code it prints. **Enter Server Details Instead** takes the server address and the setup
+   code shown under the QR code (or the admin token, which the app swaps for a token of its
+   own).
 2. Health asks once what Health Relay may read: select everything, then confirm. The app
    asks again by itself only when an update brings data types the sheet never showed.
 3. The first sync uploads all history, which can take a while; keep the app
@@ -104,6 +113,9 @@ gets a message to update it, and nothing changes.
 | `Settings.swift` | server URL and token in the Keychain |
 | `AppModel.swift` | setup from a link, the Health request, syncing on open, erasing and starting over |
 | `Pairing.swift` | setup links, pairing, status and erase calls |
+| `ServerAddress.swift` | moving to the server's preferred address once it answers as the same server |
+| `AppDirectory.swift` | the app's data directories, out of backups |
+| `PrivacyInfo.xcprivacy` | privacy manifest: no tracking, no collected data, the reasons for UserDefaults and file metadata |
 | `ContentView.swift` | the main screen (status), first-run welcome, manual setup |
 | `AdvancedView.swift` | server, data types, item-by-item types, maintenance |
 | `HealthKitRelayUITests/` | the setup flow end to end on a simulator (`Scripts/ui-test`) |

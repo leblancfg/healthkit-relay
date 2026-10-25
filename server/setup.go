@@ -99,6 +99,16 @@ func (s *Server) setupAllowed(r *http.Request) bool {
 	case "off":
 		return false
 	}
+	return fromPrivateNetwork(r)
+}
+
+// fromPrivateNetwork tells whether a request comes from a private network. Tailscale Funnel
+// relays requests from the internet through the local tailscaled, which marks them with a
+// Tailscale-Funnel-Request header: those are public whatever address they carry.
+func fromPrivateNetwork(r *http.Request) bool {
+	if fromLocalProxy(r) && r.Header.Get("Tailscale-Funnel-Request") != "" {
+		return false
+	}
 	a, ok := clientAddr(r)
 	return ok && isPrivate(a)
 }
@@ -128,6 +138,7 @@ type setupView struct {
 	Addresses  []Address
 	Chosen     string
 	Configured bool     // -public-url is set
+	Demo       bool     // Code is a demo server's shared code (demo.go)
 	Devices    []Device // paired apps (upload tokens)
 	Tokens     []Device // read tokens, for the query API
 	SetupLink  string   // the setup page with the code, to send to a phone
@@ -201,7 +212,9 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var exp time.Time
-	if code != "" {
+	if s.Demo.isCode(code) {
+		v.Demo = true
+	} else if code != "" {
 		state, dev, e := s.Codes.State(code)
 		switch state {
 		case "paired":
@@ -255,7 +268,9 @@ func (s *Server) setupPage(w http.ResponseWriter, r *http.Request) {
 	}
 	v.Mode, v.Code, v.Link, v.QR = "pair", code, template.URL(PairLink(public, code)), template.HTML(q.SVG())
 	v.SetupLink = public + "/setup?code=" + code
-	v.Expires = exp.Local().Format("15:04")
+	if !v.Demo {
+		v.Expires = exp.Local().Format("15:04")
+	}
 	if v.Admin {
 		v.Devices, v.Tokens = s.deviceLists()
 	}
@@ -346,6 +361,9 @@ func (s *Server) setupStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state, dev, _ := s.Codes.State(r.URL.Query().Get("code"))
+	if s.Demo.isCode(r.URL.Query().Get("code")) {
+		state = "pending" // pairs any number of iPhones, so the page keeps waiting
+	}
 	out := map[string]string{"state": state}
 	if dev != nil {
 		out["device"] = dev.Name
@@ -520,7 +538,12 @@ if (location.hash) document.querySelector("form.login").action = "/setup" + loca
     <p class="hint">The server found these addresses. Pick the one your iPhone can reach. To set it for good, start the server with <code>-public-url</code>.</p>
   </div>
   {{end}}
+  {{if .Demo}}
+  <p class="hint">Or, in Health Relay, tap <b>Enter Server Details Instead</b> and enter the server address <code>{{.Chosen}}</code> and the setup code <code>{{.Code}}</code>.</p>
+  <p class="status" id="status"><span class="dot"></span><span id="status-text">This is a demo server: its setup code pairs any number of iPhones, and it erases all uploaded data every hour.</span></p>
+  {{else}}
   <p class="status" id="status"><span class="dot"></span><span id="status-text"><span class="desktop">Waiting for your iPhone · </span>This setup code works once, until {{.Expires}}</span></p>
+  {{end}}
 </section>
 <section class="card" id="done" hidden>
   <svg class="check" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30" fill="#34c759"/><path d="M19 33l9 9 17-19" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>

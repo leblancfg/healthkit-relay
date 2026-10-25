@@ -105,6 +105,9 @@ func run(args []string) error {
 	queryMemory := fs.String("query-memory-limit", "512MB", "DuckDB memory_limit per query; queries needing more fail (nothing spills to disk)")
 	queryThreads := fs.Int("query-threads", 2, "DuckDB threads per query")
 	queryConcurrency := fs.Int("query-concurrency", 2, "queries that may run at once; others wait (within -query-timeout)")
+	demoCodeFile := fs.String("demo-code-file", "", "demo server: file holding a shared setup code (16+ characters of A-Z, 2-7) that pairs any number of iPhones; turns on the hourly erase and the upload quota (optional)")
+	demoReset := fs.Duration("demo-reset", time.Hour, "demo server: how often all records are erased")
+	demoQuota := fs.Int64("demo-quota", 256<<20, "demo server: most upload bytes accepted between two erases; beyond, uploads get 429 until the next erase")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -150,8 +153,23 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("admin token: %w", err)
 	}
+	serverID, err := loadServerID(*archiveDir)
+	if err != nil {
+		return fmt.Errorf("server ID: %w", err)
+	}
 	srv := &Server{Archive: archive, AdminKey: adminKey, MaxBodyBytes: *maxBody, Devices: devices, Codes: codes,
-		PublicURL: strings.TrimRight(cfg.publicURL, "/"), SetupFrom: cfg.setupFrom, Listen: *listen}
+		PublicURL: strings.TrimRight(cfg.publicURL, "/"), SetupFrom: cfg.setupFrom, Listen: *listen, ID: serverID}
+	if *demoCodeFile != "" {
+		code, err := readSecret(*demoCodeFile)
+		if err != nil {
+			return fmt.Errorf("-demo-code-file: %w", err)
+		}
+		if srv.Demo, err = NewDemo(code, *demoReset, *demoQuota); err != nil {
+			return fmt.Errorf("-demo-code-file: %w", err)
+		}
+		log.Printf("demo server: the code in %s pairs any number of iPhones; all records are erased every %s; uploads beyond %d MB per period get 429",
+			*demoCodeFile, *demoReset, *demoQuota>>20)
+	}
 	if *queryDuckDB != "" {
 		dir := cmpOr(*queryDir, *archiveDir)
 		db, err := NewDuckDB(*queryDuckDB, dir, *queryTimeout, *queryMaxRows, *queryMemory, *queryThreads, *queryConcurrency)
@@ -191,6 +209,11 @@ func run(args []string) error {
 		return err
 	}
 	defer func() { stop(); waitMaintenance() }() // runs before the archive closes (deferred earlier)
+	if srv.Demo != nil {
+		done := make(chan struct{})
+		go func() { srv.runDemoResets(ctx); close(done) }()
+		defer func() { stop(); <-done }()
+	}
 	errc := make(chan error, 1)
 	go func() { errc <- hs.ListenAndServe() }()
 	log.Printf("listening on %s; %d paired devices and read tokens; setup page %s (-setup-from %s)",

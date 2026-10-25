@@ -25,18 +25,14 @@ protocol UploadTransport: Sendable {
     func send(_ request: URLRequest, body: Data, upload: PendingUpload, direct: Bool) async throws -> (Int, Data)
 }
 
-/// Upload bodies and their bookkeeping on disk (Application Support/uploads), readable after
-/// the first unlock, as the system reads the body while the iPhone is locked. Each file is
+/// Upload bodies and their bookkeeping on disk (Application Support/uploads, out of backups),
+/// readable after the first unlock, as the system reads the body while the iPhone is locked. Each file is
 /// removed once its upload is over, whatever the outcome.
 struct UploadStore: Sendable {
     let directory: URL
 
     init(name: String = "uploads") {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        directory = base.appendingPathComponent(name, isDirectory: true)
-        try? FileManager.default.createDirectory(
-            at: directory, withIntermediateDirectories: true,
-            attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
+        directory = AppDirectory.make(name)
     }
 
     func bodyURL(_ id: String) -> URL { directory.appendingPathComponent(id + ".body") }

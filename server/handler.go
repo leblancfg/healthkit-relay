@@ -23,6 +23,8 @@ type Server struct {
 	SetupFrom    string    // who may use /setup and pairing: "private" (default), "any", "off"
 	Listen       string    // the listen address, to tell which local addresses reach the server
 	Query        *queryAPI // nil: no query API (-query-duckdb not set)
+	ID           string    // the server ID (server.json, identity.go); "" in tests
+	Demo         *Demo     // nil: not a demo server (demo.go)
 
 	netInfo *netInfo // nil: the real interfaces and tailscale CLI
 
@@ -77,6 +79,7 @@ func (s *Server) routes() []route {
 		{"POST /v1/samples", s.samples},
 		{"POST /v1/heartbeat", s.heartbeat},
 		{"GET /v1/status", s.statusHandler},
+		{"GET /v1/server", s.serverInfo},
 		{"DELETE /v1/data", s.eraseHandler},
 		{"POST /v1/pair", s.pair},
 		{"POST /v1/pairing-codes", s.pairingCodes},
@@ -117,6 +120,9 @@ func (s *Server) samples(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.adminUpload(c, r)
+	if !s.demoAdmit(w, r) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, s.MaxBodyBytes)
 	var b Batch
 	dec := json.NewDecoder(r.Body)
@@ -268,14 +274,19 @@ func (s *Server) add(name string, n int64) {
 	s.stats[name] += n
 }
 
-// metrics serves Prometheus text format. Counts only: no health data.
+// metrics serves Prometheus text format. Counts only: no health data. Private networks only,
+// like the setup page: a server reachable from the internet keeps its activity to itself.
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
+	if !fromPrivateNetwork(r) {
+		httpError(w, http.StatusForbidden, "/metrics answers only private networks: this computer, the local network or Tailscale")
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	fmt.Fprintln(w, "# HELP healthkit_relay_requests_total Uploads (POST /v1/samples), pairings, refused tokens and failed queries by result.")
 	fmt.Fprintln(w, "# TYPE healthkit_relay_requests_total counter")
-	for _, res := range []string{"ok", "unauthorized", "bad_request", "incomplete", "archive_error", "paired", "pair_rejected", "erased", "forbidden", "query_error", "query_timeout", "query_busy"} {
+	for _, res := range []string{"ok", "unauthorized", "bad_request", "incomplete", "archive_error", "paired", "pair_rejected", "erased", "forbidden", "query_error", "query_timeout", "query_busy", "demo_quota"} {
 		fmt.Fprintf(w, "healthkit_relay_requests_total{result=%q} %d\n", res, s.stats["requests_"+res])
 	}
 	fmt.Fprintln(w, "# HELP healthkit_relay_admin_token_uploads_total Uploads and status requests authenticated with the admin token instead of a paired device's token (deprecated).")

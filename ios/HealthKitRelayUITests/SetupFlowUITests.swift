@@ -44,38 +44,7 @@ final class SetupFlowUITests: XCTestCase {
         snapshot("3-health-step")
         primer.tap()
 
-        // Health's sheet: select everything ("Turn On All" before iOS 26), confirm at the end
-        // of the list ("Continue" on iOS 27, "Allow" before), then, on iOS 27, all history.
-        let selectAll = app.descendants(matching: .any).matching(NSPredicate(
-            format: "identifier == 'UIA.Health.AuthSheet.AllCategoryButton' OR label == 'Turn On All'")).firstMatch
-        XCTAssertTrue(selectAll.waitForExistence(timeout: 30), "no Health sheet:\n\(app.debugDescription)")
-        sleep(1)
-        snapshot("4-health-sheet")
-        selectAll.tap()
-        // Resolved anew on each use: labels change as the sheet moves on.
-        let confirm = app.descendants(matching: .any).matching(NSPredicate(
-            format: "label IN {'Continue', 'Allow'} AND identifier != 'health.continue'")).firstMatch
-        let allHistory = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'All Recorded Data'")).firstMatch
-        for _ in 0..<6 {
-            if allHistory.exists {
-                snapshot("5-health-history")
-                allHistory.tap()
-                sleep(1)
-            }
-            guard confirm.waitForExistence(timeout: 5) else { break }
-            var swipes = 0
-            // On screen by its frame: isHittable can raise for a button far down Health's list
-            // ("Activation point invalid").
-            let screen = app.windows.firstMatch.frame
-            while swipes < 60 && confirm.exists && !(screen.contains(CGPoint(x: confirm.frame.midX, y: confirm.frame.midY))) {
-                app.swipeUp(velocity: .fast)
-                swipes += 1
-            }
-            if confirm.exists && confirm.isEnabled { confirm.tap() }
-            sleep(2)
-        }
-        XCTAssertFalse(selectAll.exists || allHistory.exists, "Health sheet still up:\n\(app.debugDescription)")
-
+        let selectAll = allowEverything(app)
         let title = app.staticTexts["status.title"]
         expectation(for: NSPredicate(format: "label == 'Up to date'"), evaluatedWith: title)
         waitForExpectations(timeout: 240)
@@ -101,6 +70,95 @@ final class SetupFlowUITests: XCTestCase {
             sleep(6)
             snapshot("8-vision-prescriptions")
         }
+    }
+
+    /// What App Review does (docs/appstore/review-notes.md): the demo server's address and
+    /// setup code typed in by hand. HKR_DEMO_SERVER and HKR_DEMO_CODE name the server; the
+    /// screenshots of this run are the App Store set (.github/workflows/appstore-screenshots.yml).
+    func testManualSetupWithTheDemoServer() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let server = env["HKR_DEMO_SERVER"], let code = env["HKR_DEMO_CODE"], !server.isEmpty, !code.isEmpty else {
+            throw XCTSkip("needs HKR_DEMO_SERVER and HKR_DEMO_CODE")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-hkr-reset-state"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Health Relay"].waitForExistence(timeout: 15))
+        sleep(1)
+        snapshot("01-welcome")
+
+        app.buttons["manual"].tap()
+        let field = app.textFields["manual.server"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.tap()
+        field.typeText(server)
+        let codeField = app.textFields["manual.code"]
+        codeField.tap()
+        codeField.typeText(code)
+        sleep(1)
+        snapshot("02-server-details")
+        app.buttons["manual.connect"].tap()
+
+        let primer = app.buttons["health.continue"]
+        XCTAssertTrue(primer.waitForExistence(timeout: 60), "no Health step:\n\(app.debugDescription)")
+        sleep(1)
+        snapshot("03-health-step")
+        primer.tap()
+        _ = allowEverything(app, shots: false)
+
+        let title = app.staticTexts["status.title"]
+        expectation(for: NSPredicate(format: "label == 'Up to date'"), evaluatedWith: title)
+        waitForExpectations(timeout: 300)
+        sleep(3)
+        snapshot("04-home")
+
+        app.buttons["advanced"].tap()
+        XCTAssertTrue(app.navigationBars["Advanced"].waitForExistence(timeout: 10))
+        sleep(3)
+        snapshot("05-advanced")
+        let types = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Data types read'")).firstMatch
+        if types.waitForExistence(timeout: 10) {
+            types.tap()
+            sleep(2)
+            snapshot("06-data-types")
+        }
+    }
+
+    /// Health's sheet: select everything ("Turn On All" before iOS 26), confirm at the end of
+    /// the list ("Continue" on iOS 27, "Allow" before), then, on iOS 27, all history. Returns
+    /// the select-all control, gone once the sheet is.
+    @discardableResult
+    private func allowEverything(_ app: XCUIApplication, shots: Bool = true) -> XCUIElement {
+        let selectAll = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == 'UIA.Health.AuthSheet.AllCategoryButton' OR label == 'Turn On All'")).firstMatch
+        XCTAssertTrue(selectAll.waitForExistence(timeout: 30), "no Health sheet:\n\(app.debugDescription)")
+        sleep(1)
+        if shots { snapshot("4-health-sheet") }
+        selectAll.tap()
+        // Resolved anew on each use: labels change as the sheet moves on.
+        let confirm = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label IN {'Continue', 'Allow'} AND identifier != 'health.continue'")).firstMatch
+        let allHistory = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'All Recorded Data'")).firstMatch
+        for _ in 0..<6 {
+            if allHistory.exists {
+                if shots { snapshot("5-health-history") }
+                allHistory.tap()
+                sleep(1)
+            }
+            guard confirm.waitForExistence(timeout: 5) else { break }
+            var swipes = 0
+            // On screen by its frame: isHittable can raise for a button far down Health's list
+            // ("Activation point invalid").
+            let screen = app.windows.firstMatch.frame
+            while swipes < 60 && confirm.exists && !(screen.contains(CGPoint(x: confirm.frame.midX, y: confirm.frame.midY))) {
+                app.swipeUp(velocity: .fast)
+                swipes += 1
+            }
+            if confirm.exists && confirm.isEnabled { confirm.tap() }
+            sleep(2)
+        }
+        XCTAssertFalse(selectAll.exists || allHistory.exists, "Health sheet still up:\n\(app.debugDescription)")
+        return selectAll
     }
 
     private func snapshot(_ name: String) {

@@ -75,7 +75,7 @@ func TestHeartbeat(t *testing.T) {
 	 "pending":"locked","last_error":"The network\nconnection was lost.","uploaded":0,"seconds":0.2,
 	 "background_time_left":27.5,"process_age":5400,"app_version":"0.6.2 (9)",
 	 "wakes":{"refresh":{"count":3,"last":"2026-10-20T12:00:00Z"},"observer":{"count":1,"last":"2026-10-20T11:00:00Z"}}}`
-	if resp := send(t, http.MethodPost, ts.URL+"/v1/heartbeat", token, "", body); resp.StatusCode != http.StatusNoContent {
+	if resp := send(t, http.MethodPost, ts.URL+"/v1/heartbeat", token, "", body); resp.StatusCode != http.StatusOK {
 		t.Fatalf("heartbeat: %d", resp.StatusCode)
 	}
 	line := logs.String()
@@ -128,7 +128,7 @@ func TestHeartbeatPower(t *testing.T) {
 		ts, _ := newTestServer(t, dir)
 		logs := captureLog(t)
 		body := `{"trigger":"observer","app_state":"background","protected_data":true,"outcome":"ok","app_version":"0.6.4 (11)",` + c.body + `}`
-		if resp := send(t, http.MethodPost, ts.URL+"/v1/heartbeat", token, "", body); resp.StatusCode != http.StatusNoContent {
+		if resp := send(t, http.MethodPost, ts.URL+"/v1/heartbeat", token, "", body); resp.StatusCode != http.StatusOK {
 			t.Fatalf("heartbeat: %d", resp.StatusCode)
 		}
 		if line := logs.String(); !strings.Contains(line, "outcome ok"+c.want) {
@@ -211,7 +211,7 @@ func TestHeartbeatNewTriggers(t *testing.T) {
 	logs := captureLog(t)
 	for _, trigger := range []string{"processing", "urlsession", "backgrounded", "continued"} {
 		body := `{"trigger":"` + trigger + `","app_state":"background","protected_data":true,"outcome":"ok","app_version":"0.7.0 (12)"}`
-		if resp := send(t, http.MethodPost, ts.URL+"/v1/heartbeat", token, "", body); resp.StatusCode != http.StatusNoContent {
+		if resp := send(t, http.MethodPost, ts.URL+"/v1/heartbeat", token, "", body); resp.StatusCode != http.StatusOK {
 			t.Fatalf("%s heartbeat: %d", trigger, resp.StatusCode)
 		}
 		if resp, _ := post(t, ts.URL, token, `{"version":2,"trigger":"`+trigger+`","app_state":"background","samples":[]}`); resp.StatusCode != http.StatusOK {

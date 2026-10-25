@@ -11,12 +11,7 @@ enum Log {
     private static let maxBytes = 1 << 20
 
     static let fileURL: URL = {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Logs", isDirectory: true)
-        try? FileManager.default.createDirectory(
-            at: dir, withIntermediateDirectories: true,
-            attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
-        return dir.appendingPathComponent("HealthRelay.log")
+        AppDirectory.make("Logs").appendingPathComponent("HealthRelay.log")
     }()
 
     static func info(_ message: String) {

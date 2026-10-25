@@ -44,7 +44,9 @@ final class AppModel: ObservableObject {
             setupError = "This link is not a setup code from a healthkit-relay server. Open your server's setup page and scan the setup code there."
             return
         }
-        if settings.sameServer(as: link.server.absoluteString) {
+        // The server already paired, maybe at another address (it names its server ID): no
+        // question, and the device and its history stay.
+        if await KnownServer.isCurrent(link.server, settings: settings) {
             await connect(with: link)
         } else {
             Log.info("setup: link for \(link.host), waiting for confirmation")
@@ -67,13 +69,28 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Server address and admin token typed in by hand. The admin token is exchanged for a device
-    /// token when the server supports it; an older server keeps the token as given.
+    /// A setup code as shown on the setup page (24 characters of A-Z and 2-7, dashes and spaces
+    /// aside); admin tokens are longer and use other characters.
+    nonisolated static func isSetupCode(_ text: String) -> Bool {
+        let code = text.uppercased().filter { $0 != "-" && !$0.isWhitespace }
+        return (16...32).contains(code.count) && code.allSatisfy { ("A"..."Z").contains($0) || ("2"..."7").contains($0) }
+    }
+
+    /// Server address and a setup code or the admin token, typed in by hand. A setup code pairs
+    /// like a scanned one. The admin token is exchanged for a device token when the server
+    /// supports it; an older server keeps the token as given.
     func connectManually(url: String, token: String) async -> Bool {
         let typed = ServerSettings(url: url, token: token)
         guard typed.isComplete, let base = typed.baseURL else {
-            setupError = "Enter the server address, starting with http:// or https://, for example http://192.168.1.10:8080. Then enter the admin token."
+            setupError = "Enter the server address, starting with http:// or https://, for example http://192.168.1.10:8080. Then enter the setup code from the server's setup page."
             return false
+        }
+        if Self.isSetupCode(typed.token) {
+            Log.info("setup: setup code typed in for \(typed.host)")
+            await connect(to: base.absoluteString, host: typed.host, token: nil) { old in
+                try await ServerClient(base: base).pair(code: typed.token.trimmingCharacters(in: .whitespacesAndNewlines), replacing: old)
+            }
+            return setupError == nil
         }
         await connect(to: base.absoluteString, host: typed.host, token: typed.token) { old in
             do {
@@ -124,7 +141,8 @@ final class AppModel: ObservableObject {
 
     private func pairAndSave(url: String, host: String, token: String?,
                              pair: (String?) async throws -> ServerClient.Paired?) async -> Bool {
-        let sameServer = settings.sameServer(as: url)
+        var sameServer = false
+        if let u = URL(string: url) { sameServer = await KnownServer.isCurrent(u, settings: settings) }
         do {
             let paired = try await pair(sameServer ? settings.token : nil)
             guard let newToken = paired?.token ?? token else { throw ServerError.tooOld }
@@ -139,6 +157,8 @@ final class AppModel: ObservableObject {
             device = paired?.device
             PairedDevice.save(paired?.device)
             server = paired?.server
+            if !sameServer { KnownServer.id = nil }
+            KnownServer.note(paired?.server.serverID)
             reachable = true
             revoked = false
             SyncStatus.shared.lastError = nil
@@ -151,11 +171,19 @@ final class AppModel: ObservableObject {
         return true
     }
 
+    /// The server's preferred address answered as the same server (AddressHandoff), from a
+    /// status check or a heartbeat: settings already saved, history and sync positions kept.
+    func serverMoved(to new: ServerSettings) {
+        guard ServerSettings.load() == new else { return }
+        settings = new
+    }
+
     /// Forgets the server (the token stays valid on the server until revoked there).
     func disconnect() {
         Log.info("setup: disconnected from \(settings.host)")
         ServerSettings.clear()
         PairedDevice.save(nil)
+        KnownServer.id = nil
         settings = ServerSettings.load()
         device = nil
         server = nil
@@ -288,9 +316,14 @@ final class AppModel: ObservableObject {
     func refreshServer() async {
         guard let base = settings.baseURL else { return }
         do {
-            server = try await ServerClient(base: base).status(token: settings.token)
+            let status = try await ServerClient(base: base).status(token: settings.token)
+            server = status
+            KnownServer.note(status.serverID)
             reachable = true
             revoked = false
+            if connecting == nil, let moved = await AddressHandoff.follow(status.handoff, from: settings, device: device?.id) {
+                serverMoved(to: moved)
+            }
         } catch ServerError.unauthorized {
             reachable = true
             revoked = true
@@ -320,3 +353,4 @@ final class AppModel: ObservableObject {
     }
     #endif
 }
+

@@ -278,8 +278,21 @@ struct WelcomeView: View {
                 }
                 .padding(.top, 40)
 
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Works with your own server", systemImage: "server.rack")
+                        .font(.headline)
+                    Text("Health Relay sends your Health data to a server you run yourself: the free healthkit-relay program on a home computer, a NAS or a small cloud server. Your data goes only there. Setting one up takes a few minutes.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Link("How to set up a server", destination: Links.setup)
+                        .font(.subheadline.weight(.semibold))
+                }
+                .padding(22)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+
                 VStack(alignment: .leading, spacing: 22) {
-                    step(1, "Open your server's setup page", "On a computer, open the server address followed by /setup, for example http://192.168.1.10:8080/setup. Sign in with the admin token.")
+                    step(1, "Open your server's setup page", "On a computer, open the server address followed by /setup, for example https://health.example.ts.net/setup. Sign in with the admin token.")
                     step(2, "Scan the setup code with the Camera", "Point the iPhone's Camera at the QR code on the page, then tap Open in Health Relay.")
                     step(3, "Allow Health access", "Health Relay then copies your Health data, and syncs in the background several times a day.")
                 }
@@ -292,11 +305,19 @@ struct WelcomeView: View {
                         .font(.callout)
                         .foregroundStyle(.orange)
                 }
+
+                HStack(spacing: 18) {
+                    Link("Privacy Policy", destination: Links.privacy)
+                    Link("Help", destination: Links.support)
+                }
+                .font(.footnote)
+                .padding(.bottom, 8)
             }
             .padding(.horizontal, 24)
         }
         .safeAreaInset(edge: .bottom) {
             Button("Enter Server Details Instead") { showManual = true }
+                .accessibilityIdentifier("manual")
                 .font(.callout)
                 .padding(.vertical, 12)
                 .frame(maxWidth: .infinity)
@@ -333,15 +354,18 @@ struct ManualSetupView: View {
             Form {
                 Section {
                     TextField("Server address", text: $url)
+                        .accessibilityIdentifier("manual.server")
                         .keyboardType(.URL)
                         .textContentType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    SecureField("Admin token", text: $token)
-                        .textInputAutocapitalization(.never)
+                    TextField("Setup code or admin token", text: $token)
+                        .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
+                        .textContentType(.oneTimeCode)
+                        .accessibilityIdentifier("manual.code")
                 } footer: {
-                    Text("The server address is how this iPhone reaches the server, for example http://192.168.1.10:8080 or https://health.example.ts.net. Addresses with http:// work only with an IP address or a name ending in .local. The admin token is the one the server printed in its log on its first start. Health Relay uses it once to pair this iPhone, then keeps a token of its own. Scanning a setup code from the setup page does all of this for you.")
+                    Text("The server address is how this iPhone reaches the server, for example https://health.example.ts.net or http://192.168.1.10:8080. Addresses with http:// work only with an IP address or a name ending in .local. The setup code is the one under the QR code on the server's setup page, for example ABCD-EFGH-JKLM-NPQR-STUV-WXYZ. The admin token, which the server printed in its log on its first start, works too: Health Relay uses it once to pair this iPhone, then keeps a token of its own.")
                 }
                 if let error = model.setupError, !working {
                     Section { Text(error).foregroundStyle(.red) }
@@ -357,6 +381,7 @@ struct ManualSetupView: View {
                     } else {
                         Button("Connect") {
                             working = true
+                            token = token.trimmingCharacters(in: .whitespacesAndNewlines)
                             Task {
                                 let ok = await model.connectManually(url: url, token: token)
                                 working = false
@@ -364,10 +389,18 @@ struct ManualSetupView: View {
                             }
                         }
                         .disabled(url.isEmpty || token.isEmpty)
+                        .accessibilityIdentifier("manual.connect")
                     }
                 }
             }
         }
         .onAppear { model.setupError = nil }
     }
+}
+
+/// Pages of the documentation site the app links to.
+enum Links {
+    static let setup = URL(string: "https://leblancfg.com/healthkit-relay/quickstart/")!
+    static let privacy = URL(string: "https://leblancfg.com/healthkit-relay/privacy/")!
+    static let support = URL(string: "https://leblancfg.com/healthkit-relay/support/")!
 }

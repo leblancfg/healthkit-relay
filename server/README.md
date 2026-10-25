@@ -329,9 +329,13 @@ device's records; with the admin token, what was uploaded with the admin token, 
 `?device=<id>` what that device uploaded (also after it was revoked). It requires
 `?confirm=erase`: any other value, or none, is refused (`400`, nothing erased). Only the app
 before 0.6 may leave it out (a paired device's token, or iOS's CFNetwork user agent). `200`
-`{"erased": 12571973, "device": "3f9a1c2e"}`. The app's **Erase Server Data and Start Over**
-calls it, then uploads its history again from scratch. Numbers already forwarded to the
-metrics database stay there. See [Erasing](#erasing).
+`{"erased": 12571973, "device": "3f9a1c2e"}`. With a paired device's token, `?disconnect=1`
+also revokes that token in the same step (`"disconnected": true`; a demo server, which keeps
+nothing, answers it too): the app's **Erase Server Data
+and Disconnect** sends it, so no upload of that device is stored after the erase. An upload
+already under way when the erase ends is refused (`409`). The app's **Erase Server Data and
+Start Over** calls it without `disconnect`, then uploads its history again from scratch.
+Numbers already forwarded to the metrics database stay there. See [Erasing](#erasing).
 
 ### `GET /healthz`
 
@@ -344,7 +348,8 @@ public). Prometheus text format: `healthkit_relay_requests_total{result}` (`ok`,
 `bad_request`, `incomplete` for a body cut short by a client going away, `archive_error`,
 `paired`, `pair_rejected`, `erased`, `forbidden` for a token of the wrong scope,
 `query_error`, `query_timeout`, `query_busy`, `demo_quota` for an upload refused by a demo
-server's quota), `healthkit_relay_admin_token_uploads_total`,
+server's quota, `erased_meanwhile` for an upload refused because an erase of its device ended
+while it was on its way), `healthkit_relay_admin_token_uploads_total`,
 `healthkit_relay_records_total{outcome}`,
 `healthkit_relay_archive_records`, `healthkit_relay_staged_records` (not flushed yet),
 `healthkit_relay_last_success_timestamp_seconds{job="flush"|"compaction"}` (alert when it

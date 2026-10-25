@@ -42,4 +42,24 @@ final class SettingsTests: XCTestCase {
         ServerSettings.clearIfReinstalled(dataReadable: true, defaults)
         XCTAssertEqual(ServerSettings.load().url, "https://kept.example")
     }
+
+    func testAddressAndTokenAreOneItem() throws {
+        let saved = ServerSettings.load()
+        defer { if saved.url.isEmpty { ServerSettings.clear() } else { try? saved.save() } }
+        // Two items, as apps before 1.0 (14) kept them: read as they are.
+        ServerSettings.clear()
+        try Keychain.set("https://legacy.example", for: "server-url")
+        try Keychain.set("legacy-token", for: "server-token")
+        XCTAssertEqual(ServerSettings.load(), ServerSettings(url: "https://legacy.example", token: "legacy-token"))
+        // The next save writes one item and drops the two.
+        let new = ServerSettings(url: "https://new.example", token: "new-token")
+        try new.save()
+        XCTAssertNil(Keychain.get("server-url"))
+        XCTAssertNil(Keychain.get("server-token"))
+        XCTAssertEqual(ServerSettings.load(), new)
+        try ServerSettings(url: "https://other.example", token: "other").save()
+        XCTAssertEqual(ServerSettings.load(), ServerSettings(url: "https://other.example", token: "other"))
+        ServerSettings.clear()
+        XCTAssertEqual(ServerSettings.load(), ServerSettings(url: "", token: ""))
+    }
 }

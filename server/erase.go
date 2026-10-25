@@ -23,14 +23,28 @@ import (
 // It is journaled (pending_erase) and idempotent: an erase cut short is finished on the next
 // start, before the server accepts uploads again. It returns the number of records erased.
 func (s *Store) Erase(ctx context.Context, uploader string) (int64, error) {
+	return s.EraseThen(ctx, uploader, nil)
+}
+
+// EraseThen erases like Erase, then, if the erase succeeded, runs then while uploads are still
+// held back: revoking the device there means no upload of it is stored after the erase, also
+// one that arrives late (an upload admitted before is refused, see IngestAdmitted).
+func (s *Store) EraseThen(ctx context.Context, uploader string, then func() error) (int64, error) {
 	s.ingest.Lock()
 	defer s.ingest.Unlock()
 	s.maint.Lock()
 	defer s.maint.Unlock()
+	// Uploads admitted before the erase ends are refused (IngestAdmitted), also when it fails:
+	// the app sends them again.
+	defer s.erases.Add(1)
 	if _, err := s.db.Exec(`INSERT OR IGNORE INTO pending_erase (uploader) VALUES (?)`, uploader); err != nil {
 		return 0, err
 	}
-	return s.erase(ctx, uploader)
+	n, err := s.erase(ctx, uploader)
+	if err == nil && then != nil {
+		err = then()
+	}
+	return n, err
 }
 
 func (s *Store) erase(ctx context.Context, uploader string) (int64, error) {
@@ -170,9 +184,10 @@ func rewriteWithout[T any](s *Store, path string, drop func(*T) bool) error {
 	return mergeFiles(s, path, []string{path}, nil, drop)
 }
 
-// eraseHandler serves DELETE /v1/data: a device erases what it uploaded. The admin token
-// erases what was uploaded with the admin token, or, with ?device=<id>, what that device
-// uploaded (also after it was revoked).
+// eraseHandler serves DELETE /v1/data: a device erases what it uploaded; with ?disconnect=1
+// its token is revoked in the same step (the app's Erase Server Data and Disconnect), so
+// nothing it sent can arrive afterwards, and the answer says "disconnected": true. The admin token erases what was uploaded with the
+// admin token, or, with ?device=<id>, what that device uploaded (also after it was revoked).
 func (s *Server) eraseHandler(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.authorize(w, r, ScopeUpload)
 	if !ok {
@@ -202,12 +217,24 @@ func (s *Server) eraseHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// Rewriting files can take a while with a long history and several devices.
 	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(30 * time.Minute))
+	var revoke func() error
+	if r.URL.Query().Get("disconnect") == "1" && c.Device != nil && s.Demo == nil {
+		revoke = func() error {
+			if _, err := s.Devices.Revoke(c.Device.ID); err != nil {
+				return fmt.Errorf("erased, but could not revoke the device: %w", err)
+			}
+			log.Printf("erase: revoked device %s, as it asked", c.Device.ID)
+			return nil
+		}
+	}
+	// A demo server stores nothing sent with any token: for it, the device is disconnected.
+	disconnected := revoke != nil || (s.Demo != nil && r.URL.Query().Get("disconnect") == "1" && c.Device != nil)
 	var n int64
 	var err error
 	if s.Demo != nil {
-		n = 0 // a demo server stores no records
+		n = 0 // a demo server stores no records, and its tokens expire on their own
 	} else {
-		n, err = s.Archive.Erase(context.WithoutCancel(r.Context()), uploader)
+		n, err = s.Archive.EraseThen(context.WithoutCancel(r.Context()), uploader, revoke)
 	}
 	if err != nil {
 		log.Printf("erase: %v", err)
@@ -215,7 +242,11 @@ func (s *Server) eraseHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.count("erased")
-	writeJSON(w, http.StatusOK, map[string]any{"erased": n, "device": uploader})
+	answer := map[string]any{"erased": n, "device": uploader}
+	if disconnected {
+		answer["disconnected"] = true
+	}
+	writeJSON(w, http.StatusOK, answer)
 }
 
 // Uploaders lists everyone with records in the archive: device IDs, and "" for the admin

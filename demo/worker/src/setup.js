@@ -195,7 +195,7 @@ export function pairPage(version, server, code) {
     <a class="button" href="${esc(link)}">Open in Health Relay</a>
   </div>
   <p class="hint">Or, in Health Relay, tap <b>Enter Server Details Instead</b> and enter the server address <code>${esc(server)}</code> and the setup code <code>${esc(code)}</code>.</p>
-  <p class="status" id="status"><span class="dot"></span><span id="status-text">This is a demo server: its setup code pairs any number of iPhones, and it erases all uploaded data every hour.</span></p>
+  <p class="status" id="status"><span class="dot"></span><span id="status-text">This is a demo server: its setup code pairs any number of iPhones, and it checks uploaded data and drops it at once; it keeps only hourly counts.</span></p>
 </section>
 <section class="card" id="done" hidden>
   <svg class="check" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30" fill="#34c759"/><path d="M19 33l9 9 17-19" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>

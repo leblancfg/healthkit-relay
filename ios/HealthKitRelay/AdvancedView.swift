@@ -29,9 +29,9 @@ struct AdvancedView: View {
                         LabeledContent("Server version", value: s.version)
                     }
                     Button("Connect to Another Server…") { showManual = true }
-                        .disabled(model.erasing)
+                        .disabled(model.erasing || model.connecting != nil)
                     Button("Disconnect", role: .destructive) { confirmDisconnect = true }
-                        .disabled(model.erasing)
+                        .disabled(model.erasing || model.connecting != nil)
                 }
 
                 Section {

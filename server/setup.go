@@ -548,7 +548,7 @@ if (location.hash) document.querySelector("form.login").action = "/setup" + loca
   {{end}}
   {{if .Demo}}
   <p class="hint">Or, in Health Relay, tap <b>Enter Server Details Instead</b> and enter the server address <code>{{.Chosen}}</code> and the setup code <code>{{.Code}}</code>.</p>
-  <p class="status" id="status"><span class="dot"></span><span id="status-text">This is a demo server: its setup code pairs any number of iPhones, and it erases all uploaded data every hour.</span></p>
+  <p class="status" id="status"><span class="dot"></span><span id="status-text">This is a demo server: its setup code pairs any number of iPhones, and it checks uploaded data and drops it at once; it keeps only hourly counts.</span></p>
   {{else}}
   <p class="status" id="status"><span class="dot"></span><span id="status-text"><span class="desktop">Waiting for your iPhone · </span>This setup code works once, until {{.Expires}}</span></p>
   {{end}}

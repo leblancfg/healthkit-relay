@@ -115,7 +115,10 @@ most data tools read it, with or without Health Relay.
 `DELETE /v1/data?confirm=erase`. The server permanently deletes everything that iPhone
 uploaded: it rewrites the Parquet files without its rows (or removes them), deletes its
 staged rows, tombstones and de-duplication entries, and truncates SQLite's log. The app then
-uploads its history again. Two copies stay as they are: numbers already forwarded to a
+uploads its history again. **Erase Server Data and Disconnect** sends
+`DELETE /v1/data?confirm=erase&disconnect=1`: the same erase, and the server revokes the
+iPhone's token in the same step, so nothing it sent before can arrive afterwards. Two copies
+stay as they are: numbers already forwarded to a
 metrics database (they age out with its retention), and copies outside the archive
 directory, such as backups and snapshots. With the admin token, `?confirm=erase` is required,
 and `?device=<id>` erases one paired device's data.

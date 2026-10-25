@@ -74,18 +74,36 @@ struct ServerSettings: Equatable, Sendable {
         return key(url) != nil && key(url) == key(other)
     }
 
+    /// Address and token are one Keychain item, read and written in one step: a reader on
+    /// another thread (a background heartbeat, an upload) never pairs one server's address with
+    /// another's token. Apps before 1.0 (14) kept two items; they are read until the next save.
+    private static let account = "server"
+    private static let legacy = ("server-url", "server-token")
+
+    private struct Stored: Codable {
+        var url: String
+        var token: String
+    }
+
     static func load() -> ServerSettings {
-        ServerSettings(url: Keychain.get("server-url") ?? "", token: Keychain.get("server-token") ?? "")
+        if let data = Keychain.getData(account) {
+            guard let s = try? JSONDecoder().decode(Stored.self, from: data) else { return ServerSettings(url: "", token: "") }
+            return ServerSettings(url: s.url, token: s.token)
+        }
+        return ServerSettings(url: Keychain.get(legacy.0) ?? "", token: Keychain.get(legacy.1) ?? "")
     }
 
     func save() throws {
-        try Keychain.set(url.trimmingCharacters(in: .whitespacesAndNewlines), for: "server-url")
-        try Keychain.set(token.trimmingCharacters(in: .whitespacesAndNewlines), for: "server-token")
+        let s = Stored(url: url.trimmingCharacters(in: .whitespacesAndNewlines), token: token.trimmingCharacters(in: .whitespacesAndNewlines))
+        try Keychain.set(try JSONEncoder().encode(s), for: Self.account)
+        Keychain.delete(Self.legacy.0)
+        Keychain.delete(Self.legacy.1)
     }
 
     static func clear() {
-        Keychain.delete("server-url")
-        Keychain.delete("server-token")
+        Keychain.delete(account)
+        Keychain.delete(legacy.0)
+        Keychain.delete(legacy.1)
     }
 }
 
@@ -113,6 +131,10 @@ enum Keychain {
     private static let service = Bundle.main.bundleIdentifier ?? "healthkit-relay"
 
     static func get(_ account: String) -> String? {
+        getData(account).flatMap { String(data: $0, encoding: .utf8) }
+    }
+
+    static func getData(_ account: String) -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -121,9 +143,8 @@ enum Keychain {
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else { return nil }
+        return item as? Data
     }
 
     static func delete(_ account: String) {
@@ -135,16 +156,25 @@ enum Keychain {
     }
 
     static func set(_ value: String, for account: String) throws {
+        try set(Data(value.utf8), for: account)
+    }
+
+    /// Replaces the item's value in place (a reader sees the old value or the new one, never
+    /// none), or adds it.
+    static func set(_ data: Data, for account: String) throws {
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        SecItemDelete(base as CFDictionary)
-        var add = base
-        add[kSecValueData as String] = Data(value.utf8)
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let status = SecItemAdd(add as CFDictionary, nil)
+        let update: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        var status = SecItemUpdate(base as CFDictionary, update as CFDictionary)
+        if status == errSecItemNotFound {
+            status = SecItemAdd(base.merging(update) { $1 } as CFDictionary, nil)
+        }
         guard status == errSecSuccess else {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
         }

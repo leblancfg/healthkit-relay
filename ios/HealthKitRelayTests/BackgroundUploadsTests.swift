@@ -218,13 +218,14 @@ final class BackgroundUploadsTests: XCTestCase {
 
     func testUploadRetriesThenCarriesItsCommit() async throws {
         let t = ScriptedTransport([.success((503, Data("busy".utf8))), .failure(URLError(.timedOut)), .success((200, records))])
-        let commit = UploadCommit(key: "k", ext: "txt", from: nil, to: Data("v".utf8))
+        // The sync names the commit's owner (connection and reset epoch); the uploader carries
+        // it unchanged through every retry.
+        let commit = UploadCommit(key: "k", ext: "txt", from: nil, to: Data("v".utf8),
+                                  connection: settings.connectionKey + ":epoch1")
         let b = try batch(records: 1)
         try await uploader(t).upload(b, commit: commit)
         XCTAssertEqual(t.sent.count, 3)
-        var sentCommit = commit
-        sentCommit.connection = settings.connectionKey // the connection it went to
-        XCTAssertEqual(t.sent.map(\.upload), Array(repeating: PendingUpload(records: 1, items: 2, commit: sentCommit), count: 3))
+        XCTAssertEqual(t.sent.map(\.upload), Array(repeating: PendingUpload(records: 1, items: 2, commit: commit), count: 3))
         XCTAssertEqual(t.sent.first?.body, try b.body())
         XCTAssertEqual(t.sent.map(\.direct), [false, false, true], "after a failed transfer, retries go out directly")
     }
@@ -311,17 +312,28 @@ final class BackgroundUploadsTests: XCTestCase {
     }
 
     /// A position an upload of an earlier connection carries never moves the current one's.
-    func testCommitsBelongToTheirConnection() throws {
+    func testCommitsBelongToTheirConnection() async throws {
         let saved = ServerSettings.load()
         defer { if saved.url.isEmpty { ServerSettings.clear() } else { try? saved.save() } }
         let a = ServerSettings(url: "https://a.example", token: "ta"), b = ServerSettings(url: "https://b.example", token: "tb")
         XCTAssertNotEqual(a.connectionKey, b.connectionKey)
         try b.save()
-        var commit = UploadCommit(key: "k", ext: "txt", from: nil, to: Data("v".utf8))
-        XCTAssertTrue(SyncEngine.isCurrent(commit), "from app 0.7: no connection")
-        commit.connection = a.connectionKey
-        XCTAssertFalse(SyncEngine.isCurrent(commit))
-        commit.connection = b.connectionKey
-        XCTAssertTrue(SyncEngine.isCurrent(commit))
+        let engine = SyncEngine.shared
+        let current = await engine.owner()
+        let ownsCurrent = await engine.owns(current)
+        XCTAssertTrue(ownsCurrent)
+        let ownsNil = await engine.owns(nil)
+        XCTAssertFalse(ownsNil, "from app 0.7, with no connection: sent again rather than trusted")
+        let ownsA = await engine.owns(await engine.owner(a))
+        XCTAssertFalse(ownsA)
+        // An erase (or a new server) resets the positions: what an earlier upload carries no
+        // longer applies, even on the same connection.
+        await engine.resetAnchors()
+        let ownsAfterReset = await engine.owns(current)
+        XCTAssertFalse(ownsAfterReset)
+        var commit = UploadCommit(key: "owner-test", ext: "txt", from: nil, to: Data("v".utf8))
+        commit.connection = current
+        let moved = await engine.commitFinishedUpload(commit)
+        XCTAssertFalse(moved)
     }
 }

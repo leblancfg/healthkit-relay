@@ -105,7 +105,7 @@ func run(args []string) error {
 	queryMemory := fs.String("query-memory-limit", "512MB", "DuckDB memory_limit per query; queries needing more fail (nothing spills to disk)")
 	queryThreads := fs.Int("query-threads", 2, "DuckDB threads per query")
 	queryConcurrency := fs.Int("query-concurrency", 2, "queries that may run at once; others wait (within -query-timeout)")
-	demoCodeFile := fs.String("demo-code-file", "", "demo server: file holding a shared setup code (16+ characters of A-Z, 2-7) that pairs any number of iPhones; turns on the hourly erase and the upload quota (optional)")
+	demoCodeFile := fs.String("demo-code-file", "", "demo server: file holding a shared setup code (16+ characters of A-Z, 2-7) that pairs any number of iPhones; turns on demo mode: uploads checked and dropped, an hourly upload quota (optional)")
 	demoReset := fs.Duration("demo-reset", time.Hour, "demo server: how often all records are erased")
 	demoQuota := fs.Int64("demo-quota", 256<<20, "demo server: most upload bytes accepted between two erases; beyond, uploads get 429 until the next erase")
 	showVersion := fs.Bool("version", false, "print the version and exit")

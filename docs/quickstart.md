@@ -17,7 +17,7 @@ You need:
   on Linux or [Docker Desktop](https://docs.docker.com/desktop/) on a Mac. Check it with
   `docker compose version`: it prints `Docker Compose version v2...`.
 - **An iPhone** on the same Wi-Fi network as the server, with the **Health Relay** app from
-  the App Store. (To build the app yourself instead: a Mac with Xcode 16 or newer and a paid
+  the App Store (in review in October 2026; until it is listed, build it yourself). (To build the app yourself instead: a Mac with Xcode 16 or newer and a paid
   [Apple Developer Program](https://developer.apple.com/programs/) membership, see step 3.)
 
 ## 1. Find the server address
@@ -112,7 +112,8 @@ More settings, updates and the optional dashboards are in
 
 ## 3. Install the iPhone app
 
-Install **Health Relay** from the App Store on the iPhone (search for "Health Relay"). It
+Install **Health Relay** from the App Store on the iPhone (search for "Health Relay"). While
+the app is in review (October 2026), use "Build the app yourself instead" below. It
 opens on three steps, starting with **Open your server's setup page**: go on with step 4.
 
 ??? note "Build the app yourself instead"

@@ -1,0 +1,2109 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Fix common Health Relay problems: the admin token, pairing errors, background sync on the iPhone, missing data types, Grafana and the query API.">
+      
+      
+      
+        <link rel="canonical" href="https://health-relay.leblancfg.com/troubleshooting/">
+      
+      
+        <link rel="prev" href="../support/">
+      
+      
+        <link rel="next" href="../contributing/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+  
+    
+      
+        <title>Troubleshooting - Health Relay</title>
+      
+    
+  
+
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  
+  
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Health Relay">
+  <meta property="og:title" content="Troubleshooting - Health Relay">
+  <meta property="og:description" content="Fix common Health Relay problems: the admin token, pairing errors, background sync on the iPhone, missing data types, Grafana and the query API.">
+  <meta property="og:url" content="https://health-relay.leblancfg.com/troubleshooting/">
+  <meta property="og:image" content="https://health-relay.leblancfg.com/assets/social.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Health Relay: your Apple Health data, on a server you own">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Troubleshooting - Health Relay">
+  <meta name="twitter:description" content="Fix common Health Relay problems: the admin token, pairing errors, background sync on the iPhone, missing data types, Grafana and the query API.">
+  <meta name="twitter:image" content="https://health-relay.leblancfg.com/assets/social.png">
+  
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="pink" data-md-color-accent="red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#troubleshooting" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Health Relay" class="md-header__button md-logo" aria-label="Health Relay" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Health Relay
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Troubleshooting
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="pink" data-md-color-accent="red"  aria-label="Dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="pink" data-md-color-accent="red"  aria-label="Light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/leblancfg/healthkit-relay" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    leblancfg/healthkit-relay
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Health Relay" class="md-nav__button md-logo" aria-label="Health Relay" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    Health Relay
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/leblancfg/healthkit-relay" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    leblancfg/healthkit-relay
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Setup guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup guides
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker & Compose
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/linux/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Linux binary + systemd
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/nixos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NixOS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/macos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    macOS (launchd)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/nas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synology, Unraid, TrueNAS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/raspberry-pi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Raspberry Pi & ARM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../networking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Networking & HTTPS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pairing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pairing an iPhone
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data model & querying
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../query-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Query API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grafana/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grafana
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security & privacy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../privacy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Privacy policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Help and support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Server">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#where-is-the-admin-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where is the admin token?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-command-says-the-archive-directory-belongs-to-uid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A command says the archive directory "belongs to uid"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-server-stops-at-start-with-a-token-file-error" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The server stops at start with a -token-file error
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#other-computers-cannot-connect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Other computers cannot connect
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#permission-denied-on-the-data-directory-docker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "permission denied" on the data directory (Docker)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#uploads-fail-with-413" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Uploads fail with 413
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pairing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pairing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Pairing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-setup-page-shows-set-the-server-address" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The setup page shows "Set the server address"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-setup-page-answers-403-or-a-message-about-private-networks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The setup page answers 403, or a message about private networks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-setup-code-expired-or-was-already-used" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The setup code expired or was already used
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-camera-shows-no-open-in-health-relay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Camera shows no "Open in Health Relay"
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#syncing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Syncing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Syncing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-first-sync-takes-hours" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The first sync takes hours
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#no-syncs-in-the-background" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No syncs in the background
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-app-shows-the-server-as-not-reachable-on-a-home-network" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The app shows the server as not reachable on a home network
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-app-shows-disconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The app shows "Disconnected"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-data-type-is-missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A data type is missing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-is-in-the-archive-but-not-in-grafana" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data is in the archive but not in Grafana
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#query-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Query API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Query API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docs-answers-404" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        /docs answers 404
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-query-answers-401-or-403" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A query answers 401 or 403
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-query-answers-400-unknown-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A query answers 400 "unknown type"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#todays-data-is-missing-from-queries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Today's data is missing from queries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-query-answers-422-503-or-504" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A query answers 422, 503 or 504
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-log-says-the-test-query-failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The log says the test query failed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#still-stuck" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Still stuck?
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Server">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#where-is-the-admin-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where is the admin token?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-command-says-the-archive-directory-belongs-to-uid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A command says the archive directory "belongs to uid"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-server-stops-at-start-with-a-token-file-error" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The server stops at start with a -token-file error
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#other-computers-cannot-connect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Other computers cannot connect
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#permission-denied-on-the-data-directory-docker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "permission denied" on the data directory (Docker)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#uploads-fail-with-413" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Uploads fail with 413
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pairing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pairing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Pairing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-setup-page-shows-set-the-server-address" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The setup page shows "Set the server address"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-setup-page-answers-403-or-a-message-about-private-networks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The setup page answers 403, or a message about private networks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-setup-code-expired-or-was-already-used" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The setup code expired or was already used
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-camera-shows-no-open-in-health-relay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Camera shows no "Open in Health Relay"
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#syncing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Syncing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Syncing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-first-sync-takes-hours" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The first sync takes hours
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#no-syncs-in-the-background" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No syncs in the background
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-app-shows-the-server-as-not-reachable-on-a-home-network" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The app shows the server as not reachable on a home network
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-app-shows-disconnected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The app shows "Disconnected"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-data-type-is-missing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A data type is missing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-is-in-the-archive-but-not-in-grafana" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data is in the archive but not in Grafana
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#query-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Query API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Query API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docs-answers-404" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        /docs answers 404
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-query-answers-401-or-403" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A query answers 401 or 403
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-query-answers-400-unknown-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A query answers 400 "unknown type"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#todays-data-is-missing-from-queries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Today's data is missing from queries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-query-answers-422-503-or-504" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A query answers 422, 503 or 504
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-log-says-the-test-query-failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The log says the test query failed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#still-stuck" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Still stuck?
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/leblancfg/healthkit-relay/edit/main/docs/troubleshooting.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h1>
+<p>Each problem below says what you see, why it happens, what to do, and how to check it worked.
+Words such as <em>server address</em>, <em>setup page</em> and <em>admin token</em> are defined in the
+<a href="../glossary/">glossary</a>.</p>
+<p>Start with the two logs:</p>
+<ul>
+<li>the server's log: <code>docker compose logs relay</code> (Docker Compose), <code>journalctl -u
+  healthkit-relay</code> (Linux and NixOS), or the terminal or log file it runs in;</li>
+<li>the app's diagnostic log: in the app, tap the gear, then <strong>Share Diagnostic Log</strong>.</li>
+</ul>
+<p>Both list steps and counts; health values stay in the archive. Remove your addresses before
+you share them.</p>
+<h2 id="server">Server<a class="headerlink" href="#server" title="Permanent link">&para;</a></h2>
+<h3 id="where-is-the-admin-token">Where is the admin token?<a class="headerlink" href="#where-is-the-admin-token" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> The setup page asks for the <strong>Admin token</strong>, and you do not have it.</p>
+<p><strong>Why.</strong> The server prints the admin token once, in its log, on its very first start, and
+keeps only its fingerprint (<code>admin.json</code>).</p>
+<p><strong>What to do.</strong></p>
+<ol>
+<li>Look in the log of the first start: <code>docker compose logs relay | grep -i "admin token"</code>,
+   or <code>journalctl -u healthkit-relay | grep -i "admin token"</code>.</li>
+<li>
+<p>If the log no longer has it, make a new one on the server:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>docker<span class="w"> </span>compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>relay<span class="w"> </span>healthkit-relay<span class="w"> </span>admin<span class="w"> </span>reset<span class="w">        </span><span class="c1"># Docker Compose</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>sudo<span class="w"> </span>healthkit-relay-ctl<span class="w"> </span>admin<span class="w"> </span>reset<span class="w">                         </span><span class="c1"># NixOS</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>sudo<span class="w"> </span>healthkit-relay<span class="w"> </span>admin<span class="w"> </span>reset<span class="w"> </span>-archive-dir<span class="w"> </span>/var/lib/healthkit-relay<span class="w">   </span><span class="c1"># Linux binary</span>
+</code></pre></div>
+<p>The terminal shows the new admin token. The old one stops working at once.</p>
+</li>
+<li>
+<p>Save it in your password manager.</p>
+</li>
+</ol>
+<p><strong>Check.</strong> Paste it on the setup page and click <strong>Sign in</strong>: the page shows
+<strong>Pair your iPhone</strong>.</p>
+<h3 id="a-command-says-the-archive-directory-belongs-to-uid">A command says the archive directory "belongs to uid"<a class="headerlink" href="#a-command-says-the-archive-directory-belongs-to-uid" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> <code>pair</code>, <code>devices</code>, <code>revoke</code>, <code>token create</code> or <code>admin reset</code> stops with a
+message that the archive directory belongs to a uid (a user number), e.g. <code>belongs to uid
+61234</code>.</p>
+<p><strong>Why.</strong> These commands change the server's state files, so they run as the user that owns
+the archive directory (the server's user), or as root.</p>
+<p><strong>What to do.</strong> Run the command with <code>sudo</code>, or the way your setup provides, with the
+server's <code>-archive-dir</code> (see <a href="../setup/#commands">Commands</a>):
+<code>sudo healthkit-relay pair -archive-dir /var/lib/healthkit-relay</code>,
+<code>docker compose exec relay healthkit-relay pair</code>, or <code>sudo healthkit-relay-ctl pair</code> on NixOS.</p>
+<p><strong>Check.</strong> The command prints its result: a QR code for <code>pair</code>, a table for <code>devices</code>.</p>
+<h3 id="the-server-stops-at-start-with-a-token-file-error">The server stops at start with a <code>-token-file</code> error<a class="headerlink" href="#the-server-stops-at-start-with-a-token-file-error" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> The server exits right after it starts, and the last log line names
+<code>-token-file</code>: the file cannot be read, or its token is shorter than 16 characters.</p>
+<p><strong>Why.</strong> <code>-token-file</code> (<code>HKR_TOKEN_FILE</code>) is a setting from earlier versions, where you made
+the server token by hand. At start, the server imports that token as the admin token. A
+missing file is skipped; a file the server's user cannot read, or a token under 16
+characters, stops it.</p>
+<p><strong>What to do.</strong></p>
+<ol>
+<li>If the server has started with this version before, <code>admin.json</code> already holds the admin
+   token: remove <code>-token-file</code> (or <code>HKR_TOKEN_FILE</code>) from the settings and delete the file.</li>
+<li>Otherwise, make the file readable by the server's user, or put the old token back in it,
+   and start the server once so it imports it. Then remove the setting and delete the file.</li>
+</ol>
+<p><strong>Check.</strong> The server keeps running, and its log has no <code>-token-file</code> warning.</p>
+<h3 id="other-computers-cannot-connect">Other computers cannot connect<a class="headerlink" href="#other-computers-cannot-connect" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> The server answers on the server itself (<code>curl http://127.0.0.1:8080/healthz</code>
+prints <code>ok</code>), but a browser or <code>curl</code> on another computer gets <em>Failed to connect</em> or waits
+until it gives up.</p>
+<p><strong>Why.</strong> The binary, the systemd unit and the NixOS module listen on <code>127.0.0.1:8080</code> by
+default: only the server itself reaches that address. The Docker image listens on every
+network interface.</p>
+<p><strong>What to do.</strong></p>
+<ol>
+<li>Listen on every interface: <code>HKR_LISTEN=0.0.0.0:8080</code> in <code>/etc/healthkit-relay/env</code>
+   (Linux binary), or <code>listen = "0.0.0.0:8080";</code> and <code>openFirewall = true;</code> on NixOS. Restart
+   the server.</li>
+<li>Open port 8080 in the host's firewall: <code>sudo ufw allow 8080/tcp</code>, or
+   <code>sudo firewall-cmd --add-port=8080/tcp</code>.</li>
+</ol>
+<p><strong>Check.</strong> From another computer, <code>curl http://192.168.1.10:8080/healthz</code> (with your server's
+address) prints <code>ok</code>.</p>
+<h3 id="permission-denied-on-the-data-directory-docker">"permission denied" on the data directory (Docker)<a class="headerlink" href="#permission-denied-on-the-data-directory-docker" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> The container stops, and <code>docker compose logs relay</code> shows <code>permission
+denied</code> on <code>/data</code>.</p>
+<p><strong>Why.</strong> <code>./data</code> belongs to another user than the one the container runs as.</p>
+<p><strong>What to do.</strong> See <a href="../setup/docker/#permissions">Docker &amp; Compose</a>.</p>
+<p><strong>Check.</strong> <code>docker compose ps</code> shows <code>relay</code> as <code>Up</code>.</p>
+<h3 id="uploads-fail-with-413">Uploads fail with 413<a class="headerlink" href="#uploads-fail-with-413" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> The app's status names <code>413</code>.</p>
+<p><strong>Why.</strong> A batch was larger than the server's <code>-max-body-bytes</code> (32 MB by default), or than
+your reverse proxy allows.</p>
+<p><strong>What to do.</strong> Allow 32 MB request bodies at the reverse proxy, e.g.
+<code>client_max_body_size 32m;</code> in nginx, and reload it.</p>
+<p><strong>Check.</strong> In the app, tap <strong>Sync Now</strong>: it ends with <strong>Up to date</strong>.</p>
+<h2 id="pairing">Pairing<a class="headerlink" href="#pairing" title="Permanent link">&para;</a></h2>
+<h3 id="the-setup-page-shows-set-the-server-address">The setup page shows "Set the server address"<a class="headerlink" href="#the-setup-page-shows-set-the-server-address" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> The setup page shows <strong>Set the server address</strong> instead of a QR code.</p>
+<p><strong>Why.</strong> The page was opened at an address an iPhone cannot reach, such as <code>127.0.0.1</code> or
+<code>localhost</code>, and the server found no other address it answers on.</p>
+<p><strong>What to do.</strong> One of:</p>
+<ul>
+<li>open the setup page with the address the iPhone uses, e.g.
+  <code>http://192.168.1.10:8080/setup</code>;</li>
+<li>start the server with <code>-public-url</code> (<code>HKR_PUBLIC_URL</code>) set to the server address;</li>
+<li>start the server with <code>-listen 0.0.0.0:8080</code>, so the page can offer the computer's network
+  addresses.</li>
+</ul>
+<p><strong>Check.</strong> The page shows <strong>Pair your iPhone</strong> and a QR code.</p>
+<h3 id="the-setup-page-answers-403-or-a-message-about-private-networks">The setup page answers 403, or a message about private networks<a class="headerlink" href="#the-setup-page-answers-403-or-a-message-about-private-networks" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> Opening <code>/setup</code> gives a short page about private networks, with status
+403.</p>
+<p><strong>Why.</strong> By default (<code>-setup-from private</code>), the setup page and pairing answer private
+networks only: your home network and Tailscale. Behind a reverse proxy on another host, the
+server sees the proxy's address, which may be public.</p>
+<p><strong>What to do.</strong></p>
+<ul>
+<li>From outside your home, pair over a VPN such as Tailscale, or at home.</li>
+<li>Behind a reverse proxy, run the proxy on the same host as the server, or pair with
+  <code>healthkit-relay pair</code> on the server.</li>
+</ul>
+<p><strong>Check.</strong> The setup page asks for the <strong>Admin token</strong>.</p>
+<h3 id="the-setup-code-expired-or-was-already-used">The setup code expired or was already used<a class="headerlink" href="#the-setup-code-expired-or-was-already-used" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> The app or the setup page says the setup code expired or was already used.</p>
+<p><strong>Why.</strong> A setup code pairs one iPhone, once, within 15 minutes.</p>
+<p><strong>What to do.</strong> Make a new one: reload the setup page, or run <code>healthkit-relay pair</code> again.
+To send the setup code's link to a phone that will open it later, make one that lasts
+longer: <code>healthkit-relay pair -valid 2h</code>.</p>
+<p><strong>Check.</strong> The app shows the server's address and asks you to <strong>Connect</strong>.</p>
+<h3 id="the-camera-shows-no-open-in-health-relay">The Camera shows no "Open in Health Relay"<a class="headerlink" href="#the-camera-shows-no-open-in-health-relay" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> The iPhone's Camera sees the QR code but offers no <strong>Open in Health Relay</strong>
+button.</p>
+<p><strong>Why.</strong> The setup code's QR code opens the Health Relay app, and the app is not installed
+on that iPhone.</p>
+<p><strong>What to do.</strong> Install the app, open it once, then scan the code again.</p>
+<p><strong>Check.</strong> The Camera shows <strong>Open in Health Relay</strong>.</p>
+<h2 id="syncing">Syncing<a class="headerlink" href="#syncing" title="Permanent link">&para;</a></h2>
+<h3 id="the-first-sync-takes-hours">The first sync takes hours<a class="headerlink" href="#the-first-sync-takes-hours" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> The app shows <strong>Syncing</strong> for a long time after pairing.</p>
+<p><strong>Why.</strong> The first sync uploads your whole history, which can be hundreds of thousands of
+samples.</p>
+<p><strong>What to do.</strong> Keep the app open and the phone unlocked and charging. If the sync stops, it
+continues where it stopped. On iOS 26 and later, a first sync, or a <strong>Sync Now</strong> after hours
+without a sync, also goes on when you switch to another app: iOS shows its progress in a Live
+Activity, where you can stop it. Locking the iPhone pauses it, since Health data is locked
+then; it goes on after you unlock.</p>
+<p><strong>Check.</strong> The app shows <strong>Up to date</strong>.</p>
+<h3 id="no-syncs-in-the-background">No syncs in the background<a class="headerlink" href="#no-syncs-in-the-background" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> The app syncs when you open it, and at no other time.</p>
+<p><strong>Why.</strong> Health Relay syncs in the background several times a day; open the app to sync
+right away. iOS decides when to wake the app: after new Health data arrives, at its
+background app refresh, while the iPhone charges, and for about 30 seconds after you leave
+the app. Low Power Mode, closing the app from the app switcher, and Background App Refresh
+turned off all hold these wakes back. iPhone keeps Health data locked while the phone is
+locked, so a wake while it is locked sends nothing new: it notes a sync as owed, and the
+first wake after an unlock (or opening the app) sends everything since. With Tailscale, the
+iPhone reaches the server in the background only with VPN On Demand.</p>
+<p><strong>What to do.</strong></p>
+<ol>
+<li>Turn on Background App Refresh: Settings › General › Background App Refresh, for Health
+   Relay.</li>
+<li>Leave the app in the app switcher, and Low Power Mode off.</li>
+<li>With Tailscale, turn on VPN On Demand in the Tailscale app.</li>
+</ol>
+<p><strong>Check.</strong> The server's log says what started each batch, e.g.
+<code>batch v2: … trigger observer, app background</code>, and
+<code>healthkit_relay_batches_total{trigger}</code> counts them. Triggers other than <code>foreground</code> mean
+iOS woke the app.</p>
+<p>From app 0.6.2 and server 0.6.2, the app also sends a heartbeat at the end of each background
+wake, even when it could read or send nothing. The server logs one line per heartbeat:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>heartbeat: device eae02a2e, app 0.6.4 (11), trigger refresh, background, protected data unavailable, outcome locked, on battery, 0 uploaded in 0.2s, 28s background time left, owes a sync (locked), process 5h0m0s old; wakes: observer 3 (last 10-20 08:12:40), refresh 5 (last 10-20 13:05:11)
+</code></pre></div>
+<ul>
+<li>The trigger says what woke the app: <code>observer</code> (new Health data), <code>refresh</code> (background
+  app refresh), <code>processing</code> (the processing task while charging), <code>urlsession</code> (an upload
+  left under way finished, from app 0.7.0), <code>unlock</code> (the first unlock after a skipped
+  sync), <code>backgrounded</code> (you left the app), <code>continued</code> (a sync you started that went on
+  outside the app, iOS 26) and <code>retry</code> (after a failure). Server 0.7.0 counts each under
+  its own name; older servers count the new ones as <code>unknown</code>.</li>
+<li><code>protected data unavailable</code> and <code>outcome locked</code>: the iPhone was locked; the sync waits
+  for a wake after an unlock.</li>
+<li><code>plugged in</code> or <code>on battery</code>, then <code>low power mode</code> and <code>background app refresh denied</code>
+  when they apply (app 0.6.4 and server 0.6.4): what iOS weighs before it wakes the app.
+  Wakes that come only while <code>plugged in</code> mean iOS is holding the app's background work for
+  the charger.</li>
+<li><code>outcome upload failed</code> or <code>cancelled</code>, or a <code>last error</code>: the app read Health but could
+  not send everything in the time iOS gave it. The next wake sends the rest.</li>
+<li>No heartbeat at all for hours: iOS did not wake the app. See the steps above.</li>
+</ul>
+<p><code>healthkit_relay_last_heartbeat_timestamp_seconds{trigger}</code> and
+<code>healthkit_relay_last_batch_timestamp_seconds{trigger}</code> give the time of the last of each, and
+refused tokens are logged with the client's address and user agent (<code>refused: POST
+/v1/samples from …, 401, …</code>).</p>
+<h3 id="the-app-shows-the-server-as-not-reachable-on-a-home-network">The app shows the server as not reachable on a home network<a class="headerlink" href="#the-app-shows-the-server-as-not-reachable-on-a-home-network" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> The app shows <strong>Not reachable right now</strong> while the iPhone is on the same
+Wi-Fi as the server.</p>
+<p><strong>Why.</strong> The app needs iOS's Local Network permission to reach addresses on your home
+network. Also, iOS allows plain <code>http://</code> only to IP addresses (<code>192.168.1.10</code>) and <code>.local</code>
+names; other names need <code>https://</code>.</p>
+<p><strong>What to do.</strong></p>
+<ol>
+<li>Allow it: Settings › Privacy &amp; Security › Local Network › Health Relay.</li>
+<li>Check the server address in the app (the gear, <strong>Server address</strong>). With plain <code>http://</code>, use
+   an IP address or a <code>.local</code> name, or set up HTTPS: see
+   <a href="../networking/">Networking &amp; HTTPS</a>.</li>
+</ol>
+<p><strong>Check.</strong> In the app, tap <strong>Sync Now</strong>: it ends with <strong>Up to date</strong>.</p>
+<h3 id="the-app-shows-disconnected">The app shows "Disconnected"<a class="headerlink" href="#the-app-shows-disconnected" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> The app shows <strong>Disconnected</strong> and asks you to scan a setup code from the
+setup page.</p>
+<p><strong>Why.</strong> The server no longer knows this iPhone's token: the paired device was revoked, or
+the server's archive directory was replaced (for example by an older backup or a new
+install).</p>
+<p><strong>What to do.</strong> <a href="../pairing/">Pair the iPhone again</a>.</p>
+<p><strong>Check.</strong> The app shows <strong>Up to date</strong>, and the setup page lists the iPhone under
+<strong>Paired devices</strong>.</p>
+<h3 id="a-data-type-is-missing">A data type is missing<a class="headerlink" href="#a-data-type-is-missing" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> A type you have in Apple Health is not on the server.</p>
+<p><strong>Why.</strong> Health access is granted type by type. Some types are granted item by item
+(vision prescriptions, medications; in builds of your own, clinical documents and Health
+Records). Types your iOS
+version does not have are skipped.</p>
+<p><strong>What to do.</strong></p>
+<ol>
+<li>In the app, tap the gear, then <strong>Data types read</strong>: it lists what the app reads.</li>
+<li>For the types granted item by item, tap each one under <strong>Shared item by item</strong> and pick
+   the items to share.</li>
+<li>After an app update adds types, the app asks for Health access again on its own: allow
+   them.</li>
+</ol>
+<p><strong>Check.</strong> After the next sync, <code>GET /v1/types?present=true</code> in the
+<a href="../query-api/">query API</a>, or a DuckDB query, lists the type.</p>
+<h3 id="data-is-in-the-archive-but-not-in-grafana">Data is in the archive but not in Grafana<a class="headerlink" href="#data-is-in-the-archive-but-not-in-grafana" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> DuckDB or the query API shows the data; Grafana shows nothing, or only
+the last month.</p>
+<p><strong>Why.</strong> The server forwards numbers only, and only new ones: what it stores after
+<code>-forward-url</code> is set. A metrics database with a short retention drops older history
+(VictoriaMetrics keeps one month by default).</p>
+<p><strong>What to do.</strong></p>
+<ol>
+<li>Check <code>healthkit_relay_forward_errors_total</code> on <code>/metrics</code> and the server's log for
+   forwarding errors.</li>
+<li>Give the metrics database a long retention, e.g. <code>-retentionPeriod=100y</code> for
+   VictoriaMetrics.</li>
+<li>To forward the history the server already holds, see <a href="../grafana/#with-docker-compose">Grafana</a>.</li>
+</ol>
+<p><strong>Check.</strong> In Grafana, <strong>Explore</strong> shows <code>healthkit_heart_rate</code> back to your first data.</p>
+<h2 id="query-api">Query API<a class="headerlink" href="#query-api" title="Permanent link">&para;</a></h2>
+<h3 id="docs-answers-404"><code>/docs</code> answers 404<a class="headerlink" href="#docs-answers-404" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> <code>http://192.168.1.10:8080/docs</code> shows <code>404 page not found</code>.</p>
+<p><strong>Why.</strong> The query API is off: the server starts it only with <code>-query-duckdb</code>.</p>
+<p><strong>What to do.</strong> <a href="../query-api/#turn-it-on">Turn it on</a>.</p>
+<p><strong>Check.</strong> <code>/docs</code> shows <strong>Health Relay query API</strong>, and the server's log has a line that
+starts with <code>query API on:</code>.</p>
+<h3 id="a-query-answers-401-or-403">A query answers 401 or 403<a class="headerlink" href="#a-query-answers-401-or-403" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> <code>{"error":"unauthorized"}</code> (status 401), or an error about the kind of
+token (status 403).</p>
+<p><strong>Why.</strong> 401: the server does not know the token. It was mistyped, cut short, or revoked.
+403: the token is a paired device's token, which uploads and does not query.</p>
+<p><strong>What to do.</strong> <a href="../query-api/#get-a-read-token">Create a read token</a> and paste the whole of
+it, after <code>Authorization: Bearer</code>.</p>
+<p><strong>Check.</strong> <code>curl -H "Authorization: Bearer &lt;token&gt;" http://192.168.1.10:8080/v1/types</code>
+answers <code>{"types":[...</code>.</p>
+<h3 id="a-query-answers-400-unknown-type">A query answers 400 "unknown type"<a class="headerlink" href="#a-query-answers-400-unknown-type" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> e.g.
+<code>{"error":"unknown type HKQuantityTypeIdentifierSteps; did you mean HKQuantityTypeIdentifierStepCount?"}</code>.</p>
+<p><strong>Why.</strong> The type in the address is not one of HealthKit's identifiers.</p>
+<p><strong>What to do.</strong> Use the name the message suggests, or pick one from <code>GET /v1/types</code>.</p>
+<p><strong>Check.</strong> The same request answers with data.</p>
+<h3 id="todays-data-is-missing-from-queries">Today's data is missing from queries<a class="headerlink" href="#todays-data-is-missing-from-queries" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> The app is <strong>Up to date</strong>, but the query API or DuckDB lacks the last
+hour.</p>
+<p><strong>Why.</strong> The server writes new samples to Parquet at the hourly flush; the query API and
+DuckDB read Parquet.</p>
+<p><strong>What to do.</strong> Wait for the next flush (at most an hour, <code>-flush-interval</code>).</p>
+<p><strong>Check.</strong> The same query, an hour later, includes the samples.</p>
+<h3 id="a-query-answers-422-503-or-504">A query answers 422, 503 or 504<a class="headerlink" href="#a-query-answers-422-503-or-504" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> An <code>error</code> with status 422 (the answer is too large), 503 (too many queries
+at once) or 504 (the query took too long).</p>
+<p><strong>Why.</strong> The server bounds each query: <code>-query-max-rows</code>, <code>-query-concurrency</code> and
+<code>-query-timeout</code> (see <a href="../query-api/#settings">Settings</a>).</p>
+<p><strong>What to do.</strong> 422 and 504: ask for a shorter range, a smaller <code>limit</code>, or leave out <code>raw</code>.
+503: try again after a few seconds.</p>
+<p><strong>Check.</strong> The query answers <code>200</code> with data.</p>
+<h3 id="the-log-says-the-test-query-failed">The log says the test query failed<a class="headerlink" href="#the-log-says-the-test-query-failed" title="Permanent link">&para;</a></h3>
+<p><strong>What you see.</strong> At start, the server's log has a line with <code>the test query failed</code>, and
+every query answers 500. Or the server stops at start with an error that names
+<code>-query-duckdb</code>.</p>
+<p><strong>Why.</strong> <code>duckdb</code> could not run or could not read the archive. The end of the log line
+gives the reason, e.g. a DuckDB version before 1.2, or a folder the server's user cannot
+read. When the server stops at start, <code>-query-duckdb</code> names a file that is not there.</p>
+<p><strong>What to do.</strong> Install <code>duckdb</code> 1.2 or newer, check that the path in <code>-query-duckdb</code> is
+right, and that <code>-query-archive-dir</code>, if set, is readable by the server's user. Restart the
+server.</p>
+<p><strong>Check.</strong> The log shows <code>query API on:</code> with no failed test query after it.</p>
+<h2 id="still-stuck">Still stuck?<a class="headerlink" href="#still-stuck" title="Permanent link">&para;</a></h2>
+<p>Open an <a href="https://github.com/leblancfg/healthkit-relay/issues/new/choose">issue</a> with the
+versions, how the server runs and the relevant log lines. Leave out health data and tokens.</p>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../support/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Help and support">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Help and support
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../contributing/" class="md-footer__link md-footer__link--next" aria-label="Next: Contributing">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Contributing
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      MIT licensed. Not a medical device.
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.code.copy", "content.action.edit", "navigation.sections", "navigation.top", "navigation.footer", "search.highlight", "search.suggest", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

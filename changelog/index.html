@@ -1,0 +1,2097 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Release notes for the Health Relay server and iPhone app.">
+      
+      
+      
+        <link rel="canonical" href="https://health-relay.leblancfg.com/changelog/">
+      
+      
+        <link rel="prev" href="../contributing/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+  
+    
+      
+        <title>Changelog - Health Relay</title>
+      
+    
+  
+
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  
+  
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Health Relay">
+  <meta property="og:title" content="Changelog - Health Relay">
+  <meta property="og:description" content="Release notes for the Health Relay server and iPhone app.">
+  <meta property="og:url" content="https://health-relay.leblancfg.com/changelog/">
+  <meta property="og:image" content="https://health-relay.leblancfg.com/assets/social.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Health Relay: your Apple Health data, on a server you own">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Changelog - Health Relay">
+  <meta name="twitter:description" content="Release notes for the Health Relay server and iPhone app.">
+  <meta name="twitter:image" content="https://health-relay.leblancfg.com/assets/social.png">
+  
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="pink" data-md-color-accent="red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#changelog" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Health Relay" class="md-header__button md-logo" aria-label="Health Relay" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Health Relay
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Changelog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="pink" data-md-color-accent="red"  aria-label="Dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="pink" data-md-color-accent="red"  aria-label="Light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/leblancfg/healthkit-relay" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    leblancfg/healthkit-relay
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Health Relay" class="md-nav__button md-logo" aria-label="Health Relay" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    Health Relay
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/leblancfg/healthkit-relay" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    leblancfg/healthkit-relay
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Setup guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup guides
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker & Compose
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/linux/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Linux binary + systemd
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/nixos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NixOS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/macos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    macOS (launchd)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/nas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synology, Unraid, TrueNAS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/raspberry-pi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Raspberry Pi & ARM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../networking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Networking & HTTPS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pairing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pairing an iPhone
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data model & querying
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../query-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Query API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grafana/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grafana
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security & privacy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../privacy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Privacy policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Help and support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unreleased
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Unreleased">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#app-100-14-for-the-app-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 1.0.0 (14), for the App Store
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#070-2026-10-25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.7.0 (2026-10-25)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.7.0 (2026-10-25)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server-070" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server 0.7.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-070" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.7.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-064" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.6.4
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-063" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.6.3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-062" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.6.2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#061-unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.6.1 (unreleased)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.6.1 (unreleased)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-061" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.6.1
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#060-2026-10-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.6.0 (2026-10-18)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.6.0 (2026-10-18)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-060" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.6.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#docs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#05-2026-10-17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.5 (2026-10-17)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.5 (2026-10-17)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server-050-to-052" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server 0.5.0 to 0.5.2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-050" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.5.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-10-17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-10-17
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2026-10-17">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#app-041" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.4.1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#server_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-040" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.4.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-030" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.3.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#02" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#01" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unreleased
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Unreleased">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#app-100-14-for-the-app-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 1.0.0 (14), for the App Store
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#070-2026-10-25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.7.0 (2026-10-25)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.7.0 (2026-10-25)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server-070" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server 0.7.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-070" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.7.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-064" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.6.4
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-063" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.6.3
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-062" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.6.2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#061-unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.6.1 (unreleased)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.6.1 (unreleased)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-061" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.6.1
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#060-2026-10-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.6.0 (2026-10-18)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.6.0 (2026-10-18)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-060" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.6.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#docs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#05-2026-10-17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.5 (2026-10-17)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.5 (2026-10-17)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server-050-to-052" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server 0.5.0 to 0.5.2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-050" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.5.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2026-10-17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-10-17
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2026-10-17">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#app-041" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.4.1
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#server_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-040" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.4.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-030" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App 0.3.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#02" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#01" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/leblancfg/healthkit-relay/edit/main/docs/changelog.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="changelog">Changelog<a class="headerlink" href="#changelog" title="Permanent link">&para;</a></h1>
+<p>Notable changes to the server and the app. Versions follow <a href="https://semver.org">Semantic Versioning</a>;
+server releases and the app are versioned separately.</p>
+<h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
+<h3 id="app-100-14-for-the-app-store">App 1.0.0 (14), for the App Store<a class="headerlink" href="#app-100-14-for-the-app-store" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The server's address follows the server: when a paired server names a preferred https
+  address (its <code>-public-url</code>), the app checks that the address answers as the same server
+  (same server ID, without the token, then its token as the same device) and moves there,
+  with its history and sync positions. Redirects are not followed. An address that does not
+  answer as the same server is tried again after 6 hours.</li>
+<li>A setup link for the address the paired server names as its preferred one pairs without
+  asking, as the same device, with its sync positions: before, a new address meant a new
+  device and a full upload again. A link for any other address asks first, as before.</li>
+<li><strong>Enter Server Details Instead</strong> takes the setup code shown on the setup page, as well as
+  the admin token.</li>
+<li>The welcome screen says what the app works with: a server you run yourself, with a link to
+  the setup guide. Links to the privacy policy and help on the welcome screen and in
+  Advanced.</li>
+<li>Pending uploads, sync positions and the log stay out of iCloud and computer backups.</li>
+<li><strong>Erase Server Data and Disconnect</strong> (Advanced): stops syncing, has the server delete
+  everything this iPhone sent, and disconnects.</li>
+<li><strong>Disconnect</strong> stops the running sync and the uploads iOS carries on; a new pairing with
+  another server (also after a disconnect) sends the whole history again.</li>
+<li>Every request that carries the token goes only to the server's address: redirects are
+  refused, and an upload iOS's background session redirected elsewhere counts as not sent.</li>
+<li>Plain HTTP only to addresses on the local network (private, link-local and Tailscale IPs,
+  <code>.local</code> and single-label names); every other server takes HTTPS.</li>
+<li>Each step that waits on the network (pairing, token upgrade, erase, status) changes the
+  connection only if the user did not disconnect or set up another server meanwhile; sync
+  positions move only on the connection their upload went to.</li>
+<li>A setup accepted before a disconnect or an erase does nothing after it, even when it was
+  waiting behind another setup; the address handoff moves the app in one step with
+  disconnect and pairing. Every sync position (pages, empty pages, activity summaries, effort
+  relationships, uploads finishing later) moves only for its own connection and set of
+  positions, which every reset renews.</li>
+<li>The server address and token are one Keychain item, read and written in one step. Erasing
+  and setting up never overlap: a setup link opened during an erase is refused, and an erase
+  waits for a setup. The app moves to the server's preferred address only when no setup or
+  erase runs, and a preferred address counts only for the connection whose server named it.</li>
+<li>A new install starts unpaired: a server address and token an earlier install left in the
+  Keychain are cleared on first start.</li>
+<li>Privacy manifest (<code>PrivacyInfo.xcprivacy</code>): no tracking, no collected data, the reasons for
+  UserDefaults and file metadata.</li>
+<li>The App Store build reads no clinical data: Health Records and CDA documents are left out
+  (a build of your own can read them, see ios/README.md).</li>
+<li>Info.plist: the local network permission explains itself, export compliance is declared
+  (HTTPS only), and the app requires HealthKit.</li>
+</ul>
+<h2 id="070-2026-10-25">0.7.0 (2026-10-25)<a class="headerlink" href="#070-2026-10-25" title="Permanent link">&para;</a></h2>
+<p>The first server release on GitHub Releases: binaries for Linux, macOS and FreeBSD (amd64
+and arm64) with the systemd unit, and <code>checksums.txt</code>.</p>
+<h3 id="server-070">Server 0.7.0<a class="headerlink" href="#server-070" title="Permanent link">&para;</a></h3>
+<ul>
+<li>An upload already under way when an erase of its device finishes is refused (<code>409</code>)
+  instead of bringing data back; <code>DELETE /v1/data?disconnect=1</code> also revokes the device's
+  token in the same step (the app's Erase Server Data and Disconnect).</li>
+<li>A server ID per archive (<code>server.json</code>) and the preferred address in <code>GET /v1/status</code> and
+  in the answer to each heartbeat (now <code>200</code> with JSON); <code>GET /v1/server</code> answers the ID
+  without a token. Phones move to <code>-public-url</code> on their own.</li>
+<li>Demo mode (<code>-demo-code-file</code>, <code>-demo-reset</code>, <code>-demo-quota</code>): a shared setup code that pairs
+  any number of iPhones and an hourly upload quota.</li>
+<li>Requests through Tailscale Funnel count as public for <code>-setup-from private</code>, and
+  <code>/metrics</code> answers private networks only.</li>
+<li>The demo server stores nothing about its users: batches are checked, answered and dropped;
+  devices get signed tokens (30 days) instead of entries in <code>devices.json</code>; no per-request
+  log lines; upload bytes, concurrent uploads and pairings are capped per hour.</li>
+<li>The public demo server moved to https://health-relay-demo.leblancfg.com: the demo mode as
+  a Cloudflare Worker (demo/worker), checked against the Go server's by one request suite
+  (<code>demo_contract_test.go</code>, in CI under <code>wrangler dev</code>). https://health-relay.leblancfg.com
+  leads to this documentation.</li>
+<li>Metrics forwarding refuses redirects. State files are synced with their directory, so a
+  revocation survives a power loss. Erasing a device with nothing stored returns at once.
+  Setup page forms without Fetch Metadata must carry the page's own Origin.</li>
+<li>Docker Compose: Grafana listens on this computer only unless <code>GRAFANA_BIND</code> says otherwise.</li>
+<li>
+<p>github.com/klauspost/compress 1.18.7 (GHSA-259r-337f-4rfw).</p>
+</li>
+<li>
+<p>Counts app 0.7.0's triggers under their own names in <code>healthkit_relay_batches_total</code>,
+  <code>healthkit_relay_heartbeats_total</code> and the last-batch and last-heartbeat timestamps:
+  <code>processing</code>, <code>urlsession</code>, <code>backgrounded</code> and <code>continued</code>. Older apps are unaffected; an
+  older server counts these as <code>unknown</code>.</p>
+</li>
+<li>The heartbeat line says <code>plugged in</code> or <code>on battery</code>, <code>low power mode</code> and <code>background app
+  refresh denied</code> or <code>restricted</code>, from app 0.6.4's heartbeats; older apps' lines are
+  unchanged.</li>
+<li><code>POST /v1/heartbeat</code> (an upload token): logs the app's heartbeat in one line, and counts
+  it in <code>healthkit_relay_heartbeats_total{trigger}</code> and
+  <code>healthkit_relay_last_heartbeat_timestamp_seconds{trigger}</code>.</li>
+<li><code>healthkit_relay_last_batch_timestamp_seconds{trigger}</code>: when the last batch of each
+  trigger arrived.</li>
+<li>Refused tokens are logged (at most every 10 seconds, with a count of the others): method,
+  path, client address, user agent and a 6-character prefix of the token's SHA-256.</li>
+<li>Query API, turned on with <code>-query-duckdb</code>: read-only endpoints for the type catalog,
+  samples and daily or hourly aggregates, with time zones and Apple-style source
+  de-duplication. The binary serves an OpenAPI 3.1 document at <code>/openapi.json</code> and Swagger UI
+  at <code>/docs</code>. Each query runs in a locked-down <code>duckdb</code> process. See
+  <a href="../query-api/">Query API</a>.</li>
+<li>The OpenAPI document describes <code>type</code> as a string with a pattern and examples, in place of
+  an enum of every HealthKit identifier; <code>GET /v1/types</code> lists the valid values. An unknown
+  type answers <code>400</code> with the closest names: <code>unknown type HKQuantityTypeIdentifierSteps; did
+  you mean HKQuantityTypeIdentifierStepCount?</code>. Kinds stay an enum, each described in one
+  line. <code>GET /v1/kinds</code> is removed: <code>GET /v1/types?kind=category</code> lists the types of one
+  kind. The served document goes from 67 kB to 54 kB.</li>
+<li>Token scopes: a read token (from the setup page, <code>healthkit-relay token create</code> or
+  <code>POST /v1/tokens</code>) queries and does nothing else; a paired device's token uploads and gets
+  <code>403</code> on queries. Existing <code>devices.json</code> files keep working as they are.</li>
+<li>The admin token (formerly the server token): the server generates it on first start, 256
+  random bits, and prints it once to its log with the setup page's address
+  (<code>docker compose logs relay</code>, <code>journalctl -u healthkit-relay</code>). <code>&lt;archive-dir&gt;/admin.json</code>
+  holds its SHA-256.</li>
+<li><code>healthkit-relay admin reset</code> prints a new admin token; the running server switches to it
+  at once and signs out browsers signed in with the old one.</li>
+<li><code>pair</code>, <code>devices</code>, <code>revoke</code>, <code>token create</code> and <code>admin reset</code> work on the state files in
+  the archive directory (<code>-archive-dir</code>), with file locks, while the server runs; this
+  replaces their <code>-token-file</code> and <code>-server</code> flags. Run them as the server's user or as root,
+  e.g. <code>docker compose exec relay healthkit-relay pair</code>.</li>
+<li>Setup codes are kept as SHA-256 in <code>codes.json</code> and last across a restart until they
+  expire.</li>
+<li><code>-token-file</code> (<code>HKR_TOKEN_FILE</code>) is optional and deprecated: at start, the server imports
+  an existing server token file into <code>admin.json</code> and logs a warning; then delete the file
+  and the flag. The Compose file mounts no token file; the image still imports
+  <code>/run/secrets/hkr_token</code> when an earlier install mounts one.</li>
+<li>Uploads and status requests with the admin token are deprecated: still accepted, logged at
+  most hourly and counted in <code>healthkit_relay_admin_token_uploads_total</code>. Pair such apps
+  again from the setup page.</li>
+<li>Setup page: <strong>Sign in</strong> with the admin token, with where to find it; <strong>Pair your iPhone</strong>,
+  <strong>Paired devices</strong> and <strong>Read tokens</strong>; copy buttons for a new read token and the setup
+  code's link.</li>
+<li>Reworded output: the first-start log says <code>Setup page:</code> (formerly <code>Sign in at:</code>), and the
+  <code>devices</code> column <code>PAIRED</code> is now <code>CREATED</code>.</li>
+<li>NixOS: <code>healthkit-relay-ctl</code> runs any command with the service's settings
+  (<code>sudo healthkit-relay-ctl pair</code>, <code>admin reset</code>, ...). <code>tokenFile</code> is deprecated; the
+  module imports a <code>/var/lib/healthkit-relay/token</code> from its earlier versions once.</li>
+</ul>
+<h3 id="app-070">App 0.7.0<a class="headerlink" href="#app-070" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Every background mechanism iOS offers, layered: HealthKit background delivery, the
+  background app refresh (now asked for 15 minutes ahead, and again at launch, after each
+  sync, when the app goes to the background and after each run), and a new processing task
+  that iOS may run while the iPhone charges and has a network. iOS decides when each runs.
+  The processing task usually runs while the iPhone is locked, when Health data is locked
+  too: it then notes a sync as owed for the unlock.</li>
+<li>Uploads that outlive the app's background time. Each batch is written to a file. With the
+  app on screen it goes through a background URLSession, which iOS finishes even if you
+  leave the app; in the background it goes out at once through a standard session, and the
+  upload under way when the background time ends moves to the background session. When such
+  an upload finishes, iOS wakes the app: the anchor that upload confirms is saved (only if
+  no later sync moved it meanwhile, so positions advance only past data the server
+  confirmed), and the app syncs on if the iPhone is unlocked.</li>
+<li>Leaving the app runs one more sync, in the time iOS gives then (about 30 seconds).</li>
+<li>iOS 26 and later: a first sync, or a <strong>Sync Now</strong> after 6 hours without a sync, goes on
+  when you switch to another app. iOS shows its progress in a Live Activity, where you can
+  stop it. Progress moves with every page sent, also within one long data type.</li>
+<li>While the app runs, a sync that failed runs again as soon as the network comes back.</li>
+<li>Heartbeats and batches name the new triggers: <code>processing</code>, <code>urlsession</code>, <code>backgrounded</code>
+  and <code>continued</code>.</li>
+<li>The app, README and docs say how often it syncs: in the background several times a day;
+  open the app to sync right away. iPhone keeps Health data locked while the phone is
+  locked, so background syncs happen after an unlock.</li>
+</ul>
+<h3 id="app-064">App 0.6.4<a class="headerlink" href="#app-064" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Heartbeats say whether the iPhone was plugged in or on battery, in Low Power Mode, and
+  whether Background App Refresh is on for the app: iOS weighs these before it wakes the app,
+  and the server's log shows them with each heartbeat.</li>
+<li>The app's log notes each lock, each move to the background and each change of power
+  state while the app runs, and the power state at every launch, refresh and HealthKit wake.</li>
+</ul>
+<h3 id="app-063">App 0.6.3<a class="headerlink" href="#app-063" title="Permanent link">&para;</a></h3>
+<ul>
+<li>One sync at a time for everything that starts one. Opening the app sets off an unlock, the
+  foreground sync and HealthKit wakes for many types within a second or two; in 0.6.2 these
+  ran as separate syncs, so the sync animation ran several times in a row and the server got
+  a heartbeat for each. Now they join the sync already running, which shows as one sync and
+  sends one heartbeat, tagged with what started it.</li>
+<li>A HealthKit wake waits 1.5 seconds before syncing, so the rest of its burst joins it. New
+  data for a type the running sync has read already makes one more pass over just that type.</li>
+<li>Each HealthKit wake is answered once its type was read, at the latest after 20 seconds.</li>
+</ul>
+<h3 id="app-062">App 0.6.2<a class="headerlink" href="#app-062" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Background sync that keeps running: every HealthKit wake syncs all types, in one sync
+  shared by all the wakes that arrive together (opening the app or an unlock fires a few
+  hundred), where 0.6.1 started one sync per type. iOS counts each wake against the app's
+  background time, and stops waking an app that does not answer HealthKit.</li>
+<li>When iOS ends the app's background time, the app answers HealthKit's open wakes and stops
+  the sync, which the next wake finishes. In 0.6.1 a sync cut short waited, unanswered,
+  until iOS ran the app again, which could be hours.</li>
+<li>HealthKit may wake the app at once for new heart rate, steps, active energy, walking
+  distance and sleep data, so it runs soon after an unlock; other types stay at most hourly.</li>
+<li>A heartbeat to the server at the end of each background wake, also when the iPhone was
+  locked or the upload failed: what woke the app, whether Health was readable, the outcome,
+  the last error and the background time left. See
+  <a href="../troubleshooting/#no-syncs-in-the-background">No syncs in the background</a>.</li>
+</ul>
+<h3 id="app">App<a class="headerlink" href="#app" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Welcome, pairing, Health access, status and error texts use the server's terms (server
+  address, setup page, setup code, admin token, paired device), and each error says what to
+  do next. Manual setup asks for the <strong>Admin token</strong>.</li>
+</ul>
+<h2 id="061-unreleased">0.6.1 (unreleased)<a class="headerlink" href="#061-unreleased" title="Permanent link">&para;</a></h2>
+<h3 id="server">Server<a class="headerlink" href="#server" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Batches may say what started the app's sync (<code>trigger</code>) and the app's state
+  (<code>app_state</code>): both appear in the <code>batch v2:</code> log line, and
+  <code>healthkit_relay_batches_total{trigger}</code> counts batches by trigger (<code>unknown</code> for older
+  apps).</li>
+</ul>
+<h3 id="app-061">App 0.6.1<a class="headerlink" href="#app-061" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Background sync works: observer queries are set up synchronously at launch from the types
+  the app asked for (saved when it asks), with no HealthKit status call first, so a launch
+  on a locked phone no longer ends with nothing observed.</li>
+<li>An authorization plan or readable-type list HealthKit could not fully answer (phone
+  locked) is no longer kept for the life of the process; it is computed again at unlock and
+  when the app opens.</li>
+<li>A sync skipped while locked, or failed, is remembered across launches and run at the next
+  unlock, background refresh or open.</li>
+<li>A background app refresh about hourly runs a full incremental sync as a fallback.</li>
+<li>Each batch says what started it (<code>foreground</code>, <code>observer</code>, <code>refresh</code>, <code>unlock</code>, <code>retry</code>).
+  Each observer wake is logged with the app's state and whether protected data is readable.</li>
+</ul>
+<h2 id="060-2026-10-18">0.6.0 (2026-10-18)<a class="headerlink" href="#060-2026-10-18" title="Permanent link">&para;</a></h2>
+<h3 id="server_1">Server<a class="headerlink" href="#server_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Erasing requires <code>?confirm=erase</code>; only the app before 0.6 may leave it out.</li>
+<li>An archive directory, or <code>parquet/</code> in it, that is a symlink works (systemd's
+  <code>DynamicUser</code> makes <code>/var/lib/&lt;name&gt;</code> one): de-duplication and file modes no longer miss
+  what is behind it. File modes are set only on what the store owns.</li>
+<li>Line protocol escapes backslashes and control characters; paired device names refuse
+  control characters; the setup page refuses cross-origin form posts, caps form size and
+  cannot be framed.</li>
+<li>Packaging: Docker image, release binaries with a systemd unit, a NixOS module with a VM
+  test, and an end-to-end smoke test run on every install path in CI.</li>
+</ul>
+<h3 id="app-060">App 0.6.0<a class="headerlink" href="#app-060" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Asks before sending Health data to a server it was not set up with, when a setup link
+  names a new one.</li>
+<li>Sends <code>confirm=erase</code> with <strong>Erase Server Data and Start Over</strong>.</li>
+</ul>
+<h3 id="docs">Docs<a class="headerlink" href="#docs" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Documentation site, setup guides, security policy and contribution guidelines.</li>
+</ul>
+<h2 id="05-2026-10-17">0.5 (2026-10-17)<a class="headerlink" href="#05-2026-10-17" title="Permanent link">&para;</a></h2>
+<h3 id="server-050-to-052">Server 0.5.0 to 0.5.2<a class="headerlink" href="#server-050-to-052" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Storage: a SQLite staging database (durable before the <code>200</code>, de-duplication on disk),
+  flushed hourly to Parquet partitioned by dataset, type and month, compacted nightly, with
+  deletions applied at compaction. DuckDB views in <code>server/sql/views.sql</code>.</li>
+<li><code>migrate</code> converts the JSON Lines archive of 0.4 and earlier; <code>flush</code> and <code>compact</code> run
+  the maintenance at once.</li>
+<li><code>DELETE /v1/data</code> erases what a device uploaded, for good.</li>
+</ul>
+<h3 id="app-050">App 0.5.0<a class="headerlink" href="#app-050" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Erase Server Data and Start Over</strong>.</li>
+</ul>
+<h2 id="2026-10-17">2026-10-17<a class="headerlink" href="#2026-10-17" title="Permanent link">&para;</a></h2>
+<h3 id="app-041">App 0.4.1<a class="headerlink" href="#app-041" title="Permanent link">&para;</a></h3>
+<ul>
+<li>One setup change at a time, so a setup link opened at launch leaves a single paired device.</li>
+</ul>
+<h3 id="server_2">Server<a class="headerlink" href="#server_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>pair -valid &lt;duration&gt;</code> for setup codes sent to a phone (default 15 minutes, at most a
+  day).</li>
+<li>Loopback addresses are never put in a setup code; the setup page offers the addresses it
+  finds (the page's own address, Tailscale serve names, LAN and Tailscale IPs).</li>
+<li>One-tap app setup: one-time setup codes, a QR code on <code>/setup</code> and in the terminal
+  (<code>pair</code>), and per-device tokens that can be listed (<code>devices</code>) and revoked (<code>revoke</code>).</li>
+<li>Records whose values are not <code>{value, unit}</code> are accepted; rejected batches are logged with
+  the reason.</li>
+</ul>
+<h3 id="app-040">App 0.4.0<a class="headerlink" href="#app-040" title="Permanent link">&para;</a></h3>
+<ul>
+<li>A status screen, setup from a link or QR code, Health access in one step.</li>
+</ul>
+<h3 id="app-030">App 0.3.0<a class="headerlink" href="#app-030" title="Permanent link">&para;</a></h3>
+<ul>
+<li>No HealthKit exception can end the app; Health access is one sheet, per-object types are
+  optional rows. Health Records became an opt-in step.</li>
+</ul>
+<h3 id="02">0.2<a class="headerlink" href="#02" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Everything in HealthKit is synced, with the type list generated from the iOS SDK at build
+  time (wire format version 2: workouts with routes, ECGs, heartbeat series, correlations,
+  documents, activity summaries, characteristics).</li>
+</ul>
+<h3 id="01">0.1<a class="headerlink" href="#01" title="Permanent link">&para;</a></h3>
+<ul>
+<li>First version: a Go receiver with an append-only archive and line-protocol forwarding, and
+  a SwiftUI app that syncs HealthKit incrementally in the background.</li>
+</ul>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../contributing/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Contributing">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Contributing
+              </div>
+            </div>
+          </a>
+        
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      MIT licensed. Not a medical device.
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.code.copy", "content.action.edit", "navigation.sections", "navigation.top", "navigation.footer", "search.highlight", "search.suggest", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

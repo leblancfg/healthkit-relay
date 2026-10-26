@@ -1,0 +1,2021 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Read your Apple Health data over HTTP: Health Relay's read-only query API runs SQL with DuckDB for Grafana, notebooks, scripts and AI agents.">
+      
+      
+      
+        <link rel="canonical" href="https://health-relay.leblancfg.com/query-api/">
+      
+      
+        <link rel="prev" href="../data/">
+      
+      
+        <link rel="next" href="../grafana/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+  
+    
+      
+        <title>Query API - Health Relay</title>
+      
+    
+  
+
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  
+  
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Health Relay">
+  <meta property="og:title" content="Query API - Health Relay">
+  <meta property="og:description" content="Read your Apple Health data over HTTP: Health Relay's read-only query API runs SQL with DuckDB for Grafana, notebooks, scripts and AI agents.">
+  <meta property="og:url" content="https://health-relay.leblancfg.com/query-api/">
+  <meta property="og:image" content="https://health-relay.leblancfg.com/assets/social.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Health Relay: your Apple Health data, on a server you own">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Query API - Health Relay">
+  <meta name="twitter:description" content="Read your Apple Health data over HTTP: Health Relay's read-only query API runs SQL with DuckDB for Grafana, notebooks, scripts and AI agents.">
+  <meta name="twitter:image" content="https://health-relay.leblancfg.com/assets/social.png">
+  
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="pink" data-md-color-accent="red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#query-api" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Health Relay" class="md-header__button md-logo" aria-label="Health Relay" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Health Relay
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Query API
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="pink" data-md-color-accent="red"  aria-label="Dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="pink" data-md-color-accent="red"  aria-label="Light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/leblancfg/healthkit-relay" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    leblancfg/healthkit-relay
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Health Relay" class="md-nav__button md-logo" aria-label="Health Relay" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    Health Relay
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/leblancfg/healthkit-relay" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    leblancfg/healthkit-relay
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../glossary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Setup guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup guides
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker & Compose
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/linux/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Linux binary + systemd
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/nixos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NixOS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/macos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    macOS (launchd)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/nas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synology, Unraid, TrueNAS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/raspberry-pi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Raspberry Pi & ARM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../networking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Networking & HTTPS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pairing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pairing an iPhone
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data model & querying
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Query API
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Query API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#types-and-kinds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Types and kinds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#turn-it-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Turn it on
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Turn it on">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#get-a-read-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Get a read token
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Get a read token">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#from-a-terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From a terminal
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-each-token-may-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What each token may do
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#your-first-query" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Your first query
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Endpoints
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Endpoints">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Errors
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aggregates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Aggregates
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Aggregates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#counting-each-moment-once-dedup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Counting each moment once (dedup)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-queries-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How queries run
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grafana/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grafana
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security & privacy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../privacy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Privacy policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Help and support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#types-and-kinds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Types and kinds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#turn-it-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Turn it on
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Turn it on">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#get-a-read-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Get a read token
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Get a read token">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#from-a-terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From a terminal
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-each-token-may-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What each token may do
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#your-first-query" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Your first query
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Endpoints
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Endpoints">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Errors
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aggregates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Aggregates
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Aggregates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#counting-each-moment-once-dedup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Counting each moment once (dedup)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-queries-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How queries run
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/leblancfg/healthkit-relay/edit/main/docs/query-api.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="query-api">Query API<a class="headerlink" href="#query-api" title="Permanent link">&para;</a></h1>
+<p>The <strong>query API</strong> lets a program read your health data from the server: a Grafana dashboard,
+a script, or an AI agent. It answers questions such as "steps per day last week", "average
+heart rate per hour" or "minutes of deep sleep per night". It reads the
+<a href="../glossary/#archive">archive</a>, the folder where the server keeps your data, and it only reads: no
+request changes anything.</p>
+<p>An API (application programming interface) is a set of web addresses that answer programs
+instead of people. Each answer is JSON, a text format that programs read easily. The query
+API is described by an OpenAPI 3.1 document at <code>/openapi.json</code> and shown as a page you can
+try out at <code>/docs</code>, e.g. <code>http://192.168.1.10:8080/docs</code>.</p>
+<p>To use it you need:</p>
+<ul>
+<li>the <strong>server address</strong>, the address the iPhone uses to reach the server, e.g.
+  <code>http://192.168.1.10:8080</code>;</li>
+<li>a <strong>read token</strong>: a password for one program, that reads your data through the query API
+  and does nothing else. You create one for each program, e.g. one named <code>grafana</code>.</li>
+</ul>
+<p>The query API starts when the server has the <code>-query-duckdb</code> setting; until then, its
+addresses answer <code>404</code>.</p>
+<h2 id="types-and-kinds">Types and kinds<a class="headerlink" href="#types-and-kinds" title="Permanent link">&para;</a></h2>
+<p>A <strong>type</strong> is one specific HealthKit measurement, named by HealthKit's identifier:
+<code>HKQuantityTypeIdentifierStepCount</code>, <code>HKQuantityTypeIdentifierHeartRate</code>,
+<code>HKCategoryTypeIdentifierSleepAnalysis</code>. A <strong>kind</strong> is the shape of a type's data. Each type
+has one kind: <code>HKQuantityTypeIdentifierStepCount</code> is a type of kind <code>quantity</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Shape</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>quantity</code></td>
+<td>a number with a unit</td>
+<td>steps: 12027 <code>count</code> on 2026-10-15; heart rate: 67 <code>count/min</code> at 09:04</td>
+</tr>
+<tr>
+<td><code>category</code></td>
+<td>a labelled interval</td>
+<td>sleep: <code>asleepDeep</code> from 01:10 to 01:40; stand hours: <code>stood</code> from 14:00 to 15:00</td>
+</tr>
+<tr>
+<td><code>workout</code>, <code>heartbeat_series</code>, <code>electrocardiogram</code>, <code>audiogram</code>, <code>correlation</code>, ...</td>
+<td>a record with fields of its own</td>
+<td>a run with its duration, energy and distance; an ECG with its classification</td>
+</tr>
+</tbody>
+</table>
+<p>Quantity and category types have aggregates (totals and averages per day or hour). For the
+other kinds, read the samples with <code>raw=true</code>. <code>GET /v1/types</code> lists every type with its
+kind; <code>GET /v1/types?kind=category</code> lists the types of one kind.</p>
+<h2 id="turn-it-on">Turn it on<a class="headerlink" href="#turn-it-on" title="Permanent link">&para;</a></h2>
+<p>The server runs each query with <a href="https://duckdb.org">DuckDB</a>, a database program that reads
+the archive's Parquet files. You install the <code>duckdb</code> program next to the server, then tell
+the server where it is.</p>
+<ol>
+<li>
+<p>Install <code>duckdb</code>, version 1.2 or newer (tested with 1.5), on the computer that runs the
+   server:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>brew<span class="w"> </span>install<span class="w"> </span>duckdb<span class="w">          </span><span class="c1"># macOS</span>
+</code></pre></div>
+<p>On Linux, download the <code>duckdb</code> command-line program for your system from
+<a href="https://duckdb.org/docs/installation/">duckdb.org</a> and copy it to <code>/usr/local/bin</code>.
+Check it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>duckdb<span class="w"> </span>--version
+</code></pre></div>
+<p>It prints a version such as <code>v1.5.0</code>.</p>
+</li>
+<li>
+<p>Give the server the path of <code>duckdb</code> with <code>-query-duckdb</code> (or <code>HKR_QUERY_DUCKDB</code>):</p>
+<ul>
+<li>Linux with systemd: add <code>HKR_QUERY_DUCKDB=/usr/local/bin/duckdb</code> to
+  <code>/etc/healthkit-relay/env</code>, then <code>sudo systemctl restart healthkit-relay</code>.</li>
+<li>macOS: add <code>&lt;string&gt;-query-duckdb&lt;/string&gt;&lt;string&gt;/opt/homebrew/bin/duckdb&lt;/string&gt;</code>
+  (the path <code>which duckdb</code> prints) to the <code>ProgramArguments</code> of the launchd agent (see
+  <a href="../setup/macos/">macOS</a>), run
+  <code>launchctl bootout gui/$(id -u)/io.github.healthkit-relay</code>, then the
+  <code>launchctl bootstrap</code> command from that page again.</li>
+<li>NixOS: <code>services.healthkit-relay.extraFlags = [ "-query-duckdb" "${pkgs.duckdb}/bin/duckdb" ];</code>,
+  then <code>sudo nixos-rebuild switch</code>.</li>
+<li>
+<p>From a terminal:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>healthkit-relay<span class="w"> </span>-archive-dir<span class="w"> </span>/var/lib/healthkit-relay<span class="w"> </span>-query-duckdb<span class="w"> </span>/usr/local/bin/duckdb
+</code></pre></div>
+</li>
+</ul>
+<p>The Docker image holds the server program alone. To use the query API, run the server
+from one of the setups above.</p>
+</li>
+<li>
+<p>Read the server's log. It shows a line like this one:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>query API on: /usr/local/bin/duckdb reads /var/lib/healthkit-relay/parquet; /docs, /openapi.json
+</code></pre></div>
+<p>A second line with <code>the test query failed</code> means <code>duckdb</code> could not read the archive:
+the line ends with DuckDB's reason.</p>
+</li>
+<li>
+<p>Open the <code>/docs</code> page in a browser, e.g. <code>http://192.168.1.10:8080/docs</code>. It shows
+   <strong>Health Relay query API</strong>, with every endpoint.</p>
+</li>
+</ol>
+<p>Samples reach the Parquet files at the hourly flush. Samples the server received in the last
+hour appear in the query API after the next flush.</p>
+<h3 id="settings">Settings<a class="headerlink" href="#settings" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-query-duckdb</code></td>
+<td>(empty: the query API is off)</td>
+<td>the <code>duckdb</code> program</td>
+</tr>
+<tr>
+<td><code>-query-archive-dir</code></td>
+<td><code>-archive-dir</code></td>
+<td>the archive whose <code>parquet/</code> is read, e.g. a replica or a restored backup</td>
+</tr>
+<tr>
+<td><code>-query-timeout</code></td>
+<td><code>30s</code></td>
+<td>longest a query may run, waiting for a free slot included; DuckDB is stopped at the deadline</td>
+</tr>
+<tr>
+<td><code>-query-max-rows</code></td>
+<td><code>50000</code></td>
+<td>most rows one query may return</td>
+</tr>
+<tr>
+<td><code>-query-memory-limit</code></td>
+<td><code>512MB</code></td>
+<td>DuckDB <code>memory_limit</code> per query; a query needing more fails (it never spills to disk)</td>
+</tr>
+<tr>
+<td><code>-query-threads</code></td>
+<td><code>2</code></td>
+<td>DuckDB threads per query</td>
+</tr>
+<tr>
+<td><code>-query-concurrency</code></td>
+<td><code>2</code></td>
+<td>queries that may run at once; the others wait, up to <code>-query-timeout</code>, then get <code>503</code></td>
+</tr>
+</tbody>
+</table>
+<p>Each flag has an environment variable: <code>HKR_</code> and the name in capitals, with <code>_</code> for <code>-</code>
+(<code>HKR_QUERY_TIMEOUT=60s</code>).</p>
+<h2 id="get-a-read-token">Get a read token<a class="headerlink" href="#get-a-read-token" title="Permanent link">&para;</a></h2>
+<p>You create read tokens on the server's <strong>setup page</strong>, its <code>/setup</code> page. You sign in to it
+with the <strong>admin token</strong>, the password of your server, which the server printed on its first
+start (see <a href="../troubleshooting/#where-is-the-admin-token">Troubleshooting</a> if you do not have
+it). The <code>/docs</code> page links to the right place.</p>
+<ol>
+<li>On a computer on your home network (or your Tailscale network), open the setup page at
+   its read tokens section, e.g. <code>http://192.168.1.10:8080/setup#read-tokens</code>. The page asks
+   for the <strong>Admin token</strong>.</li>
+<li>Paste the admin token and click <strong>Sign in</strong>. The page shows <strong>Read tokens</strong>, below
+   <strong>Pair your iPhone</strong> and <strong>Paired devices</strong>.</li>
+<li>Under <strong>Read tokens</strong>, type a name that says what the token is for, e.g. <code>grafana</code>, in
+   the box that says <em>Name, e.g. grafana</em>. Click <strong>Create</strong>.</li>
+<li>The page shows <strong>Read token for grafana</strong> and the token, a line of 43 letters, digits,
+   <code>-</code> and <code>_</code>. Click the copy button next to it. On a plain <code>http://</code> address the button
+   selects the token instead: press Ctrl+C (Cmd+C on a Mac).</li>
+<li>Paste the token into your password manager now. The server keeps only a fingerprint of
+   it (its SHA-256) and shows it this once.</li>
+<li>Click <strong>Done</strong>. The <strong>Read tokens</strong> list now shows <code>grafana</code>, with the date it was
+   created.</li>
+</ol>
+<p>To stop a read token, click <strong>Revoke</strong> next to it under <strong>Read tokens</strong>. It stops working at
+once. Lost a token? Revoke it and create a new one.</p>
+<h3 id="from-a-terminal">From a terminal<a class="headerlink" href="#from-a-terminal" title="Permanent link">&para;</a></h3>
+<p>On the server, run <code>token create</code> as the server's user or as root, with the server's
+archive directory (see <a href="../setup/#commands">Commands</a>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>healthkit-relay<span class="w"> </span>token<span class="w"> </span>create<span class="w"> </span>-archive-dir<span class="w"> </span>/var/lib/healthkit-relay<span class="w"> </span>-name<span class="w"> </span>grafana
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>q3vN8x2LkP0aTzR7mW5cYb1HdJ9eFgUs4oXiK6nVtQA
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>Created read token 4be1f07a (grafana). It is shown only this once; revoke it with: healthkit-relay revoke 4be1f07a
+</code></pre></div>
+<p>The first line is the token. With Docker Compose, run
+<code>docker compose exec relay healthkit-relay token create -name grafana</code>; on NixOS,
+<code>sudo healthkit-relay-ctl token create -name grafana</code>.</p>
+<p><code>healthkit-relay devices</code> lists paired devices and read tokens, with <code>read</code> in the <code>SCOPE</code>
+column for read tokens; <code>healthkit-relay revoke 4be1f07a</code> revokes one.</p>
+<p>A program can also create a token with <code>POST /v1/tokens</code> and the admin token:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$ADMIN_TOKEN</span><span class="s2">"</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">'{"name": "grafana"}'</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>http://192.168.1.10:8080/v1/tokens
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="p">{</span><span class="nt">"token"</span><span class="p">:</span><span class="s2">"q3vN8x2LkP0aTzR7mW5cYb1HdJ9eFgUs4oXiK6nVtQA"</span><span class="p">,</span><span class="nt">"device"</span><span class="p">:{</span><span class="nt">"id"</span><span class="p">:</span><span class="s2">"4be1f07a"</span><span class="p">,</span><span class="nt">"name"</span><span class="p">:</span><span class="s2">"grafana"</span><span class="p">,</span><span class="nt">"created_at"</span><span class="p">:</span><span class="s2">"2026-10-19T14:02:11Z"</span><span class="p">,</span><span class="nt">"last_seen_at"</span><span class="p">:</span><span class="s2">"2026-10-19T14:02:11Z"</span><span class="p">,</span><span class="nt">"scope"</span><span class="p">:</span><span class="s2">"read"</span><span class="p">}}</span>
+</code></pre></div>
+<h3 id="what-each-token-may-do">What each token may do<a class="headerlink" href="#what-each-token-may-do" title="Permanent link">&para;</a></h3>
+<p>The server keeps the SHA-256 of every token in <code>devices.json</code>, in the archive directory:
+read tokens next to the <a href="../glossary/#paired-device">paired devices</a>, the iPhones that used a setup code.
+Each token has a scope, the list of what it may do.</p>
+<table>
+<thead>
+<tr>
+<th>Token</th>
+<th>Scope</th>
+<th>Query API</th>
+<th>Upload, status, erase</th>
+<th>Tokens, devices, pairing</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Admin token</td>
+<td>admin</td>
+<td>yes</td>
+<td>erase any paired device's data; uploads are deprecated</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Read token</td>
+<td><code>read</code></td>
+<td>yes</td>
+<td>no (<code>403</code>)</td>
+<td>no (<code>401</code>)</td>
+</tr>
+<tr>
+<td>A paired device's token</td>
+<td><code>upload</code></td>
+<td>no (<code>403</code>)</td>
+<td>yes, its own data</td>
+<td>no (<code>401</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>A paired device from a version before scopes has no <code>scope</code> in <code>devices.json</code> and counts as
+<code>upload</code>. <code>/openapi.json</code> and <code>/docs</code> are public: they describe the API and hold no data.</p>
+<h2 id="your-first-query">Your first query<a class="headerlink" href="#your-first-query" title="Permanent link">&para;</a></h2>
+<p>This sends one request with <code>curl</code>, a command-line program for web requests (installed on
+macOS and most Linux systems). Run it on any computer that reaches the server.</p>
+<ol>
+<li>
+<p>Put the server address and your read token in two variables, so the next commands can
+   use them:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nv">SERVER</span><span class="o">=</span>http://192.168.1.10:8080
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nv">H</span><span class="o">=</span><span class="s2">"Authorization: Bearer q3vN8x2LkP0aTzR7mW5cYb1HdJ9eFgUs4oXiK6nVtQA"</span>
+</code></pre></div>
+</li>
+<li>
+<p>Ask which types have data:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$H</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$SERVER</span><span class="s2">/v1/types?present=true"</span>
+</code></pre></div>
+<p>The answer starts with <code>{"types":[{"identifier":"HKQuantityTypeIdentifierStepCount",...</code>.
+It is one long line; the examples below spread it over several lines to read it.</p>
+</li>
+<li>
+<p>If it answers something else:</p>
+<table>
+<thead>
+<tr>
+<th>Answer</th>
+<th>Meaning</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{"error":"unauthorized"}</code></td>
+<td>the server does not know this token</td>
+<td>check that you pasted the whole token; create a new one if it was revoked</td>
+</tr>
+<tr>
+<td>another <code>{"error": ...}</code></td>
+<td>the server refused the request</td>
+<td>read the message: it says what to change, e.g. that a paired device's token cannot query</td>
+</tr>
+<tr>
+<td><code>404 page not found</code></td>
+<td>the query API is off</td>
+<td><a href="#turn-it-on">turn it on</a></td>
+</tr>
+<tr>
+<td><code>Failed to connect</code></td>
+<td>curl cannot reach the server</td>
+<td>check the address, as in <a href="../troubleshooting/#other-computers-cannot-connect">Troubleshooting</a></td>
+</tr>
+</tbody>
+</table>
+</li>
+<li>
+<p>Ask for steps per day, with days in your time zone:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$H</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$SERVER</span><span class="s2">/v1/types/HKQuantityTypeIdentifierStepCount/aggregates?tz=America/Toronto&amp;start=2026-10-15&amp;end=2026-10-17"</span>
+</code></pre></div>
+<p>The answer has one bucket per day, with <code>"sum": 12027</code> and the like. More examples
+follow.</p>
+</li>
+</ol>
+<h2 id="endpoints">Endpoints<a class="headerlink" href="#endpoints" title="Permanent link">&para;</a></h2>
+<p>All <code>GET</code>, with <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/v1/types</code></td>
+<td>every HealthKit type, with kind, unit, aggregation style, category labels and what the archive holds (count, first and last sample); <code>?present=true</code> keeps the types with data, <code>?kind=category</code> the types of one kind</td>
+</tr>
+<tr>
+<td><code>/v1/types/{type}</code></td>
+<td>one type</td>
+</tr>
+<tr>
+<td><code>/v1/types/{type}/samples</code></td>
+<td>its samples in <code>[start, end)</code>, page by page (<code>limit</code>, <code>cursor</code>, <code>order</code>, <code>raw</code>)</td>
+</tr>
+<tr>
+<td><code>/v1/types/{type}/aggregates</code></td>
+<td>per day or hour (<code>interval</code>), in a time zone (<code>tz</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><code>{type}</code> is a HealthKit identifier such as <code>HKQuantityTypeIdentifierStepCount</code>. In the
+OpenAPI document it is a string that starts with <code>HK</code> (the pattern
+<code>^HK[A-Za-z]+Type[A-Za-z0-9]*$</code>), with examples; <code>GET /v1/types</code> lists the valid values,
+over 200 of them, from the iOS SDK the app is built with. An unknown type answers <code>400</code> with
+the closest names:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$H</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$SERVER</span><span class="s2">/v1/types/HKQuantityTypeIdentifierSteps"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="p">{</span><span class="nt">"error"</span><span class="p">:</span><span class="s2">"unknown type HKQuantityTypeIdentifierSteps; did you mean HKQuantityTypeIdentifierStepCount?"</span><span class="p">}</span>
+</code></pre></div>
+<p><code>kind</code> takes one of the kinds the OpenAPI document lists (<code>quantity</code>, <code>category</code>,
+<code>workout</code>, ...).</p>
+<p>Times are RFC 3339 timestamps with an offset, e.g. <code>2026-10-17T09:00:00-04:00</code>. <code>start</code> and
+<code>end</code> also take a date, e.g. <code>2026-10-17</code>, meaning midnight in <code>tz</code>. <code>tz</code> is a time zone name
+such as <code>America/Toronto</code>; the default is UTC.</p>
+<h3 id="errors">Errors<a class="headerlink" href="#errors" title="Permanent link">&para;</a></h3>
+<p>Every error is JSON with an <code>error</code> message, e.g.
+<code>{"error":"tz \"Mars/Olympus\" is not in the time zone database"}</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>400</code></td>
+<td>a parameter is wrong: an unknown type, a bad date, a range over the limit</td>
+</tr>
+<tr>
+<td><code>401</code></td>
+<td>no token, or a token the server does not know</td>
+</tr>
+<tr>
+<td><code>403</code></td>
+<td>a paired device's token</td>
+</tr>
+<tr>
+<td><code>422</code></td>
+<td>the answer would be too large: ask for fewer rows or a shorter range</td>
+</tr>
+<tr>
+<td><code>503</code></td>
+<td>too many queries at once: try again after the <code>Retry-After</code> seconds</td>
+</tr>
+<tr>
+<td><code>504</code></td>
+<td>the query took longer than <code>-query-timeout</code>: ask for a shorter range</td>
+</tr>
+</tbody>
+</table>
+<h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
+<p>These use the <code>SERVER</code> and <code>H</code> variables from <a href="#your-first-query">Your first query</a>.</p>
+<p>Which types have data, of one kind:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$H</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$SERVER</span><span class="s2">/v1/types?present=true&amp;kind=category"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="p">{</span><span class="nt">"types"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="p">{</span><span class="nt">"identifier"</span><span class="p">:</span><span class="w"> </span><span class="s2">"HKCategoryTypeIdentifierAppleStandHour"</span><span class="p">,</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"category"</span><span class="p">,</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">   </span><span class="nt">"display_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Apple Stand Hour"</span><span class="p">,</span><span class="w"> </span><span class="nt">"value_enum"</span><span class="p">:</span><span class="w"> </span><span class="s2">"HKCategoryValueAppleStandHour"</span><span class="p">,</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">   </span><span class="nt">"values"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"label"</span><span class="p">:</span><span class="w"> </span><span class="s2">"stood"</span><span class="p">},</span><span class="w"> </span><span class="p">{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"label"</span><span class="p">:</span><span class="w"> </span><span class="s2">"idle"</span><span class="p">}],</span><span class="w"> </span><span class="nt">"aggregates"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">   </span><span class="nt">"data"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"samples"</span><span class="p">:</span><span class="w"> </span><span class="mi">41632</span><span class="p">,</span><span class="w"> </span><span class="nt">"first_start"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2021-06-30T00:00:00Z"</span><span class="p">,</span><span class="w"> </span><span class="nt">"last_start"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-18T19:00:00Z"</span><span class="p">}},</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">  </span><span class="err">...</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="p">]}</span>
+</code></pre></div>
+<p>Steps per day, days in Toronto time:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$H</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$SERVER</span><span class="s2">/v1/types/HKQuantityTypeIdentifierStepCount/aggregates?tz=America/Toronto&amp;start=2026-10-15&amp;end=2026-10-17"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="p">{</span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"HKQuantityTypeIdentifierStepCount"</span><span class="p">,</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"quantity"</span><span class="p">,</span><span class="w"> </span><span class="nt">"aggregation"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cumulative"</span><span class="p">,</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w"> </span><span class="nt">"interval"</span><span class="p">:</span><span class="w"> </span><span class="s2">"day"</span><span class="p">,</span><span class="w"> </span><span class="nt">"tz"</span><span class="p">:</span><span class="w"> </span><span class="s2">"America/Toronto"</span><span class="p">,</span><span class="w"> </span><span class="nt">"dedup"</span><span class="p">:</span><span class="w"> </span><span class="s2">"priority"</span><span class="p">,</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w"> </span><span class="nt">"start"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-15T00:00:00-04:00"</span><span class="p">,</span><span class="w"> </span><span class="nt">"end"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-17T00:00:00-04:00"</span><span class="p">,</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w"> </span><span class="nt">"buckets"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">  </span><span class="p">{</span><span class="nt">"start"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-15T00:00:00-04:00"</span><span class="p">,</span><span class="w"> </span><span class="nt">"end"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-16T00:00:00-04:00"</span><span class="p">,</span><span class="w"> </span><span class="nt">"date"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-15"</span><span class="p">,</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">   </span><span class="nt">"unit"</span><span class="p">:</span><span class="w"> </span><span class="s2">"count"</span><span class="p">,</span><span class="w"> </span><span class="nt">"sum"</span><span class="p">:</span><span class="w"> </span><span class="mi">12027</span><span class="p">,</span><span class="w"> </span><span class="nt">"samples"</span><span class="p">:</span><span class="w"> </span><span class="mi">1009</span><span class="p">,</span><span class="w"> </span><span class="nt">"sources"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"Apple Watch"</span><span class="p">,</span><span class="w"> </span><span class="s2">"iPhone"</span><span class="p">]},</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">  </span><span class="p">{</span><span class="nt">"start"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-16T00:00:00-04:00"</span><span class="p">,</span><span class="w"> </span><span class="nt">"end"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-17T00:00:00-04:00"</span><span class="p">,</span><span class="w"> </span><span class="nt">"date"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-16"</span><span class="p">,</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">   </span><span class="nt">"unit"</span><span class="p">:</span><span class="w"> </span><span class="s2">"count"</span><span class="p">,</span><span class="w"> </span><span class="nt">"sum"</span><span class="p">:</span><span class="w"> </span><span class="mi">4895</span><span class="p">,</span><span class="w"> </span><span class="nt">"samples"</span><span class="p">:</span><span class="w"> </span><span class="mi">88</span><span class="p">,</span><span class="w"> </span><span class="nt">"sources"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"Apple Watch"</span><span class="p">,</span><span class="w"> </span><span class="s2">"iPhone"</span><span class="p">]}</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="w"> </span><span class="p">]}</span>
+</code></pre></div>
+<p>Average heart rate per hour:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$H</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$SERVER</span><span class="s2">/v1/types/HKQuantityTypeIdentifierHeartRate/aggregates?interval=hour&amp;tz=America/Toronto&amp;start=2026-10-17T09:00:00-04:00&amp;end=2026-10-17T10:00:00-04:00"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="p">{</span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"HKQuantityTypeIdentifierHeartRate"</span><span class="p">,</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"quantity"</span><span class="p">,</span><span class="w"> </span><span class="nt">"aggregation"</span><span class="p">:</span><span class="w"> </span><span class="s2">"discreteTemporallyWeighted"</span><span class="p">,</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w"> </span><span class="nt">"interval"</span><span class="p">:</span><span class="w"> </span><span class="s2">"hour"</span><span class="p">,</span><span class="w"> </span><span class="nt">"tz"</span><span class="p">:</span><span class="w"> </span><span class="s2">"America/Toronto"</span><span class="p">,</span><span class="w"> </span><span class="err">...</span><span class="p">,</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w"> </span><span class="nt">"buckets"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="w">  </span><span class="p">{</span><span class="nt">"start"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-17T09:00:00-04:00"</span><span class="p">,</span><span class="w"> </span><span class="nt">"end"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-17T10:00:00-04:00"</span><span class="p">,</span><span class="w"> </span><span class="nt">"unit"</span><span class="p">:</span><span class="w"> </span><span class="s2">"count/min"</span><span class="p">,</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="w">   </span><span class="nt">"avg"</span><span class="p">:</span><span class="w"> </span><span class="mf">123.98</span><span class="p">,</span><span class="w"> </span><span class="nt">"min"</span><span class="p">:</span><span class="w"> </span><span class="mi">67</span><span class="p">,</span><span class="w"> </span><span class="nt">"max"</span><span class="p">:</span><span class="w"> </span><span class="mi">170</span><span class="p">,</span><span class="w"> </span><span class="nt">"samples"</span><span class="p">:</span><span class="w"> </span><span class="mi">452</span><span class="p">,</span><span class="w"> </span><span class="nt">"sources"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"Apple Watch"</span><span class="p">]}</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="w"> </span><span class="p">]}</span>
+</code></pre></div>
+<p>Sleep stages per day (seconds per label):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$H</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$SERVER</span><span class="s2">/v1/types/HKCategoryTypeIdentifierSleepAnalysis/aggregates?tz=America/Toronto&amp;start=2026-10-18&amp;end=2026-10-19"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="p">{</span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"HKCategoryTypeIdentifierSleepAnalysis"</span><span class="p">,</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"category"</span><span class="p">,</span><span class="w"> </span><span class="nt">"interval"</span><span class="p">:</span><span class="w"> </span><span class="s2">"day"</span><span class="p">,</span><span class="w"> </span><span class="err">...</span><span class="p">,</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w"> </span><span class="nt">"buckets"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="w">  </span><span class="p">{</span><span class="nt">"date"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-18"</span><span class="p">,</span><span class="w"> </span><span class="err">...</span><span class="p">,</span><span class="w"> </span><span class="nt">"values"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="w">    </span><span class="p">{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">"label"</span><span class="p">:</span><span class="w"> </span><span class="s2">"asleepCore"</span><span class="p">,</span><span class="w"> </span><span class="nt">"samples"</span><span class="p">:</span><span class="w"> </span><span class="mi">14</span><span class="p">,</span><span class="w"> </span><span class="nt">"seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">13500</span><span class="p">,</span><span class="w"> </span><span class="nt">"sources"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"Apple Watch"</span><span class="p">]},</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="w">    </span><span class="p">{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="nt">"label"</span><span class="p">:</span><span class="w"> </span><span class="s2">"asleepDeep"</span><span class="p">,</span><span class="w"> </span><span class="nt">"samples"</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="nt">"seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">3300</span><span class="p">,</span><span class="w"> </span><span class="nt">"sources"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"Apple Watch"</span><span class="p">]},</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="w">    </span><span class="p">{</span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="nt">"label"</span><span class="p">:</span><span class="w"> </span><span class="s2">"asleepREM"</span><span class="p">,</span><span class="w"> </span><span class="nt">"samples"</span><span class="p">:</span><span class="w"> </span><span class="mi">6</span><span class="p">,</span><span class="w"> </span><span class="nt">"seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">4920</span><span class="p">,</span><span class="w"> </span><span class="nt">"sources"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"Apple Watch"</span><span class="p">]}</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="w">   </span><span class="p">],</span><span class="w"> </span><span class="nt">"samples"</span><span class="p">:</span><span class="w"> </span><span class="mi">25</span><span class="p">,</span><span class="w"> </span><span class="nt">"sources"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"Apple Watch"</span><span class="p">]}</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a><span class="w"> </span><span class="p">]}</span>
+</code></pre></div>
+<p>Individual heart rate readings, two per page:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"</span><span class="nv">$H</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$SERVER</span><span class="s2">/v1/types/HKQuantityTypeIdentifierHeartRate/samples?tz=America/Toronto&amp;start=2026-10-17T09:00:00-04:00&amp;limit=2"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="p">{</span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"HKQuantityTypeIdentifierHeartRate"</span><span class="p">,</span><span class="w"> </span><span class="nt">"start"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-17T09:00:00-04:00"</span><span class="p">,</span><span class="w"> </span><span class="err">...</span><span class="p">,</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w"> </span><span class="nt">"samples"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">  </span><span class="p">{</span><span class="nt">"uuid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"85DB0380-1610-44BD-A87C-C39D3BF81A65"</span><span class="p">,</span><span class="w"> </span><span class="nt">"start"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-17T09:04:13.345-04:00"</span><span class="p">,</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">   </span><span class="nt">"end"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-17T09:04:13.345-04:00"</span><span class="p">,</span><span class="w"> </span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="mi">67</span><span class="p">,</span><span class="w"> </span><span class="nt">"unit"</span><span class="p">:</span><span class="w"> </span><span class="s2">"count/min"</span><span class="p">,</span>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">   </span><span class="nt">"source"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Apple Watch"</span><span class="p">,</span><span class="w"> </span><span class="nt">"device"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Apple Watch"</span><span class="p">,</span><span class="w"> </span><span class="nt">"product_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Watch6,14"</span><span class="p">,</span><span class="w"> </span><span class="err">...</span><span class="p">}},</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">  </span><span class="err">...</span>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="w"> </span><span class="p">],</span>
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="w"> </span><span class="nt">"next_cursor"</span><span class="p">:</span><span class="w"> </span><span class="s2">"MTphOjE3OTIyNDI0ODEzNDUwMDA6OTlGQUE4MjItOTdFOC00RjNELUExMUItM0M3NjY1MjBDNUNG"</span><span class="p">}</span>
+</code></pre></div>
+<p>For the next page, send the same request with <code>&amp;cursor=</code> and the <code>next_cursor</code> value. The
+last page has no <code>next_cursor</code>.</p>
+<h2 id="aggregates">Aggregates<a class="headerlink" href="#aggregates" title="Permanent link">&para;</a></h2>
+<p>What a bucket holds depends on the type:</p>
+<ul>
+<li><strong>Cumulative quantities</strong> (steps, distances, energy, exercise minutes): <code>sum</code>. A sample
+  spanning two buckets is split in proportion to the time in each.</li>
+<li><strong>Discrete quantities</strong> (heart rate, HRV, body mass...): <code>avg</code>, <code>min</code>, <code>max</code> of the samples
+  starting in the bucket. Sound exposure averages as energy (<code>10·log10(mean(10^(dB/10)))</code>),
+  as Apple does. Temporally weighted types (heart rate) are averaged per sample, each sample
+  counting once whatever its duration.</li>
+<li><strong>Categories</strong> (sleep, stand hours, symptoms...): per value, the samples and the seconds
+  they cover inside the bucket. A night's sleep is cut at local midnight: a day bucket holds
+  the part of each night after its midnight. Use <code>interval=hour</code>, or the samples, to cut
+  nights elsewhere.</li>
+</ul>
+<p>One request covers at most 366 days or 744 hours. Days are local calendar days of <code>tz</code> (23 or
+25 hours across a daylight saving time change).</p>
+<h3 id="counting-each-moment-once-dedup">Counting each moment once (<code>dedup</code>)<a class="headerlink" href="#counting-each-moment-once-dedup" title="Permanent link">&para;</a></h3>
+<p>An Apple Watch and an iPhone carried together both count steps, distance and energy; other
+apps may write the same thing again. Summing every sample counts the same steps twice. With
+<code>dedup=priority</code>, the default, sources are ranked <strong>Apple Watch, then iPhone, then any other
+app or device</strong> (from the sample's hardware model, e.g. <code>Watch6,14</code>), and a sample counts
+only for the part of its time that no sample of a higher-ranked source covers. For
+categories, a sample is covered only by a sample of the same value: the watch's sleep stages
+leave the phone's <em>in bed</em> whole. Apple Health merges sources the same way with its default
+source order: the watch wins where both measured, and the phone fills the time the watch was
+off the wrist.</p>
+<p>Checked against the daily totals Apple's Activity app computes (the activity summaries in the
+archive), over 365 days of one person's data with two iPhones and a watch:</p>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Active energy, mean daily error</th>
+<th>Exercise minutes, mean daily error</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>priority</code> (default)</td>
+<td>6.5 kcal (0.8%)</td>
+<td>1.3 min (2.3%)</td>
+</tr>
+<tr>
+<td>one source per hour (watch first)</td>
+<td>4.7 kcal</td>
+<td>4.7 min (drops phone-only minutes)</td>
+</tr>
+<tr>
+<td>largest source per hour</td>
+<td>17.6 kcal</td>
+<td>1.2 min</td>
+</tr>
+<tr>
+<td><code>none</code> (sum everything)</td>
+<td>36.9 kcal (4.7%)</td>
+<td>10.4 min (19%)</td>
+</tr>
+</tbody>
+</table>
+<p><code>dedup=none</code> sums every sample, for when you want each source's count.</p>
+<h2 id="how-queries-run">How queries run<a class="headerlink" href="#how-queries-run" title="Permanent link">&para;</a></h2>
+<p>Each query is a fresh <code>duckdb</code> process, in memory, reading the archive through the views in
+<a href="https://github.com/leblancfg/healthkit-relay/blob/main/server/sql/views.sql"><code>server/sql/views.sql</code></a>,
+which hide samples deleted in Apple Health. Before the query, the server sets:</p>
+<ul>
+<li><code>enable_external_access = false</code>, with <code>allowed_directories</code> set to the archive's
+  <code>parquet/</code>: DuckDB reads that folder and refuses every other file, the network and
+  <code>getenv</code>;</li>
+<li><code>autoinstall_known_extensions = false</code>, <code>autoload_known_extensions = false</code>;</li>
+<li><code>memory_limit</code>, <code>threads</code>, <code>temp_directory = ''</code> (everything stays in memory),
+  <code>preserve_insertion_order = false</code>;</li>
+<li><code>lock_configuration = true</code>, which freezes those settings for the rest of the process.</li>
+</ul>
+<p>DuckDB runs with an empty environment, as the server's user. Every query filters on the type
+and the months it needs (the archive's partitions), so DuckDB opens only those files. The
+values in each query come from the server: the type from its catalog, times it parsed,
+numbers it checked.</p>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../data/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Data model &amp; querying">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Data model & querying
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../grafana/" class="md-footer__link md-footer__link--next" aria-label="Next: Grafana">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Grafana
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      MIT licensed. Not a medical device.
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.code.copy", "content.action.edit", "navigation.sections", "navigation.top", "navigation.footer", "search.highlight", "search.suggest", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
